@@ -14,12 +14,17 @@ class Settings(BaseSettings):
     supabase_service_role_key: str = ""
 
     orchestrator_api_key: str = "dev-orchestrator-key"
+    orchestrator_keys_json: str = "{}"
     job_store_path: str = "./.omnirank_jobs.db"
     log_level: str = "INFO"
 
     wordpress_deploy_webhook: str = ""
     shopify_deploy_webhook: str = ""
     appstore_deploy_webhook: str = ""
+
+    wordpress_token: str = ""
+    shopify_token: str = ""
+    appstore_token: str = ""
 
     rate_limit_per_minute: int = 120
 
