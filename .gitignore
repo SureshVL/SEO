@@ -1,0 +1,3 @@
+exports/
+.omnirank_jobs.db
+backend/.venv/
