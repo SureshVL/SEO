@@ -34,8 +34,12 @@ from app.services.persistence import (
 logging.basicConfig(level=getattr(logging, settings.log_level.upper(), logging.INFO))
 logger = logging.getLogger("omnirank")
 
-app = FastAPI(title="OMNI-RANK OR-1 API", version="0.9.0")
+app = FastAPI(title="OMNI-RANK OR-1 API", version="1.0.0")
 job_store = SQLiteJobStore(settings.job_store_path)
+
+
+if settings.environment.lower() == "prod" and settings.orchestrator_api_key == "dev-orchestrator-key":
+    raise RuntimeError("Refusing to start in prod with default orchestrator_api_key")
 
 
 def _persistence_repo() -> PersistenceRepository:
@@ -44,6 +48,8 @@ def _persistence_repo() -> PersistenceRepository:
             supabase_url=settings.supabase_url,
             supabase_service_role_key=settings.supabase_service_role_key,
         )
+    if settings.environment.lower() == "prod":
+        raise RuntimeError("Supabase persistence required in prod")
     return NoopPersistenceRepository()
 
 
@@ -96,21 +102,23 @@ def _execute_research(request: ResearchRequest, job_id: str | None = None) -> Wo
         _log_job(f"Technical agent generated {len(actions)} actions.")
 
     def _aso_hook(_research_result):
-        if request.app_link and request.app_name and request.app_category:
-            aso_output = aso_agent.run(
-                AsoRequest(
-                    app_link=request.app_link,
-                    app_name=request.app_name,
-                    category=request.app_category,
-                    primary_keyword=request.primary_keyword,
-                    secondary_keywords=[],
-                    locales=[request.locale],
-                    recent_reviews=[],
-                )
+        app_link = request.app_link or "https://apps.apple.com/us/app/placeholder/id000000"
+        app_name = request.app_name or "OMNI-RANK"
+        category = request.app_category or "Business"
+
+        aso_output = aso_agent.run(
+            AsoRequest(
+                app_link=app_link,
+                app_name=app_name,
+                category=category,
+                primary_keyword=request.primary_keyword,
+                secondary_keywords=[],
+                locales=[request.locale],
+                recent_reviews=[],
             )
-            payload = {"platform": aso_output.platform, "themes": aso_output.review_themes}
-        else:
-            payload = {"reason": "score_below_threshold", "status": "skipped_missing_app_fields"}
+        )
+
+        payload = {"platform": aso_output.platform, "themes": aso_output.review_themes}
 
         persistence.log_agent_event(
             AgentLogEvent(
@@ -212,9 +220,10 @@ def run_research(request: ResearchRequest, _auth: None = Depends(require_api_key
 def create_research_job(
     payload: JobCreateRequest,
     background_tasks: BackgroundTasks,
-    _auth: None = Depends(require_api_key),
+    api_key: str = Depends(require_api_key),
     _rate: None = Depends(enforce_rate_limit),
 ) -> JobCreateResponse:
+    require_project_access(payload.research_request.project_id, api_key)
     record = job_store.create_job(payload.model_dump())
     background_tasks.add_task(_run_research_job, record.job_id)
     return JobCreateResponse(job_id=record.job_id, status=record.status)
