@@ -7,7 +7,7 @@ flowchart LR
     UI[Next.js Control Center\nLive Agent Log + Heatmap + Deploy] --> API[FastAPI Orchestrator]
     API --> LOOP[SEO Autonomous Loop\nthreshold >= 95]
     LOOP --> RA[Research Agent\nAlgorithmic Reverse-Engineer]
-    LOOP --> ASO[ASO Agent]
+    LOOP --> ASO[ASO Agent\nLocalized Metadata + Reviews]
     LOOP --> CA[Content Agent]
     LOOP --> TA[Technical Agent]
 
@@ -39,11 +39,14 @@ flowchart LR
 │  │  │  └─ config.py                 # Settings/env config
 │  │  ├─ agents/
 │  │  │  ├─ research_agent.py         # Reverse-engineer logic
+│  │  │  ├─ aso_agent.py              # ASO localization and review playbooks
 │  │  │  └─ workflow.py               # Iterative autonomous loop
 │  │  └─ schemas/
-│  │     └─ research.py               # Pydantic contracts
+│  │     ├─ research.py               # SEO research contracts
+│  │     └─ aso.py                    # ASO contracts
 │  └─ tests/
-│     └─ test_research_agent.py
+│     ├─ test_research_agent.py
+│     └─ test_aso_agent.py
 ├─ shared/types/                      # Shared TS/Python contracts placeholder
 ├─ supabase/migrations/
 │  └─ 0001_omnirank_core.sql
@@ -68,7 +71,18 @@ flowchart LR
    - density health (15)
 7. Emit prioritized recommendation actions.
 
-## 4) Autonomous Feedback Loop
+## 4) ASO Agent Execution Logic
+
+1. Detect target platform (`google-play` / `app-store`) from the input link.
+2. Generate locale-specific metadata packs:
+   - title variants
+   - subtitle
+   - keyword field string
+   - short description
+3. Build review-response templates for positive, neutral, and negative reviews.
+4. Return optimization notes for ongoing experimentation cadence.
+
+## 5) Autonomous Feedback Loop
 
 The `SEOAutonomousLoop` performs iterative evaluation:
 - Runs research analysis.
@@ -77,7 +91,7 @@ The `SEOAutonomousLoop` performs iterative evaluation:
 
 Phase-1 reruns analysis each iteration; Phase-2 will apply Content/Technical/ASO remediation actions between cycles.
 
-## 5) Data Plane + Logging
+## 6) Data Plane + Logging
 
 - `projects` stores campaign metadata and keyword goals.
 - `competitor_intel` stores scraped competitor content and vector embeddings.

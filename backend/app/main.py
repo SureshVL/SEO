@@ -2,13 +2,15 @@ from __future__ import annotations
 
 from fastapi import FastAPI, HTTPException
 
+from app.agents.aso_agent import AsoAgent
 from app.agents.research_agent import AlgorithmicReverseEngineerAgent
 from app.agents.workflow import SEOAutonomousLoop
 from app.clients.http_clients import FirecrawlHTTPClient, SerperHTTPClient
 from app.core.config import settings
+from app.schemas.aso import AsoRequest, AsoResponse
 from app.schemas.research import ResearchRequest, WorkflowResponse
 
-app = FastAPI(title="OMNI-RANK OR-1 API", version="0.2.0")
+app = FastAPI(title="OMNI-RANK OR-1 API", version="0.3.0")
 
 
 @app.get("/health")
@@ -41,3 +43,9 @@ def run_research(request: ResearchRequest) -> WorkflowResponse:
         passed_threshold=result.passed_threshold,
         result=result.response,
     )
+
+
+@app.post("/aso/run", response_model=AsoResponse)
+def run_aso(request: AsoRequest) -> AsoResponse:
+    agent = AsoAgent()
+    return agent.run(request)
