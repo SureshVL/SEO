@@ -14,7 +14,7 @@ from app.agents.research_agent import AlgorithmicReverseEngineerAgent
 from app.agents.technical_agent import TechnicalAgent
 from app.agents.workflow import SEOAutonomousLoop
 from app.api.rate_limit import enforce_rate_limit
-from app.api.security import require_api_key, require_project_access
+from app.api.security import require_api_key
 from app.clients.http_clients import FirecrawlHTTPClient, SerperHTTPClient
 from app.core.config import settings
 from app.schemas.aso import AsoRequest, AsoResponse
@@ -207,12 +207,7 @@ def health() -> dict[str, str]:
 
 
 @app.post("/research/run", response_model=WorkflowResponse)
-def run_research(
-    request: ResearchRequest,
-    api_key: str = Depends(require_api_key),
-    _rate: None = Depends(enforce_rate_limit),
-) -> WorkflowResponse:
-    require_project_access(request.project_id, api_key)
+def run_research(request: ResearchRequest, _auth: None = Depends(require_api_key), _rate: None = Depends(enforce_rate_limit)) -> WorkflowResponse:
     if not settings.serper_api_key or not settings.firecrawl_api_key:
         raise HTTPException(
             status_code=400,
@@ -235,7 +230,7 @@ def create_research_job(
 
 
 @app.get("/jobs", response_model=list[JobSummary])
-def list_jobs(_auth: str = Depends(require_api_key), _rate: None = Depends(enforce_rate_limit)) -> list[JobSummary]:
+def list_jobs(_auth: None = Depends(require_api_key), _rate: None = Depends(enforce_rate_limit)) -> list[JobSummary]:
     return [
         JobSummary(
             job_id=record.job_id,
@@ -248,7 +243,7 @@ def list_jobs(_auth: str = Depends(require_api_key), _rate: None = Depends(enfor
 
 
 @app.get("/jobs/{job_id}", response_model=JobStatus)
-def get_job(job_id: str, _auth: str = Depends(require_api_key), _rate: None = Depends(enforce_rate_limit)) -> JobStatus:
+def get_job(job_id: str, _auth: None = Depends(require_api_key), _rate: None = Depends(enforce_rate_limit)) -> JobStatus:
     record = job_store.get_job(job_id)
     if not record:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -264,7 +259,7 @@ def get_job(job_id: str, _auth: str = Depends(require_api_key), _rate: None = De
 
 
 @app.get("/jobs/{job_id}/stream")
-async def stream_job_logs(job_id: str, _auth: str = Depends(require_api_key), _rate: None = Depends(enforce_rate_limit)):
+async def stream_job_logs(job_id: str, _auth: None = Depends(require_api_key), _rate: None = Depends(enforce_rate_limit)):
     if not job_store.get_job(job_id):
         raise HTTPException(status_code=404, detail="Job not found")
 
@@ -292,11 +287,11 @@ async def stream_job_logs(job_id: str, _auth: str = Depends(require_api_key), _r
 
 
 @app.post("/aso/run", response_model=AsoResponse)
-def run_aso(request: AsoRequest, _auth: str = Depends(require_api_key), _rate: None = Depends(enforce_rate_limit)) -> AsoResponse:
+def run_aso(request: AsoRequest, _auth: None = Depends(require_api_key), _rate: None = Depends(enforce_rate_limit)) -> AsoResponse:
     agent = AsoAgent()
     return agent.run(request)
 
 
 @app.post("/deploy/run", response_model=DeployResponse)
-def run_deploy(request: DeployRequest, _auth: str = Depends(require_api_key), _rate: None = Depends(enforce_rate_limit)) -> DeployResponse:
+def run_deploy(request: DeployRequest, _auth: None = Depends(require_api_key), _rate: None = Depends(enforce_rate_limit)) -> DeployResponse:
     return DeployAgent().run(request)
