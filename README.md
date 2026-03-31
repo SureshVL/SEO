@@ -2,26 +2,23 @@
 
 Production-oriented scaffold for a universal autonomous SEO system covering Google SEO, ASO, and social-distribution optimization.
 
-## What is implemented now
+## What was pending and is now implemented
 
-- System architecture and modular backend/frontend/shared structure.
-- Phase-1 **Algorithmic Reverse-Engineer Research Agent**.
-- Phase-1 **ASO Agent** for localized store metadata and review-response playbooks.
-- Phase-1 **LangGraph-style autonomous loop** (`SEOAutonomousLoop`) with score threshold checks.
-- FastAPI endpoints wired for live research and ASO payload generation.
-- Supabase SQL migration for required core tables.
+- ✅ ASO agent implemented (localized metadata + review responses).
+- ✅ Content agent implemented (Position-Zero draft generation into content queue payloads).
+- ✅ Technical agent implemented (heuristic technical fix recommendations).
+- ✅ Consolidated multi-agent orchestrator endpoint implemented (`/orchestrator/run`) with live log events.
+- ✅ Existing research loop retained for iterative scoring toward threshold.
 
 ## Repository layout
 
-- `docs/system-architecture.md` — architecture + execution flow.
 - `backend/app/agents/research_agent.py` — competitor reverse engineering logic.
 - `backend/app/agents/aso_agent.py` — ASO metadata/review strategy generation.
-- `backend/app/agents/workflow.py` — iterative scoring loop.
-- `backend/app/clients/http_clients.py` — Serper/Firecrawl HTTP adapters.
-- `backend/app/schemas/research.py` — research request/response models.
-- `backend/app/schemas/aso.py` — ASO request/response models.
-- `backend/app/main.py` — API bootstrap.
-- `supabase/migrations/0001_omnirank_core.sql` — schema migration.
+- `backend/app/agents/content_agent.py` — snippet-oriented content queue generator.
+- `backend/app/agents/technical_agent.py` — technical SEO fix generator.
+- `backend/app/agents/orchestrator_agent.py` — consolidated autonomous run controller.
+- `backend/app/schemas/orchestrator.py` — unified orchestration request/response contracts.
+- `backend/app/main.py` — FastAPI routes (`/research/run`, `/aso/run`, `/orchestrator/run`).
 
 ## Environment variables
 
@@ -43,24 +40,22 @@ cd backend
 python -m venv .venv
 source .venv/bin/activate
 pip install -e '.[dev]'
-
-# run tests
 pytest
-
-# run API
 uvicorn app.main:app --reload
 ```
 
 ## API
 
 ### `POST /research/run`
-Runs the autonomous research loop and returns:
-- attempts used
-- final score
-- threshold status
-- full research payload (competitors, gaps, recommendations)
-
-> Requires `SERPER_API_KEY` and `FIRECRAWL_API_KEY`.
+Runs reverse-engineer loop and returns SEO score + research recommendations.
 
 ### `POST /aso/run`
-Generates ASO metadata packs and review-response templates for the provided app link + locales.
+Generates ASO metadata packs and review-response templates.
+
+### `POST /orchestrator/run`
+Runs research + technical + content (+ ASO when app context provided), returning:
+- final score and cycle count
+- live action logs
+- technical fixes
+- content queue items
+- optional ASO payload
