@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections import defaultdict, deque
 from time import time
 
-from fastapi import Header, HTTPException, Request
+from fastapi import HTTPException, Request
 
 from app.core.config import settings
 
@@ -27,7 +27,6 @@ class SimpleRateLimiter:
 rate_limiter = SimpleRateLimiter(settings.rate_limit_per_minute)
 
 
-def enforce_rate_limit(request: Request, x_api_key: str | None = Header(default="anon")) -> None:
+def enforce_rate_limit(request: Request) -> None:
     client = request.client.host if request.client else "unknown"
-    key = f"{x_api_key}:{client}:{request.url.path}"
-    rate_limiter.check(key)
+    rate_limiter.check(client)

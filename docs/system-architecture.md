@@ -1,16 +1,14 @@
-# OMNI-RANK OR-1 — Phase Completion Notes
+# OMNI-RANK OR-1 — Next Phase Status
 
-## Security & Governance
-- Scoped API key auth with project-level authorization checks.
-- Per-key/path/client rate limiting.
-- Production startup guardrails for unsafe defaults.
+## Completed now
 
-## Orchestration
-- Durable SQLite job lifecycle and SSE streaming.
-- Research workflow with content/technical/ASO remediation hooks.
-- ASO remediation executes with inferred defaults when app context is not supplied.
-
-## Integrations
-- Serper/Firecrawl retry + fallback endpoint support.
-- Supabase persistence adapter for logs/intel/content queue.
-- Deploy bridge with dry-run and tokenized webhook submit.
+1. Durable SQLite job orchestration.
+2. API-key auth + rate limiting.
+3. Provider retry/backoff + fallback endpoint support.
+4. Scraped competitor markdown persisted to intelligence storage.
+5. Workflow remediation executes ASO when app context is available.
+6. ASO includes review-theme extraction.
+7. Technical actions now emit execution queue payloads.
+8. Deploy bridge supports dry-run and webhook submit modes.
+9. Structured logging added for orchestration lifecycle.
+10. Bootstrap script added for local dependency/test setup.

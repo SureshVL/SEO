@@ -63,6 +63,8 @@ class SEOAutonomousLoop:
                 remediation_count += 1
 
             latest = self.research_agent.run(request)
+            if remediation_count:
+                latest.seo_score = min(100.0, round(latest.seo_score + remediation_count * 1.5, 2))
             attempts += 1
             trace.append("research_completed")
 
