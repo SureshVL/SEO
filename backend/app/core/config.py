@@ -17,6 +17,12 @@ class Settings(BaseSettings):
     job_store_path: str = "./.omnirank_jobs.db"
     log_level: str = "INFO"
 
+    wordpress_deploy_webhook: str = ""
+    shopify_deploy_webhook: str = ""
+    appstore_deploy_webhook: str = ""
+
+    rate_limit_per_minute: int = 120
+
     seo_score_threshold: float = 95.0
     max_feedback_iterations: int = 3
 

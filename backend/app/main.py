@@ -13,6 +13,7 @@ from app.agents.deploy_agent import DeployAgent
 from app.agents.research_agent import AlgorithmicReverseEngineerAgent
 from app.agents.technical_agent import TechnicalAgent
 from app.agents.workflow import SEOAutonomousLoop
+from app.api.rate_limit import enforce_rate_limit
 from app.api.security import require_api_key
 from app.clients.http_clients import FirecrawlHTTPClient, SerperHTTPClient
 from app.core.config import settings
@@ -33,7 +34,7 @@ from app.services.persistence import (
 logging.basicConfig(level=getattr(logging, settings.log_level.upper(), logging.INFO))
 logger = logging.getLogger("omnirank")
 
-app = FastAPI(title="OMNI-RANK OR-1 API", version="0.8.0")
+app = FastAPI(title="OMNI-RANK OR-1 API", version="0.9.0")
 job_store = SQLiteJobStore(settings.job_store_path)
 
 
@@ -50,6 +51,7 @@ def _execute_research(request: ResearchRequest, job_id: str | None = None) -> Wo
     persistence = _persistence_repo()
     content_agent = ContentAgent()
     technical_agent = TechnicalAgent()
+    aso_agent = AsoAgent()
 
     def _log_job(message: str) -> None:
         logger.info("job=%s message=%s", job_id, message)
@@ -94,15 +96,31 @@ def _execute_research(request: ResearchRequest, job_id: str | None = None) -> Wo
         _log_job(f"Technical agent generated {len(actions)} actions.")
 
     def _aso_hook(_research_result):
+        if request.app_link and request.app_name and request.app_category:
+            aso_output = aso_agent.run(
+                AsoRequest(
+                    app_link=request.app_link,
+                    app_name=request.app_name,
+                    category=request.app_category,
+                    primary_keyword=request.primary_keyword,
+                    secondary_keywords=[],
+                    locales=[request.locale],
+                    recent_reviews=[],
+                )
+            )
+            payload = {"platform": aso_output.platform, "themes": aso_output.review_themes}
+        else:
+            payload = {"reason": "score_below_threshold", "status": "skipped_missing_app_fields"}
+
         persistence.log_agent_event(
             AgentLogEvent(
                 project_id=request.project_id,
                 agent_name="aso_agent",
-                action_type="queued_aso_remediation",
-                action_payload={"reason": "score_below_threshold"},
+                action_type="aso_remediation_executed",
+                action_payload=payload,
             )
         )
-        _log_job("ASO remediation event queued.")
+        _log_job("ASO remediation event executed.")
 
     persistence.log_agent_event(
         AgentLogEvent(
@@ -181,7 +199,7 @@ def health() -> dict[str, str]:
 
 
 @app.post("/research/run", response_model=WorkflowResponse)
-def run_research(request: ResearchRequest, _auth: None = Depends(require_api_key)) -> WorkflowResponse:
+def run_research(request: ResearchRequest, _auth: None = Depends(require_api_key), _rate: None = Depends(enforce_rate_limit)) -> WorkflowResponse:
     if not settings.serper_api_key or not settings.firecrawl_api_key:
         raise HTTPException(
             status_code=400,
@@ -195,6 +213,7 @@ def create_research_job(
     payload: JobCreateRequest,
     background_tasks: BackgroundTasks,
     _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
 ) -> JobCreateResponse:
     record = job_store.create_job(payload.model_dump())
     background_tasks.add_task(_run_research_job, record.job_id)
@@ -202,7 +221,7 @@ def create_research_job(
 
 
 @app.get("/jobs", response_model=list[JobSummary])
-def list_jobs(_auth: None = Depends(require_api_key)) -> list[JobSummary]:
+def list_jobs(_auth: None = Depends(require_api_key), _rate: None = Depends(enforce_rate_limit)) -> list[JobSummary]:
     return [
         JobSummary(
             job_id=record.job_id,
@@ -215,7 +234,7 @@ def list_jobs(_auth: None = Depends(require_api_key)) -> list[JobSummary]:
 
 
 @app.get("/jobs/{job_id}", response_model=JobStatus)
-def get_job(job_id: str, _auth: None = Depends(require_api_key)) -> JobStatus:
+def get_job(job_id: str, _auth: None = Depends(require_api_key), _rate: None = Depends(enforce_rate_limit)) -> JobStatus:
     record = job_store.get_job(job_id)
     if not record:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -231,7 +250,7 @@ def get_job(job_id: str, _auth: None = Depends(require_api_key)) -> JobStatus:
 
 
 @app.get("/jobs/{job_id}/stream")
-async def stream_job_logs(job_id: str, _auth: None = Depends(require_api_key)):
+async def stream_job_logs(job_id: str, _auth: None = Depends(require_api_key), _rate: None = Depends(enforce_rate_limit)):
     if not job_store.get_job(job_id):
         raise HTTPException(status_code=404, detail="Job not found")
 
@@ -259,11 +278,11 @@ async def stream_job_logs(job_id: str, _auth: None = Depends(require_api_key)):
 
 
 @app.post("/aso/run", response_model=AsoResponse)
-def run_aso(request: AsoRequest, _auth: None = Depends(require_api_key)) -> AsoResponse:
+def run_aso(request: AsoRequest, _auth: None = Depends(require_api_key), _rate: None = Depends(enforce_rate_limit)) -> AsoResponse:
     agent = AsoAgent()
     return agent.run(request)
 
 
 @app.post("/deploy/run", response_model=DeployResponse)
-def run_deploy(request: DeployRequest, _auth: None = Depends(require_api_key)) -> DeployResponse:
+def run_deploy(request: DeployRequest, _auth: None = Depends(require_api_key), _rate: None = Depends(enforce_rate_limit)) -> DeployResponse:
     return DeployAgent().run(request)

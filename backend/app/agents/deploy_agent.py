@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import requests
+
+from app.core.config import settings
 from app.schemas.deploy import DeployRequest, DeployResponse
 
 
 class DeployAgent:
-    """Phase-2 deploy bridge (connector-ready)."""
+    """Phase-2 deploy bridge with optional webhook connectors."""
 
     def run(self, request: DeployRequest) -> DeployResponse:
         platform = request.platform.lower()
@@ -16,11 +19,30 @@ class DeployAgent:
             f"Validated payload schema for {platform} connector.",
             "Prepared publish batch from content_queue.",
         ]
+
         if request.dry_run:
             actions.append("Dry-run complete. No external publish call executed.")
-            status = "dry_run_complete"
-        else:
-            actions.append(f"Publish call submitted to {platform} connector.")
-            status = "submitted"
+            return DeployResponse(platform=platform, status="dry_run_complete", actions=actions)
 
-        return DeployResponse(platform=platform, status=status, actions=actions)
+        webhook = self._platform_webhook(platform)
+        if not webhook:
+            actions.append("No deploy webhook configured for platform.")
+            return DeployResponse(platform=platform, status="failed", actions=actions)
+
+        payload = {"project_id": request.project_id, "platform": platform}
+        response = requests.post(webhook, json=payload, timeout=20)
+        if response.status_code >= 300:
+            actions.append(f"Webhook failed with status {response.status_code}.")
+            return DeployResponse(platform=platform, status="failed", actions=actions)
+
+        actions.append(f"Publish call submitted to {platform} connector.")
+        return DeployResponse(platform=platform, status="submitted", actions=actions)
+
+    @staticmethod
+    def _platform_webhook(platform: str) -> str:
+        mapping = {
+            "wordpress": settings.wordpress_deploy_webhook,
+            "shopify": settings.shopify_deploy_webhook,
+            "appstore": settings.appstore_deploy_webhook,
+        }
+        return mapping.get(platform, "")

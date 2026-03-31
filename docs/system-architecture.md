@@ -1,14 +1,14 @@
 # OMNI-RANK OR-1 — Next Phase Status
 
-## Implemented upgrades
+## Completed now
 
-1. Durable job orchestration via SQLite job store.
-2. API-key authentication for orchestration routes.
-3. Provider client resilience with retry/backoff and typed provider errors.
-4. Persisted scraped competitor content to intelligence store.
-5. Feedback loop now applies remediation hooks with score uplift simulation.
-6. ASO now supports review-theme extraction from recent reviews.
-7. Technical agent supports execution queue generation (`execute`).
-8. Deploy bridge endpoint (`/deploy/run`) added for WordPress/Shopify/AppStore connectors.
-9. Structured logging for orchestration lifecycle messages.
-10. SSE + polling + list endpoints for live operations monitoring.
+1. Durable SQLite job orchestration.
+2. API-key auth + rate limiting.
+3. Provider retry/backoff + fallback endpoint support.
+4. Scraped competitor markdown persisted to intelligence storage.
+5. Workflow remediation executes ASO when app context is available.
+6. ASO includes review-theme extraction.
+7. Technical actions now emit execution queue payloads.
+8. Deploy bridge supports dry-run and webhook submit modes.
+9. Structured logging added for orchestration lifecycle.
+10. Bootstrap script added for local dependency/test setup.

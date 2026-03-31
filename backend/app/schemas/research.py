@@ -9,6 +9,9 @@ class ResearchRequest(BaseModel):
     locale: str = Field(default="en-US")
     target_region: str = Field(default="US")
     project_id: str = Field(default="")
+    app_link: HttpUrl | None = None
+    app_name: str | None = None
+    app_category: str | None = None
 
 
 class CompetitorPageProfile(BaseModel):
