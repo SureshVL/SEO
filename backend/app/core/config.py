@@ -10,6 +10,9 @@ class Settings(BaseSettings):
     serper_api_key: str = ""
     firecrawl_api_key: str = ""
 
+    supabase_url: str = ""
+    supabase_service_role_key: str = ""
+
     seo_score_threshold: float = 95.0
     max_feedback_iterations: int = 3
 

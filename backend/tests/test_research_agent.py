@@ -79,13 +79,34 @@ def test_research_agent_raises_when_serp_empty():
         assert "No SERP results" in str(exc)
 
 
-def test_workflow_runs_until_max_iters():
+def test_workflow_runs_with_transition_trace():
+    calls = {"content": 0, "technical": 0, "aso": 0}
+
+    def _content(_: object):
+        calls["content"] += 1
+
+    def _technical(_: object):
+        calls["technical"] += 1
+
+    def _aso(_: object):
+        calls["aso"] += 1
+
     agent = AlgorithmicReverseEngineerAgent(MockSerper(), MockFirecrawl())
-    loop = SEOAutonomousLoop(research_agent=agent, threshold=99.0, max_iters=2)
+    loop = SEOAutonomousLoop(
+        research_agent=agent,
+        threshold=99.0,
+        max_iters=2,
+        apply_content=_content,
+        apply_technical=_technical,
+        apply_aso=_aso,
+    )
     request = ResearchRequest(client_url="https://client.example.com", primary_keyword="ai seo")
 
     result = loop.run(request)
 
     assert result.attempts == 2
     assert not result.passed_threshold
-    assert result.final_score == result.response.seo_score
+    assert calls == {"content": 1, "technical": 1, "aso": 1}
+    assert "input_intake" in result.trace
+    assert "content_remediation_applied" in result.trace
+    assert result.trace[-1] == "max_iterations_reached"

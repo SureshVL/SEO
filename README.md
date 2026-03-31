@@ -7,8 +7,9 @@ Production-oriented scaffold for a universal autonomous SEO system covering Goog
 - System architecture and modular backend/frontend/shared structure.
 - Phase-1 **Algorithmic Reverse-Engineer Research Agent**.
 - Phase-1 **ASO Agent** for localized store metadata and review-response playbooks.
-- Phase-1 **LangGraph-style autonomous loop** (`SEOAutonomousLoop`) with score threshold checks.
+- Phase-1 **LangGraph-style autonomous loop** (`SEOAutonomousLoop`) with explicit transition trace.
 - FastAPI endpoints wired for live research and ASO payload generation.
+- Supabase-ready persistence repository for `agent_logs` and `competitor_intel` writes.
 - Supabase SQL migration for required core tables.
 
 ## Repository layout
@@ -16,7 +17,8 @@ Production-oriented scaffold for a universal autonomous SEO system covering Goog
 - `docs/system-architecture.md` — architecture + execution flow.
 - `backend/app/agents/research_agent.py` — competitor reverse engineering logic.
 - `backend/app/agents/aso_agent.py` — ASO metadata/review strategy generation.
-- `backend/app/agents/workflow.py` — iterative scoring loop.
+- `backend/app/agents/workflow.py` — iterative scoring loop + state transitions.
+- `backend/app/services/persistence.py` — persistence adapters (Supabase REST + no-op).
 - `backend/app/clients/http_clients.py` — Serper/Firecrawl HTTP adapters.
 - `backend/app/schemas/research.py` — research request/response models.
 - `backend/app/schemas/aso.py` — ASO request/response models.
@@ -32,6 +34,8 @@ OPENAI_API_KEY=...
 ANTHROPIC_API_KEY=...
 SERPER_API_KEY=...
 FIRECRAWL_API_KEY=...
+SUPABASE_URL=...
+SUPABASE_SERVICE_ROLE_KEY=...
 SEO_SCORE_THRESHOLD=95
 MAX_FEEDBACK_ITERATIONS=3
 ```
@@ -58,9 +62,13 @@ Runs the autonomous research loop and returns:
 - attempts used
 - final score
 - threshold status
+- transition trace
 - full research payload (competitors, gaps, recommendations)
 
+Request additionally supports `project_id` for persistence logging.
+
 > Requires `SERPER_API_KEY` and `FIRECRAWL_API_KEY`.
+> If `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` are set, the service writes to `agent_logs` and `competitor_intel`.
 
 ### `POST /aso/run`
 Generates ASO metadata packs and review-response templates for the provided app link + locales.

@@ -8,6 +8,7 @@ class ResearchRequest(BaseModel):
     primary_keyword: str = Field(min_length=2)
     locale: str = Field(default="en-US")
     target_region: str = Field(default="US")
+    project_id: str = Field(default="")
 
 
 class CompetitorPageProfile(BaseModel):
@@ -37,8 +38,13 @@ class ResearchResponse(BaseModel):
     raw_metrics: dict[str, Any] = Field(default_factory=dict)
 
 
+class WorkflowTrace(BaseModel):
+    steps: list[str] = Field(default_factory=list)
+
+
 class WorkflowResponse(BaseModel):
     attempts: int
     final_score: float
     passed_threshold: bool
+    trace: WorkflowTrace
     result: ResearchResponse

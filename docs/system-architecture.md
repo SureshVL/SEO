@@ -15,8 +15,9 @@ flowchart LR
     RA --> Firecrawl[Firecrawl]
     TA --> Browserless[Browserless.io]
 
-    API --> SB[(Supabase\nPostgres + pgvector + Auth)]
-    LOOP --> SB
+    API --> PERSIST[Persistence Repository\nSupabase REST or No-op]
+    PERSIST --> SB[(Supabase\nPostgres + pgvector + Auth)]
+    LOOP --> PERSIST
     UI --> SB
 
     UI --> WP[WordPress API]
@@ -40,13 +41,16 @@ flowchart LR
 │  │  ├─ agents/
 │  │  │  ├─ research_agent.py         # Reverse-engineer logic
 │  │  │  ├─ aso_agent.py              # ASO localization and review playbooks
-│  │  │  └─ workflow.py               # Iterative autonomous loop
+│  │  │  └─ workflow.py               # Iterative autonomous loop + transitions
+│  │  ├─ services/
+│  │  │  └─ persistence.py            # agent_logs + competitor_intel writers
 │  │  └─ schemas/
 │  │     ├─ research.py               # SEO research contracts
 │  │     └─ aso.py                    # ASO contracts
 │  └─ tests/
 │     ├─ test_research_agent.py
-│     └─ test_aso_agent.py
+│     ├─ test_aso_agent.py
+│     └─ test_persistence.py
 ├─ shared/types/                      # Shared TS/Python contracts placeholder
 ├─ supabase/migrations/
 │  └─ 0001_omnirank_core.sql
@@ -84,16 +88,21 @@ flowchart LR
 
 ## 5) Autonomous Feedback Loop
 
-The `SEOAutonomousLoop` performs iterative evaluation:
-- Runs research analysis.
-- Checks score threshold (default: 95).
-- Repeats until threshold met or max iterations reached.
+The `SEOAutonomousLoop` performs iterative evaluation with explicit transition trace:
+- `input_intake`
+- `research_completed`
+- remediation states when score < threshold:
+  - `content_remediation_applied`
+  - `technical_remediation_applied`
+  - `aso_remediation_applied`
+- terminal state:
+  - `threshold_achieved` or `max_iterations_reached`
 
-Phase-1 reruns analysis each iteration; Phase-2 will apply Content/Technical/ASO remediation actions between cycles.
+Phase-1 runs deterministic remediation hooks; Phase-2 will execute real Content/Technical/ASO actions between cycles.
 
 ## 6) Data Plane + Logging
 
 - `projects` stores campaign metadata and keyword goals.
-- `competitor_intel` stores scraped competitor content and vector embeddings.
-- `agent_logs` captures every autonomous action and status.
+- `competitor_intel` stores scraped competitor content and entity maps per source URL.
+- `agent_logs` captures orchestrator + per-agent autonomous actions.
 - `content_queue` stages generated assets for CMS/App Store deployment.
