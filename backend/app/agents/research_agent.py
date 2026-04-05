@@ -1,16 +1,18 @@
-"""Algorithmic Reverse-Engineer Research Agent (Phase 1).
+"""AI-Powered SEO Research Agent.
 
-Deterministic competitor benchmarking with pluggable data providers.
+Replaces the heuristic-only approach with Claude-powered analysis
+while keeping deterministic data collection via Serper + Firecrawl.
 """
 
 from __future__ import annotations
 
-from collections import Counter
-from dataclasses import dataclass
+import logging
 import math
 import re
+from collections import Counter
 from typing import Protocol
 
+from app.clients.claude_client import SONNET, AIUsageAccumulator, ClaudeClient
 from app.schemas.research import (
     CompetitorPageProfile,
     GapAnalysis,
@@ -18,81 +20,82 @@ from app.schemas.research import (
     ResearchResponse,
 )
 
+logger = logging.getLogger("omnirank.research")
+
 STOPWORDS = {
-    "the",
-    "and",
-    "for",
-    "that",
-    "with",
-    "from",
-    "this",
-    "your",
-    "into",
-    "about",
-    "when",
-    "what",
-    "where",
-    "which",
-    "their",
-    "have",
-    "they",
-    "them",
-    "then",
-    "than",
-    "will",
+    "the", "and", "for", "that", "with", "from", "this", "your", "into",
+    "about", "when", "what", "where", "which", "their", "have", "they",
+    "them", "then", "than", "will", "are", "was", "were", "been", "being",
+    "has", "had", "does", "did", "not", "but", "can", "could", "would",
+    "should", "may", "might", "shall", "must", "its", "also", "each",
+    "more", "most", "other", "some", "such", "only", "very", "just",
 }
 
 
 class SerperClient(Protocol):
-    def search_top_results(self, keyword: str, locale: str, region: str, limit: int = 3) -> list[dict]:
-        """Return search results where each item includes at least a `link` key."""
+    def search_top_results(self, keyword: str, locale: str, region: str, limit: int = 3) -> list[dict]: ...
 
 
 class FirecrawlClient(Protocol):
-    def scrape_markdown(self, url: str) -> str:
-        """Return cleaned markdown content for a URL."""
-
-
-@dataclass
-class RawPageSignals:
-    title: str
-    h1: str | None
-    h2: list[str]
-    questions: list[str]
-    entities: list[str]
-    words: list[str]
+    def scrape_markdown(self, url: str) -> str: ...
 
 
 class AlgorithmicReverseEngineerAgent:
-    """Reverse engineer top-ranked pages to compute ranking opportunities."""
+    """AI-augmented SEO research: deterministic data collection + Claude analysis."""
 
-    def __init__(self, serper_client: SerperClient, firecrawl_client: FirecrawlClient):
+    def __init__(
+        self,
+        serper_client: SerperClient,
+        firecrawl_client: FirecrawlClient,
+        claude_client: ClaudeClient | None = None,
+    ):
         self.serper = serper_client
         self.firecrawl = firecrawl_client
+        self.claude = claude_client
+        self.usage = AIUsageAccumulator()
 
     def run(self, request: ResearchRequest) -> ResearchResponse:
         serp_results = self.serper.search_top_results(
             keyword=request.primary_keyword,
             locale=request.locale,
             region=request.target_region,
-            limit=3,
+            limit=5,
         )
         if not serp_results:
             raise ValueError("No SERP results returned by Serper client.")
 
-        competitor_links = [item.get("link", "").strip() for item in serp_results[:3]]
+        competitor_links = [item.get("link", "").strip() for item in serp_results[:5]]
         competitor_links = [link for link in competitor_links if link]
         if not competitor_links:
             raise ValueError("SERP response did not include valid competitor links.")
 
-        competitor_profiles = [self._build_profile(link, request.primary_keyword) for link in competitor_links]
-        client_profile = self._build_profile(str(request.client_url), request.primary_keyword)
+        competitor_profiles = []
+        competitor_markdown: dict[str, str] = {}
+        for link in competitor_links[:5]:
+            try:
+                md = self.firecrawl.scrape_markdown(link)
+                competitor_markdown[link] = md
+                profile = self._build_profile(link, request.primary_keyword, md)
+                competitor_profiles.append(profile)
+            except Exception as exc:
+                logger.warning("Failed to scrape %s: %s", link, exc)
 
-        competitor_markdown = {c.url: self.firecrawl.scrape_markdown(c.url) for c in competitor_profiles}
+        if not competitor_profiles:
+            raise ValueError("Could not scrape any competitor pages.")
+
+        client_md = self.firecrawl.scrape_markdown(str(request.client_url))
+        client_profile = self._build_profile(str(request.client_url), request.primary_keyword, client_md)
 
         gap_analysis = self._build_gap_analysis(client_profile, competitor_profiles)
-        seo_score = self._score(client_profile, competitor_profiles, gap_analysis)
-        recommendations = self._recommend(gap_analysis, client_profile, competitor_profiles)
+
+        if self.claude:
+            seo_score, recommendations = self._ai_analyze(
+                client_profile, competitor_profiles, gap_analysis,
+                request.primary_keyword, client_md, competitor_markdown,
+            )
+        else:
+            seo_score = self._deterministic_score(client_profile, competitor_profiles, gap_analysis)
+            recommendations = self._deterministic_recommend(gap_analysis, client_profile, competitor_profiles)
 
         return ResearchResponse(
             seo_score=seo_score,
@@ -103,152 +106,172 @@ class AlgorithmicReverseEngineerAgent:
             raw_metrics={
                 "avg_competitor_word_count": self._mean([c.word_count for c in competitor_profiles]),
                 "avg_competitor_density": self._mean([c.keyword_density for c in competitor_profiles]),
-                "avg_competitor_question_count": self._mean([len(c.top_questions) for c in competitor_profiles]),
-                "avg_competitor_entity_count": self._mean([len(c.top_entities) for c in competitor_profiles]),
                 "scraped_content": competitor_markdown,
+                "ai_usage": {
+                    "total_input_tokens": self.usage.total_input_tokens,
+                    "total_output_tokens": self.usage.total_output_tokens,
+                    "total_cost_usd": self.usage.total_cost_usd,
+                },
             },
         )
 
-    def _build_profile(self, url: str, keyword: str) -> CompetitorPageProfile:
-        markdown = self.firecrawl.scrape_markdown(url)
-        signals = self._extract_signals(markdown)
+    def _ai_analyze(
+        self,
+        client: CompetitorPageProfile,
+        competitors: list[CompetitorPageProfile],
+        gap: GapAnalysis,
+        keyword: str,
+        client_md: str,
+        competitor_md: dict[str, str],
+    ) -> tuple[float, list[str]]:
+        client_excerpt = client_md[:3000]
+        comp_excerpts = {url: md[:2000] for url, md in list(competitor_md.items())[:3]}
 
-        return CompetitorPageProfile(
-            url=url,
-            title=signals.title,
-            h1=signals.h1,
-            h2=signals.h2[:15],
-            top_entities=signals.entities[:25],
-            top_questions=signals.questions[:12],
-            word_count=len(signals.words),
-            keyword_density=self._keyword_density(signals.words, keyword),
+        system = """You are an expert SEO analyst. Analyze the client page vs competitors
+for the target keyword. Provide an honest SEO readiness score (0-100) and
+5-8 specific, actionable recommendations ranked by impact.
+
+Score criteria (total 100):
+- Content depth & quality (0-30): word count, coverage, expertise
+- Entity & semantic coverage (0-25): named entities, LSI terms, completeness
+- Technical SEO signals (0-20): heading structure, links, schema readiness
+- Search intent alignment (0-15): does content match keyword intent?
+- Competitive positioning (0-10): unique value vs competitors
+
+Respond ONLY with valid JSON:
+{
+  "score": <number>,
+  "score_breakdown": {"content_depth":<0-30>,"entity_coverage":<0-25>,"technical_signals":<0-20>,"intent_alignment":<0-15>,"competitive_edge":<0-10>},
+  "recommendations": [{"priority":"critical|high|medium","action":"<specific>","impact":"<result>"}]
+}"""
+
+        comp_summary = "\n".join([
+            f"Competitor {i+1} ({p.url}): {p.word_count} words, {len(p.top_entities)} entities, "
+            f"density {p.keyword_density}%, H2s: {', '.join(p.h2[:5])}"
+            for i, p in enumerate(competitors[:3])
+        ])
+
+        user_msg = f"""Target keyword: "{keyword}"
+
+CLIENT PAGE ({client.url}):
+- Words: {client.word_count}, Density: {client.keyword_density}%
+- H1: {client.h1}
+- H2s: {', '.join(client.h2[:10])}
+- Entities: {', '.join(client.top_entities[:15])}
+- Questions: {', '.join(client.top_questions[:5])}
+Content excerpt:
+{client_excerpt}
+
+COMPETITORS:
+{comp_summary}
+
+GAPS:
+- Missing entities: {', '.join(gap.missing_entities[:10])}
+- Missing questions: {', '.join(gap.missing_questions[:5])}
+- Heading gaps: {', '.join(gap.heading_gaps[:5])}
+- Density gap: {gap.density_gap}
+
+Competitor excerpts:
+{chr(10).join(f"--- {url} ---{chr(10)}{ex}" for url, ex in list(comp_excerpts.items())[:2])}"""
+
+        parsed, resp = self.claude.complete_json(
+            messages=[{"role": "user", "content": user_msg}],
+            system=system, model=SONNET, max_tokens=2048, temperature=0.2,
         )
+        self.usage.record(resp)
 
-    def _extract_signals(self, markdown: str) -> RawPageSignals:
-        lines = [line.strip() for line in markdown.splitlines() if line.strip()]
+        score = float(parsed.get("score", 50))
+        recs_raw = parsed.get("recommendations", [])
+        recommendations = []
+        for r in recs_raw:
+            if isinstance(r, dict):
+                pri = r.get("priority", "medium")
+                act = r.get("action", "")
+                imp = r.get("impact", "")
+                recommendations.append(f"[{pri.upper()}] {act} → {imp}")
+            elif isinstance(r, str):
+                recommendations.append(r)
 
-        h1_candidates = [line.replace("# ", "").strip() for line in lines if line.startswith("# ")]
-        title = h1_candidates[0] if h1_candidates else "Untitled"
-        h1 = h1_candidates[0] if h1_candidates else None
-        h2 = [line.replace("## ", "").strip() for line in lines if line.startswith("## ")]
+        return score, recommendations or ["Review gap analysis manually."]
+
+    def _build_profile(self, url: str, keyword: str, markdown: str) -> CompetitorPageProfile:
+        lines = [l.strip() for l in markdown.splitlines() if l.strip()]
+        h1_cands = [l.replace("# ", "").strip() for l in lines if l.startswith("# ")]
+        title = h1_cands[0] if h1_cands else "Untitled"
+        h1 = h1_cands[0] if h1_cands else None
+        h2 = [l.replace("## ", "").strip() for l in lines if l.startswith("## ")]
 
         full_text = " ".join(lines)
-        words = re.findall(r"[A-Za-z][A-Za-z\-']+", full_text.lower())
-        words = [w for w in words if w not in STOPWORDS and len(w) > 2]
+        words = [w for w in re.findall(r"[A-Za-z][A-Za-z\-']+", full_text.lower()) if w not in STOPWORDS and len(w) > 2]
 
         entity_matches = re.findall(r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z0-9&]+)+)\b", markdown)
-        entity_counts = Counter(entity_matches)
-        entities = [e for e, _ in entity_counts.most_common()]
+        entities = [e for e, _ in Counter(entity_matches).most_common()]
 
-        questions = [line for line in lines if line.endswith("?")]
+        questions = [l for l in lines if l.endswith("?")]
         if not questions:
-            questions = re.findall(r"([^.!?]*\?)", full_text)
-            questions = [q.strip() for q in questions if 30 <= len(q.strip()) <= 180]
+            questions = [q.strip() for q in re.findall(r"([^.!?]*\?)", full_text) if 30 <= len(q.strip()) <= 180]
 
-        return RawPageSignals(
-            title=title,
-            h1=h1,
-            h2=h2,
-            questions=self._unique_preserve_order(questions),
-            entities=self._unique_preserve_order(entities),
-            words=words,
+        return CompetitorPageProfile(
+            url=url, title=title, h1=h1, h2=h2[:15],
+            top_entities=self._unique(entities)[:25],
+            top_questions=self._unique(questions)[:12],
+            word_count=len(words),
+            keyword_density=self._keyword_density(words, keyword),
         )
 
     def _keyword_density(self, words: list[str], keyword: str) -> float:
         if not words:
             return 0.0
-        keyword_terms = [term for term in re.findall(r"[A-Za-z0-9]+", keyword.lower()) if len(term) > 1]
-        if not keyword_terms:
+        terms = [t for t in re.findall(r"[A-Za-z0-9]+", keyword.lower()) if len(t) > 1]
+        if not terms:
             return 0.0
-        hits = sum(1 for word in words if word in keyword_terms)
-        return round((hits / len(words)) * 100, 3)
+        return round((sum(1 for w in words if w in terms) / len(words)) * 100, 3)
 
-    def _build_gap_analysis(
-        self,
-        client: CompetitorPageProfile,
-        competitors: list[CompetitorPageProfile],
-    ) -> GapAnalysis:
-        competitor_entities = Counter()
-        competitor_questions: set[str] = set()
-        competitor_h2: set[str] = set()
-
-        for comp in competitors:
-            competitor_entities.update(comp.top_entities)
-            competitor_questions.update(comp.top_questions)
-            competitor_h2.update(comp.h2)
-
-        missing_entities = [entity for entity, _ in competitor_entities.most_common(30) if entity not in client.top_entities][:12]
-        missing_questions = [q for q in competitor_questions if q not in client.top_questions][:12]
-        heading_gaps = [h for h in competitor_h2 if h not in client.h2][:12]
-
-        avg_comp_density = self._mean([c.keyword_density for c in competitors])
-        density_gap = round(avg_comp_density - client.keyword_density, 3)
+    def _build_gap_analysis(self, client: CompetitorPageProfile, competitors: list[CompetitorPageProfile]) -> GapAnalysis:
+        comp_entities: Counter[str] = Counter()
+        comp_questions: set[str] = set()
+        comp_h2: set[str] = set()
+        for c in competitors:
+            comp_entities.update(c.top_entities)
+            comp_questions.update(c.top_questions)
+            comp_h2.update(c.h2)
 
         return GapAnalysis(
-            missing_entities=missing_entities,
-            missing_questions=missing_questions,
-            heading_gaps=heading_gaps,
-            density_gap=density_gap,
+            missing_entities=[e for e, _ in comp_entities.most_common(30) if e not in client.top_entities][:12],
+            missing_questions=[q for q in comp_questions if q not in client.top_questions][:12],
+            heading_gaps=[h for h in comp_h2 if h not in client.h2][:12],
+            density_gap=round(self._mean([c.keyword_density for c in competitors]) - client.keyword_density, 3),
         )
 
-    def _score(
-        self,
-        client: CompetitorPageProfile,
-        competitors: list[CompetitorPageProfile],
-        gap: GapAnalysis,
-    ) -> float:
+    def _deterministic_score(self, client: CompetitorPageProfile, competitors: list[CompetitorPageProfile], gap: GapAnalysis) -> float:
         if not competitors:
             return 0.0
+        avg_w = self._mean([c.word_count for c in competitors])
+        avg_q = self._mean([len(c.top_questions) for c in competitors])
+        cs = min(35.0, (client.word_count / max(avg_w, 1.0)) * 35.0)
+        es = max(0.0, 30.0 - len(gap.missing_entities) * 2.2)
+        ss = min(20.0, (len(client.top_questions) / max(avg_q, 1.0)) * 20.0)
+        ds = max(0.0, 15.0 - min(15.0, math.fabs(gap.density_gap) * 4.0))
+        return round(min(100.0, cs + es + ss + ds), 2)
 
-        avg_words = self._mean([c.word_count for c in competitors])
-        avg_questions = self._mean([len(c.top_questions) for c in competitors])
-
-        content_depth_score = min(35.0, (client.word_count / max(avg_words, 1.0)) * 35.0)
-
-        entity_score = max(0.0, 30.0 - (len(gap.missing_entities) * 2.2))
-        snippet_score = min(20.0, (len(client.top_questions) / max(avg_questions, 1.0)) * 20.0)
-
-        density_penalty = min(15.0, math.fabs(gap.density_gap) * 4.0)
-        density_score = max(0.0, 15.0 - density_penalty)
-
-        total = content_depth_score + entity_score + snippet_score + density_score
-        return round(min(100.0, total), 2)
-
-    def _recommend(
-        self,
-        gap: GapAnalysis,
-        client: CompetitorPageProfile,
-        competitors: list[CompetitorPageProfile],
-    ) -> list[str]:
-        avg_words = self._mean([c.word_count for c in competitors])
-        recommendations: list[str] = []
-
-        if client.word_count < avg_words:
-            recommendations.append(f"Expand page depth by ~{int(avg_words - client.word_count)} words to match top competitors.")
+    def _deterministic_recommend(self, gap: GapAnalysis, client: CompetitorPageProfile, competitors: list[CompetitorPageProfile]) -> list[str]:
+        avg_w = self._mean([c.word_count for c in competitors])
+        r: list[str] = []
+        if client.word_count < avg_w:
+            r.append(f"Expand content by ~{int(avg_w - client.word_count)} words.")
         if gap.missing_entities:
-            recommendations.append("Add semantic entity coverage for: " + ", ".join(gap.missing_entities[:6]))
+            r.append("Add entities: " + ", ".join(gap.missing_entities[:6]))
         if gap.heading_gaps:
-            recommendations.append("Add section headings for uncovered topics: " + ", ".join(gap.heading_gaps[:5]))
+            r.append("Add headings: " + ", ".join(gap.heading_gaps[:5]))
         if gap.missing_questions:
-            recommendations.append("Create Position Zero FAQ block answering: " + " | ".join(gap.missing_questions[:4]))
-        if gap.density_gap > 0.4:
-            recommendations.append("Increase natural keyword usage in intros/subheadings while preserving readability.")
-        if not recommendations:
-            recommendations.append("Content is benchmark-aligned; proceed to technical and backlink optimization.")
-        return recommendations
+            r.append("Add FAQ: " + " | ".join(gap.missing_questions[:4]))
+        return r or ["Content is benchmark-aligned."]
 
     @staticmethod
-    def _unique_preserve_order(items: list[str]) -> list[str]:
+    def _unique(items: list[str]) -> list[str]:
         seen: set[str] = set()
-        ordered: list[str] = []
-        for item in items:
-            if item not in seen:
-                seen.add(item)
-                ordered.append(item)
-        return ordered
+        return [x for x in items if x not in seen and not seen.add(x)]  # type: ignore
 
     @staticmethod
     def _mean(values: list[float | int]) -> float:
-        if not values:
-            return 0.0
-        return float(sum(values) / len(values))
+        return float(sum(values) / len(values)) if values else 0.0
