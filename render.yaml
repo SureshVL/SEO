@@ -1,0 +1,38 @@
+services:
+  - type: web
+    name: omnirank-backend
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    envVars:
+      - key: ENVIRONMENT
+        value: prod
+      - key: PORT
+        value: "8000"
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: SERPER_API_KEY
+        sync: false
+      - key: FIRECRAWL_API_KEY
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: ORCHESTRATOR_API_KEY
+        sync: false
+      - key: REDIS_URL
+        fromService:
+          name: omnirank-redis
+          type: redis
+          property: connectionString
+      - key: CORS_ORIGINS
+        value: https://your-frontend-domain.com
+    healthCheckPath: /health
+    plan: starter
+
+  - type: redis
+    name: omnirank-redis
+    plan: starter
+    maxmemoryPolicy: allkeys-lru
+    ipAllowList: []

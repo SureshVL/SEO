@@ -1,13 +1,15 @@
+"""Deploy bridge agent with httpx (async-compatible)."""
+
 from __future__ import annotations
 
-import requests
+import httpx
 
 from app.core.config import settings
 from app.schemas.deploy import DeployRequest, DeployResponse
 
 
 class DeployAgent:
-    """Phase-2 deploy bridge with optional webhook connectors."""
+    """Deploy bridge with optional webhook connectors."""
 
     def run(self, request: DeployRequest) -> DeployResponse:
         platform = request.platform.lower()
@@ -30,9 +32,14 @@ class DeployAgent:
             return DeployResponse(platform=platform, status="failed", actions=actions)
 
         payload = {"project_id": request.project_id, "platform": platform}
-        response = requests.post(webhook, json=payload, timeout=20)
-        if response.status_code >= 300:
-            actions.append(f"Webhook failed with status {response.status_code}.")
+        try:
+            with httpx.Client(timeout=20) as client:
+                response = client.post(webhook, json=payload)
+            if response.status_code >= 300:
+                actions.append(f"Webhook failed with status {response.status_code}.")
+                return DeployResponse(platform=platform, status="failed", actions=actions)
+        except httpx.HTTPError as exc:
+            actions.append(f"Webhook call failed: {exc}")
             return DeployResponse(platform=platform, status="failed", actions=actions)
 
         actions.append(f"Publish call submitted to {platform} connector.")
