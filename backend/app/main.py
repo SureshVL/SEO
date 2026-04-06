@@ -19,7 +19,8 @@ from app.agents.workflow import SEOAutonomousLoop
 from app.api.rate_limit import enforce_rate_limit
 from app.api.security import require_api_key, require_project_access
 from app.api.auth import get_current_user, get_optional_user
-from app.clients.claude_client import ClaudeClient
+from app.api.ai import router as ai_router
+from app.clients.llm import get_llm_client
 from app.clients.http_clients import FirecrawlHTTPClient, SerperHTTPClient
 from app.core.config import settings
 from app.schemas.aso import AsoRequest, AsoResponse
@@ -56,6 +57,9 @@ app.add_middleware(
 
 job_store = SQLiteJobStore(settings.job_store_path)
 
+# Register AI router
+app.include_router(ai_router, prefix="/api/ai")
+
 if settings.environment.lower() == "prod" and settings.orchestrator_api_key == "dev-orchestrator-key":
     raise RuntimeError("Refusing to start in prod with default orchestrator_api_key")
 
@@ -81,12 +85,9 @@ async def require_auth(request: Request) -> dict:
     raise HTTPException(status_code=401, detail="Authentication required. Send Bearer token or X-API-KEY.")
 
 
-def _get_claude_client() -> ClaudeClient | None:
-    """Create Claude client if API key is configured."""
-    if settings.anthropic_api_key:
-        return ClaudeClient(api_key=settings.anthropic_api_key)
-    logger.warning("ANTHROPIC_API_KEY not set — AI features disabled, using deterministic fallbacks.")
-    return None
+def _get_claude_client():
+    """Create LLM client (Claude or Gemini based on config)."""
+    return get_llm_client()
 
 
 def _persistence_repo() -> PersistenceRepository:
@@ -253,8 +254,10 @@ def _run_research_job(job_id: str) -> None:
 
 @app.get("/health")
 def health() -> dict[str, str]:
-    ai_status = "enabled" if settings.anthropic_api_key else "disabled"
-    return {"status": "ok", "service": settings.app_name, "ai": ai_status}
+    provider = settings.llm_provider
+    has_key = bool(settings.anthropic_api_key or settings.gemini_api_key)
+    ai_status = f"{provider}:enabled" if has_key else "disabled"
+    return {"status": "ok", "service": settings.app_name, "ai": ai_status, "llm_provider": provider}
 
 
 # ── Research ────────────────────────────────────────────────────────
