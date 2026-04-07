@@ -20,7 +20,11 @@ from app.api.rate_limit import enforce_rate_limit
 from app.api.security import require_api_key, require_project_access
 from app.api.auth import get_current_user, get_optional_user
 from app.api.ai import router as ai_router
-from app.clients.llm import get_llm_client
+from app.clients.llm import llm_client
+
+def _get_llm_client():
+    """Returns the unified LLM client"""
+    return llm_client
 from app.clients.http_clients import FirecrawlHTTPClient, SerperHTTPClient
 from app.core.config import settings
 from app.schemas.aso import AsoRequest, AsoResponse

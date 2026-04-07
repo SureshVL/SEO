@@ -1,67 +1,71 @@
-from pydantic_settings import BaseSettings, SettingsConfigDict
-
+from pydantic_settings import BaseSettings
+from typing import Optional
 
 class Settings(BaseSettings):
-    app_name: str = "OMNI-RANK OR-1"
-    environment: str = "dev"
+    ENVIRONMENT: str = "dev"
+    LOG_LEVEL: str = "INFO"
+    APP_NAME: str = "OMNI-RANK"
 
-    # AI
-    openai_api_key: str = ""
-    anthropic_api_key: str = ""
-    gemini_api_key: str = ""
-    llm_provider: str = "auto"  # "claude", "gemini", or "auto"
+    # AI Providers
+    LLM_PROVIDER: str = "auto"
+    ANTHROPIC_API_KEY: Optional[str] = None
+    GEMINI_API_KEY: Optional[str] = None
+    GROQ_API_KEY: Optional[str] = None
+    OPENAI_API_KEY: Optional[str] = None
+    PERPLEXITY_API_KEY: Optional[str] = None
 
-    # Data providers
-    serper_api_key: str = ""
-    firecrawl_api_key: str = ""
-    pagespeed_api_key: str = ""
-    dataforseo_login: str = ""
-    dataforseo_password: str = ""
+    DEFAULT_CLAUDE_MODEL: str = "claude-3-5-sonnet-20241022"
+    DEFAULT_GEMINI_MODEL: str = "gemini-2.0-flash"
+    DEFAULT_GROQ_MODEL: str = "llama-3.3-70b-versatile"
+    DEFAULT_OPENAI_MODEL: str = "gpt-4o"
+    DEFAULT_PERPLEXITY_MODEL: str = "sonar-pro"
+
+    # Data Tools
+    SERPER_API_KEY: Optional[str] = None
+    FIRECRAWL_API_KEY: Optional[str] = None
+    PAGESPEED_API_KEY: Optional[str] = None
+
+    # DataForSEO
+    DATAFORSEO_LOGIN: Optional[str] = None
+    DATAFORSEO_PASSWORD: Optional[str] = None
 
     # Supabase
-    supabase_url: str = ""
-    supabase_service_role_key: str = ""
-    supabase_anon_key: str = ""
+    SUPABASE_URL: Optional[str] = None
+    SUPABASE_SERVICE_ROLE_KEY: Optional[str] = None
+    SUPABASE_ANON_KEY: Optional[str] = None
 
-    # Auth & Security
-    orchestrator_api_key: str = "dev-orchestrator-key"
-    orchestrator_keys_json: str = "{}"
-    jwt_secret: str = ""
-    cors_origins: str = "http://localhost:3000"
+    # Redis
+    REDIS_URL: str = "redis://localhost:6379/0"
 
-    # Job store
-    job_store_path: str = "./.omnirank_jobs.db"
-    log_level: str = "INFO"
+    # Security
+    ORCHESTRATOR_API_KEY: str = "dev-orchestrator-key-change-in-prod"
+    JWT_SECRET: str = "change-this-to-a-strong-secret"
 
-    # Deploy webhooks
-    wordpress_deploy_webhook: str = ""
-    shopify_deploy_webhook: str = ""
-    appstore_deploy_webhook: str = ""
+    # Frontend
+    NEXT_PUBLIC_API_URL: str = "http://localhost:8000"
+    NEXT_PUBLIC_SUPABASE_URL: Optional[str] = None
+    NEXT_PUBLIC_SUPABASE_ANON_KEY: Optional[str] = None
+    NEXT_PUBLIC_APP_NAME: str = "OMNI-RANK"
 
-    # Deploy tokens
-    wordpress_token: str = ""
-    shopify_token: str = ""
-    appstore_token: str = ""
+    # Billing
+    RAZORPAY_KEY_ID: Optional[str] = None
+    RAZORPAY_KEY_SECRET: Optional[str] = None
 
-    # Rate limiting
-    rate_limit_per_minute: int = 120
+    # Integrations
+    WORDPRESS_API_URL: Optional[str] = None
+    WORDPRESS_USERNAME: Optional[str] = None
+    WORDPRESS_APP_PASSWORD: Optional[str] = None
+    SHOPIFY_STORE_URL: Optional[str] = None
+    SHOPIFY_API_KEY: Optional[str] = None
+    SHOPIFY_API_SECRET: Optional[str] = None
 
-    # Workflow
-    seo_score_threshold: float = 85.0
-    max_feedback_iterations: int = 3
+    SEO_SCORE_THRESHOLD: float = 75.0
+    MAX_FEEDBACK_ITERATIONS: int = 3
 
-    # Redis (optional, for production caching)
-    redis_url: str = ""
-
-    # Razorpay billing
-    razorpay_key_id: str = ""
-    razorpay_key_secret: str = ""
-    razorpay_webhook_secret: str = ""
-
-    # Email (Resend)
-    resend_api_key: str = ""
-
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+    class Config:
+        env_file = ".env"
+        env_file_encoding = 'utf-8'
+        extra = "ignore"
 
 
 settings = Settings()
