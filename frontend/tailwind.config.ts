@@ -6,14 +6,18 @@ const config: Config = {
     extend: {
       colors: {
         brand: {
-          50: "#eef2ff", 100: "#e0e7ff", 200: "#c7d2fe", 300: "#a5b4fc",
-          400: "#818cf8", 500: "#6366f1", 600: "#4f46e5", 700: "#4338ca",
-          800: "#3730a3", 900: "#312e81", 950: "#1e1b4b",
+          50: "#faf5ee", 100: "#f0e4d0", 200: "#e0c8a0", 300: "#d0a870",
+          400: "#c87941", 500: "#b06830", 600: "#8b5a2b", 700: "#6b4420",
+          800: "#4b3018", 900: "#2e1e10", 950: "#1a110a",
         },
-        surface: { 1: "#09090b", 2: "#111113", 3: "#18181b", 4: "#1f1f23" },
+        sage: {
+          400: "#8fb896", 500: "#6b8f71", 600: "#537a5a",
+        },
+        surface: { 1: "#110f0d", 2: "#1c1917", 3: "#2c2723", 4: "#3d3530" },
       },
       fontFamily: {
-        sans: ['"DM Sans"', "system-ui", "sans-serif"],
+        serif: ['"Instrument Serif"', "Georgia", "serif"],
+        sans: ['"Outfit"', "system-ui", "sans-serif"],
         mono: ['"JetBrains Mono"', "monospace"],
       },
     },

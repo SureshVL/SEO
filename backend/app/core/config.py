@@ -8,11 +8,15 @@ class Settings(BaseSettings):
     # AI
     openai_api_key: str = ""
     anthropic_api_key: str = ""
+    gemini_api_key: str = ""
+    llm_provider: str = "auto"  # "claude", "gemini", or "auto"
 
     # Data providers
     serper_api_key: str = ""
     firecrawl_api_key: str = ""
     pagespeed_api_key: str = ""
+    dataforseo_login: str = ""
+    dataforseo_password: str = ""
 
     # Supabase
     supabase_url: str = ""
