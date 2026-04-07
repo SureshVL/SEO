@@ -15,6 +15,8 @@ class Settings(BaseSettings):
     serper_api_key: str = ""
     firecrawl_api_key: str = ""
     pagespeed_api_key: str = ""
+    dataforseo_login: str = ""
+    dataforseo_password: str = ""
 
     # Supabase
     supabase_url: str = ""

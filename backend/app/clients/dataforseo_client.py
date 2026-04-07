@@ -1,0 +1,452 @@
+"""DataForSEO API client.
+
+Comprehensive integration covering:
+- SERP API: real-time search results, SERP features, AI overviews
+- Keywords Data API: search volume, CPC, difficulty, trends
+- Backlinks API: referring domains, anchors, domain authority
+- DataForSEO Labs API: competitor domains, ranked keywords, content gaps
+- On-Page API: full site crawl, technical audit
+
+Pay-as-you-go pricing (~70-97% cheaper than Ahrefs):
+- SERP: $0.002/query live, $0.0006 standard queue
+- Keywords: $0.05 per 700 keywords
+- Backlinks: $0.02/task + $0.00003/row
+- Labs: $0.001-0.01/task
+"""
+
+from __future__ import annotations
+
+import logging
+import time
+from dataclasses import dataclass, field
+from typing import Any
+
+import httpx
+
+from app.core.config import settings
+
+logger = logging.getLogger("omnirank.dataforseo")
+
+BASE_URL = "https://api.dataforseo.com/v3"
+
+
+@dataclass
+class BacklinkProfile:
+    total_backlinks: int = 0
+    referring_domains: int = 0
+    domain_rank: float = 0
+    top_anchors: list[dict] = field(default_factory=list)
+    top_referring: list[dict] = field(default_factory=list)
+    dofollow_ratio: float = 0
+    edu_gov_links: int = 0
+
+
+@dataclass
+class KeywordMetrics:
+    keyword: str = ""
+    search_volume: int = 0
+    cpc: float = 0
+    competition: float = 0
+    difficulty: int = 0
+    trend: list[int] = field(default_factory=list)
+    intent: str = ""
+    serp_features: list[str] = field(default_factory=list)
+
+
+@dataclass
+class CompetitorDomain:
+    domain: str = ""
+    common_keywords: int = 0
+    total_keywords: int = 0
+    total_traffic: int = 0
+    domain_rank: float = 0
+    overlap_percentage: float = 0
+
+
+class DataForSEOClient:
+    """Production DataForSEO API client with retry, rate limiting, and cost tracking."""
+
+    def __init__(
+        self,
+        login: str | None = None,
+        password: str | None = None,
+    ):
+        self.login = login or settings.dataforseo_login
+        self.password = password or settings.dataforseo_password
+        self.total_cost = 0.0
+        self._request_count = 0
+
+        if not self.login or not self.password:
+            logger.warning("DataForSEO credentials not set — data features disabled")
+
+    @property
+    def enabled(self) -> bool:
+        return bool(self.login and self.password)
+
+    def _auth(self) -> tuple[str, str]:
+        return (self.login, self.password)
+
+    def _post(self, endpoint: str, payload: list[dict], retries: int = 3) -> dict:
+        """Make authenticated POST request with retry."""
+        url = f"{BASE_URL}/{endpoint}"
+        last_error = None
+
+        for attempt in range(retries):
+            try:
+                with httpx.Client(timeout=60) as client:
+                    resp = client.post(url, json=payload, auth=self._auth())
+                    data = resp.json()
+
+                    if data.get("status_code") == 20000:
+                        cost = data.get("cost", 0)
+                        self.total_cost += cost
+                        self._request_count += 1
+                        return data
+
+                    error_msg = data.get("status_message", "Unknown error")
+                    if data.get("status_code") == 40200:
+                        logger.error("DataForSEO insufficient funds")
+                        raise ValueError("DataForSEO: insufficient account balance")
+
+                    logger.warning("DataForSEO error (attempt %d): %s", attempt + 1, error_msg)
+                    last_error = Exception(error_msg)
+
+            except httpx.HTTPError as exc:
+                last_error = exc
+                logger.warning("DataForSEO HTTP error (attempt %d): %s", attempt + 1, exc)
+
+            time.sleep(1.5 * (2 ** attempt))
+
+        raise RuntimeError(f"DataForSEO failed after {retries} retries: {last_error}")
+
+    # ── SERP API ──────────────────────────────────────────────────
+
+    def serp_live(
+        self,
+        keyword: str,
+        location_code: int = 2356,  # India
+        language_code: str = "en",
+        depth: int = 20,
+        device: str = "desktop",
+    ) -> dict:
+        """Get live SERP results with all features."""
+        payload = [{
+            "keyword": keyword,
+            "location_code": location_code,
+            "language_code": language_code,
+            "depth": depth,
+            "device": device,
+            "se_type": "organic",
+        }]
+        return self._post("serp/google/organic/live/advanced", payload)
+
+    def serp_competitors(
+        self,
+        keyword: str,
+        location_code: int = 2356,
+        language_code: str = "en",
+    ) -> list[dict]:
+        """Get SERP competitors for a keyword."""
+        data = self.serp_live(keyword, location_code, language_code, depth=20)
+        results = []
+        for task in data.get("tasks", []):
+            for item in task.get("result", []):
+                for organic in item.get("items", []):
+                    if organic.get("type") == "organic":
+                        results.append({
+                            "position": organic.get("rank_absolute"),
+                            "url": organic.get("url", ""),
+                            "domain": organic.get("domain", ""),
+                            "title": organic.get("title", ""),
+                            "description": organic.get("description", ""),
+                            "etv": organic.get("estimated_paid_traffic_cost"),
+                        })
+        return results[:20]
+
+    def serp_features(self, keyword: str, location_code: int = 2356) -> list[str]:
+        """Detect which SERP features appear for a keyword."""
+        data = self.serp_live(keyword, location_code, depth=10)
+        features = set()
+        for task in data.get("tasks", []):
+            for result in task.get("result", []):
+                for item in result.get("items", []):
+                    item_type = item.get("type", "")
+                    if item_type and item_type != "organic":
+                        features.add(item_type)
+        return list(features)
+
+    # ── Keywords Data API ─────────────────────────────────────────
+
+    def keyword_metrics(
+        self,
+        keywords: list[str],
+        location_code: int = 2356,
+        language_code: str = "en",
+    ) -> list[KeywordMetrics]:
+        """Get search volume, CPC, difficulty for up to 700 keywords."""
+        payload = [{
+            "keywords": keywords[:700],
+            "location_code": location_code,
+            "language_code": language_code,
+        }]
+        data = self._post("keywords_data/google_ads/search_volume/live", payload)
+
+        results = []
+        for task in data.get("tasks", []):
+            for item in task.get("result", []):
+                monthly = item.get("monthly_searches", [])
+                trend = [m.get("search_volume", 0) for m in (monthly or [])[:12]]
+                results.append(KeywordMetrics(
+                    keyword=item.get("keyword", ""),
+                    search_volume=item.get("search_volume", 0) or 0,
+                    cpc=item.get("cpc", 0) or 0,
+                    competition=item.get("competition", 0) or 0,
+                    difficulty=item.get("keyword_difficulty", 0) or 0,
+                    trend=trend,
+                    intent="",  # classified by AI later
+                ))
+        return results
+
+    def keyword_suggestions(
+        self,
+        seed_keyword: str,
+        location_code: int = 2356,
+        language_code: str = "en",
+        limit: int = 50,
+    ) -> list[KeywordMetrics]:
+        """Get related keyword suggestions with metrics."""
+        payload = [{
+            "keyword": seed_keyword,
+            "location_code": location_code,
+            "language_code": language_code,
+            "limit": limit,
+            "include_seed_keyword": True,
+            "include_serp_info": True,
+        }]
+        data = self._post("keywords_data/google_ads/keywords_for_keywords/live", payload)
+
+        results = []
+        for task in data.get("tasks", []):
+            for item in task.get("result", []):
+                results.append(KeywordMetrics(
+                    keyword=item.get("keyword", ""),
+                    search_volume=item.get("search_volume", 0) or 0,
+                    cpc=item.get("cpc", 0) or 0,
+                    competition=item.get("competition", 0) or 0,
+                ))
+        return results
+
+    # ── Backlinks API ─────────────────────────────────────────────
+
+    def backlink_summary(self, domain: str) -> BacklinkProfile:
+        """Get backlink profile summary for a domain."""
+        payload = [{"target": domain, "internal_list_limit": 0, "include_subdomains": True}]
+        data = self._post("backlinks/summary/live", payload)
+
+        profile = BacklinkProfile()
+        for task in data.get("tasks", []):
+            for result in task.get("result", []):
+                profile.total_backlinks = result.get("total_backlinks", 0)
+                profile.referring_domains = result.get("referring_domains", 0)
+                profile.domain_rank = result.get("rank", 0)
+                nofollow = result.get("referring_links_attributes", {}).get("nofollow", 0)
+                total = profile.total_backlinks or 1
+                profile.dofollow_ratio = round((total - nofollow) / total * 100, 1)
+        return profile
+
+    def backlink_anchors(self, domain: str, limit: int = 20) -> list[dict]:
+        """Get top anchor texts for a domain."""
+        payload = [{"target": domain, "limit": limit, "order_by": ["backlinks,desc"]}]
+        data = self._post("backlinks/anchors/live", payload)
+
+        anchors = []
+        for task in data.get("tasks", []):
+            for item in task.get("result", []):
+                if isinstance(item, dict) and "items" in item:
+                    for anchor in item["items"]:
+                        anchors.append({
+                            "anchor": anchor.get("anchor", ""),
+                            "backlinks": anchor.get("backlinks", 0),
+                            "referring_domains": anchor.get("referring_domains", 0),
+                            "dofollow": anchor.get("backlinks_nofollow", 0) == 0,
+                        })
+        return anchors[:limit]
+
+    def backlink_referring_domains(self, domain: str, limit: int = 20) -> list[dict]:
+        """Get top referring domains."""
+        payload = [{"target": domain, "limit": limit, "order_by": ["rank,desc"]}]
+        data = self._post("backlinks/referring_domains/live", payload)
+
+        domains = []
+        for task in data.get("tasks", []):
+            for item in task.get("result", []):
+                if isinstance(item, dict) and "items" in item:
+                    for ref in item["items"]:
+                        domains.append({
+                            "domain": ref.get("domain", ""),
+                            "rank": ref.get("rank", 0),
+                            "backlinks": ref.get("backlinks", 0),
+                            "dofollow": ref.get("backlinks_nofollow", 0) == 0,
+                            "first_seen": ref.get("first_seen"),
+                        })
+        return domains[:limit]
+
+    # ── DataForSEO Labs API ───────────────────────────────────────
+
+    def competitor_domains(
+        self,
+        domain: str,
+        location_code: int = 2356,
+        language_code: str = "en",
+        limit: int = 10,
+    ) -> list[CompetitorDomain]:
+        """Find competing domains based on keyword overlap."""
+        payload = [{
+            "target": domain,
+            "location_code": location_code,
+            "language_code": language_code,
+            "limit": limit,
+            "filters": ["relevant_serp_items", ">", 0],
+        }]
+        data = self._post("dataforseo_labs/google/competitors_domain/live", payload)
+
+        competitors = []
+        for task in data.get("tasks", []):
+            for result in task.get("result", []):
+                if isinstance(result, dict) and "items" in result:
+                    for item in result["items"]:
+                        avg_pos = item.get("avg_position", 0)
+                        competitors.append(CompetitorDomain(
+                            domain=item.get("domain", ""),
+                            common_keywords=item.get("se_keywords", 0),
+                            total_keywords=item.get("se_keywords", 0),
+                            total_traffic=int(item.get("etv", 0) or 0),
+                            domain_rank=item.get("domain_rank", 0) or 0,
+                            overlap_percentage=item.get("intersections", 0) or 0,
+                        ))
+        return sorted(competitors, key=lambda c: c.common_keywords, reverse=True)[:limit]
+
+    def ranked_keywords(
+        self,
+        domain: str,
+        location_code: int = 2356,
+        language_code: str = "en",
+        limit: int = 50,
+    ) -> list[dict]:
+        """Get keywords a domain ranks for with positions."""
+        payload = [{
+            "target": domain,
+            "location_code": location_code,
+            "language_code": language_code,
+            "limit": limit,
+            "order_by": ["keyword_data.keyword_info.search_volume,desc"],
+        }]
+        data = self._post("dataforseo_labs/google/ranked_keywords/live", payload)
+
+        keywords = []
+        for task in data.get("tasks", []):
+            for result in task.get("result", []):
+                if isinstance(result, dict) and "items" in result:
+                    for item in result["items"]:
+                        kw_data = item.get("keyword_data", {})
+                        kw_info = kw_data.get("keyword_info", {})
+                        serp_info = kw_data.get("serp_info", {})
+                        keywords.append({
+                            "keyword": kw_data.get("keyword", ""),
+                            "position": item.get("rank_absolute"),
+                            "search_volume": kw_info.get("search_volume", 0),
+                            "cpc": kw_info.get("cpc", 0),
+                            "difficulty": kw_info.get("keyword_difficulty", 0),
+                            "url": item.get("url", ""),
+                            "serp_features": serp_info.get("serp_item_types", []),
+                        })
+        return keywords
+
+    def keyword_gap(
+        self,
+        target_domain: str,
+        competitor_domains: list[str],
+        location_code: int = 2356,
+        language_code: str = "en",
+        limit: int = 50,
+    ) -> list[dict]:
+        """Find keywords competitors rank for but target doesn't."""
+        targets = {target_domain: {"is_target": True}}
+        for cd in competitor_domains[:4]:
+            targets[cd] = {"is_target": False}
+
+        payload = [{
+            "targets": targets,
+            "location_code": location_code,
+            "language_code": language_code,
+            "limit": limit,
+            "item_types": ["organic"],
+            "keywords_filters": [["keyword_data.keyword_info.search_volume", ">", 100]],
+        }]
+        data = self._post("dataforseo_labs/google/domain_intersection/live", payload)
+
+        gaps = []
+        for task in data.get("tasks", []):
+            for result in task.get("result", []):
+                if isinstance(result, dict) and "items" in result:
+                    for item in result["items"]:
+                        kw_data = item.get("keyword_data", {})
+                        gaps.append({
+                            "keyword": kw_data.get("keyword", ""),
+                            "search_volume": kw_data.get("keyword_info", {}).get("search_volume", 0),
+                            "cpc": kw_data.get("keyword_info", {}).get("cpc", 0),
+                            "competitor_positions": {
+                                domain: info.get("rank_absolute")
+                                for domain, info in item.get("intersection_result", {}).items()
+                                if info and info.get("rank_absolute")
+                            },
+                        })
+        return sorted(gaps, key=lambda g: g.get("search_volume", 0), reverse=True)[:limit]
+
+    # ── On-Page API ───────────────────────────────────────────────
+
+    def onpage_audit(self, domain: str, max_pages: int = 100) -> str:
+        """Start an on-page audit task. Returns task_id."""
+        payload = [{
+            "target": domain,
+            "max_crawl_pages": max_pages,
+            "load_resources": True,
+            "enable_javascript": True,
+            "enable_browser_rendering": True,
+            "check_spell": True,
+        }]
+        data = self._post("on_page/task_post", payload)
+
+        for task in data.get("tasks", []):
+            return task.get("id", "")
+        return ""
+
+    def onpage_summary(self, task_id: str) -> dict:
+        """Get on-page audit summary results."""
+        payload = [{"id": task_id}]
+        data = self._post("on_page/summary", payload)
+
+        for task in data.get("tasks", []):
+            for result in task.get("result", []):
+                return {
+                    "pages_crawled": result.get("crawl_progress", {}).get("pages_crawled", 0),
+                    "pages_with_errors": result.get("crawl_status", {}).get("pages_with_errors", 0),
+                    "duplicate_titles": result.get("page_metrics", {}).get("checks", {}).get("duplicate_title", 0),
+                    "duplicate_descriptions": result.get("page_metrics", {}).get("checks", {}).get("duplicate_description", 0),
+                    "broken_links": result.get("page_metrics", {}).get("checks", {}).get("is_broken", 0),
+                    "no_h1": result.get("page_metrics", {}).get("checks", {}).get("no_h1_tag", 0),
+                    "low_content": result.get("page_metrics", {}).get("checks", {}).get("low_content_rate", 0),
+                    "no_image_alt": result.get("page_metrics", {}).get("checks", {}).get("no_image_alt", 0),
+                    "slow_pages": result.get("page_metrics", {}).get("checks", {}).get("high_loading_time", 0),
+                    "no_canonical": result.get("page_metrics", {}).get("checks", {}).get("no_canonical_tag", 0),
+                    "raw_summary": result,
+                }
+        return {}
+
+    # ── Utility ───────────────────────────────────────────────────
+
+    def get_cost_summary(self) -> dict:
+        return {
+            "total_cost_usd": round(self.total_cost, 4),
+            "total_requests": self._request_count,
+        }
