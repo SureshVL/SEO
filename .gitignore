@@ -9,3 +9,8 @@ SEO-latest.zip
 backend/.env
 backend/.env.backup
 frontend/.env.local
+__pycache__/
+*.pyc
+*.db
+.next/
+frontend/.next/
