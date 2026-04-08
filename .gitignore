@@ -1,3 +1,5 @@
 exports/
 .omnirank_jobs.db
 backend/.venv/
+node_modules/
+SEO-latest.zip
