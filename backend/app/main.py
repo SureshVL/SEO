@@ -917,3 +917,19 @@ def get_report_html(
     from fastapi.responses import HTMLResponse
     return HTMLResponse(content=html)
 
+@app.get("/jobs/{job_id}/report")
+def get_job_report(job_id: str):
+    from fastapi.responses import HTMLResponse
+    from app.services.pdf_report import generate_seo_report_html
+    job = job_store.get_job(job_id)
+    if not job: raise HTTPException(404, "Job not found")
+    if job.status != "completed" or not job.result: raise HTTPException(400, "Not completed")
+    result = job.result
+    comps = [c.model_dump() if hasattr(c, "model_dump") else c.__dict__ for c in result.result.competitor_profiles]
+    gap = result.result.gap_analysis.model_dump() if hasattr(result.result.gap_analysis, "model_dump") else result.result.gap_analysis.__dict__
+    html = generate_seo_report_html(client_url=result.result.client_profile.url, keyword=job.payload.get("primary_keyword",""), seo_score=result.final_score, competitors=comps, gap_analysis=gap, recommendations=result.result.recommendations, raw_metrics=result.result.raw_metrics, project_name=job.payload.get("project_id",""))
+    return HTMLResponse(content=html)
+
+@app.get("/api/llm/status")
+def llm_status():
+    return llm_client.get_status()
