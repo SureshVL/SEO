@@ -3,3 +3,9 @@ exports/
 backend/.venv/
 node_modules/
 SEO-latest.zip
+.env
+.env.local
+.env.backup
+backend/.env
+backend/.env.backup
+frontend/.env.local
