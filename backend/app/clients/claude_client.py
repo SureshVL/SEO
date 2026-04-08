@@ -43,16 +43,21 @@ class AIUsageAccumulator:
     total_cost_usd: float = 0.0
     calls: list[dict[str, Any]] = field(default_factory=list)
 
-    def record(self, resp: AIResponse) -> None:
-        self.total_input_tokens += resp.input_tokens
-        self.total_output_tokens += resp.output_tokens
-        self.total_cost_usd += resp.cost_usd
+    def record(self, resp) -> None:
+        if isinstance(resp, dict):
+            self.total_input_tokens += resp.get("input_tokens", 0)
+            self.total_output_tokens += resp.get("output_tokens", 0)
+            self.total_cost_usd += resp.get("cost_usd", 0)
+        else:
+            self.total_input_tokens += getattr(resp, "input_tokens", 0)
+            self.total_output_tokens += getattr(resp, "output_tokens", 0)
+            self.total_cost_usd += getattr(resp, "cost_usd", 0)
         self.calls.append({
-            "model": resp.model,
-            "input_tokens": resp.input_tokens,
-            "output_tokens": resp.output_tokens,
-            "cost_usd": resp.cost_usd,
-            "cached": resp.cached,
+            "model": resp.get("model", "unknown") if isinstance(resp, dict) else getattr(resp, "model", "unknown"),
+            "input_tokens": resp.get("input_tokens", 0) if isinstance(resp, dict) else getattr(resp, "input_tokens", 0),
+            "output_tokens": resp.get("output_tokens", 0) if isinstance(resp, dict) else getattr(resp, "output_tokens", 0),
+            "cost_usd": resp.get("cost_usd", 0) if isinstance(resp, dict) else getattr(resp, "cost_usd", 0),
+            "cached": resp.get("cached", False) if isinstance(resp, dict) else getattr(resp, "cached", False),
         })
 
 

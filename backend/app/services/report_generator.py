@@ -10,7 +10,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
-from app.clients.claude_client import SONNET, AIUsageAccumulator, ClaudeClient
+from app.clients.claude_client import AIUsageAccumulator
 
 logger = logging.getLogger("omnirank.reports")
 

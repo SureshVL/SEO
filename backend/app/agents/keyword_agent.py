@@ -10,7 +10,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any
 
-from app.clients.claude_client import HAIKU, SONNET, AIUsageAccumulator, ClaudeClient
+from app.clients.claude_client import AIUsageAccumulator
 from app.clients.http_clients import SerperHTTPClient
 
 logger = logging.getLogger("omnirank.keyword")
@@ -113,7 +113,7 @@ Generate 20-30 keyword opportunities with clustering and a content plan."""
 
         parsed, resp = self.claude.complete_json(
             messages=[{"role": "user", "content": user_msg}],
-            system=system, model=SONNET, max_tokens=4096, temperature=0.3,
+            system=system, max_tokens=4096, temperature=0.3,
         )
         self.usage.record(resp)
 
@@ -151,7 +151,7 @@ Respond ONLY with JSON: {"keyword": "intent", ...}"""
 
         parsed, resp = self.claude.complete_json(
             messages=[{"role": "user", "content": f"Keywords: {', '.join(keywords)}"}],
-            system=system, model=HAIKU, max_tokens=1024,
+            system=system, max_tokens=1024,
         )
         self.usage.record(resp)
         return {k: v for k, v in parsed.items() if isinstance(v, str)}

@@ -115,4 +115,8 @@ class SupabaseRestRepository:
             json=payload,
             timeout=self.timeout,
         )
-        response.raise_for_status()
+        try:
+            response.raise_for_status()
+        except Exception as exc:
+            import logging
+            logging.getLogger('omnirank.persistence').warning('Supabase insert to %s failed: %s', table, exc)

@@ -1,4 +1,5 @@
 # backend/app/clients/groq_client.py
+import os
 from groq import Groq
 from typing import List, Dict, Any
 

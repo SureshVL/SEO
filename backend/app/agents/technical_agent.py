@@ -12,7 +12,7 @@ from typing import Any
 
 import httpx
 
-from app.clients.claude_client import HAIKU, SONNET, AIUsageAccumulator, ClaudeClient
+from app.clients.claude_client import AIUsageAccumulator
 from app.schemas.research import ResearchResponse
 
 logger = logging.getLogger("omnirank.technical")
@@ -230,7 +230,7 @@ Entity coverage: {len(research.client_profile.top_entities)} entities found"""
 
         parsed, resp = self.claude.complete_json(
             messages=[{"role": "user", "content": context}],
-            system=system, model=HAIKU, max_tokens=1500, temperature=0.2,
+            system=system, max_tokens=1500, temperature=0.2,
         )
         self.usage.record(resp)
 

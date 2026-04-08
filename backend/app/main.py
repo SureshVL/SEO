@@ -53,7 +53,7 @@ app = FastAPI(
 # CORS for frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.cors_origins.split(",") if settings.cors_origins else ["http://localhost:3000"],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -91,7 +91,7 @@ async def require_auth(request: Request) -> dict:
 
 def _get_claude_client():
     """Create LLM client (Claude or Gemini based on config)."""
-    return get_llm_client()
+    return llm_client
 
 
 def _persistence_repo() -> PersistenceRepository:

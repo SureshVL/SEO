@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
-from app.clients.claude_client import HAIKU, SONNET, AIUsageAccumulator, ClaudeClient
+from app.clients.claude_client import AIUsageAccumulator
 from app.schemas.research import ResearchResponse
 
 logger = logging.getLogger("omnirank.content")
