@@ -1,176 +1,389 @@
 "use client";
 
-import { useState } from "react";
-import { ArrowDown, ArrowUp, BarChart3, Loader2, Minus, Plus, RefreshCw, TrendingUp, X } from "lucide-react";
+import { useState, useEffect, useCallback } from "react";
+import {
+  ArrowDown, ArrowUp, BarChart3, Loader2, Minus,
+  Plus, RefreshCw, Search, Sparkles, TrendingUp, Trash2, X,
+} from "lucide-react";
 import { cn, scoreColor } from "@/lib/utils";
 import { useAppStore } from "@/lib/store";
+import {
+  listProjects, listProjectKeywords, addKeyword,
+  deleteKeyword, getKeywordHistory, triggerRankCheck,
+} from "@/lib/api";
 import { toast } from "sonner";
 
-const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+// Tiny sparkline component
+function Sparkline({ data }: { data: number[] }) {
+  if (data.length < 2) return <span className="text-xs text-zinc-600">—</span>;
+  const max = Math.max(...data);
+  const min = Math.min(...data);
+  const range = max - min || 1;
+  const W = 80, H = 28, pad = 2;
+  const pts = data.map((v, i) => {
+    const x = pad + (i / (data.length - 1)) * (W - pad * 2);
+    // invert: lower rank = higher on chart
+    const y = pad + ((v - min) / range) * (H - pad * 2);
+    return `${x},${y}`;
+  });
+  const trend = data[data.length - 1] - data[0]; // positive = rank went up (worse)
+  const color = trend < 0 ? "#1D9E75" : trend > 0 ? "#E24B4A" : "#888";
+  return (
+    <svg width={W} height={H} className="overflow-visible">
+      <polyline
+        points={pts.join(" ")}
+        fill="none"
+        stroke={color}
+        strokeWidth="1.5"
+        strokeLinejoin="round"
+        strokeLinecap="round"
+      />
+      <circle
+        cx={pts[pts.length - 1].split(",")[0]}
+        cy={pts[pts.length - 1].split(",")[1]}
+        r="2.5"
+        fill={color}
+      />
+    </svg>
+  );
+}
+
+function posChange(curr: number | null, prev: number | null) {
+  if (!curr || !prev) return null;
+  return prev - curr; // positive = improved (rank went down)
+}
 
 export default function RankTrackerPage() {
-  const apiKey = useAppStore((s) => s.apiKey);
-  const [projectId, setProjectId] = useState("");
+  const { apiKey, businessProfile } = useAppStore();
+
+  const [projects, setProjects] = useState<any[]>([]);
+  const [projectId, setProjectId] = useState(businessProfile?.projectId || "");
   const [keywords, setKeywords] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [checking, setChecking] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
-  const [newKw, setNewKw] = useState({ keyword: "", region: "IN", locale: "en-US" });
-  const [history, setHistory] = useState<Record<string, any[]>>({});
-  const [selectedKw, setSelectedKw] = useState<string | null>(null);
+  const [newKw, setNewKw] = useState({ keyword: "", region: "IN", locale: "en-US", is_primary: false });
+  const [histories, setHistories] = useState<Record<string, number[]>>({});
+  const [expandedKw, setExpandedKw] = useState<string | null>(null);
 
-  async function loadKeywords() {
+  useEffect(() => {
+    listProjects(apiKey).then(setProjects).catch(() => {});
+  }, [apiKey]);
+
+  useEffect(() => {
+    if (businessProfile?.projectId && !projectId) setProjectId(businessProfile.projectId);
+  }, [businessProfile]);
+
+  const loadKeywords = useCallback(async () => {
     if (!projectId) return;
     setLoading(true);
     try {
-      const res = await fetch(`${API}/projects/${projectId}/keywords`, { headers: { "X-API-KEY": apiKey } });
-      if (res.ok) setKeywords(await res.json());
-    } catch {} finally { setLoading(false); }
-  }
+      const kws = await listProjectKeywords(projectId, apiKey);
+      setKeywords(kws);
+      // Fetch sparkline data for keywords that have positions
+      for (const kw of kws.slice(0, 20)) {
+        getKeywordHistory(kw.id, apiKey, 12)
+          .then((hist) => {
+            const positions = hist
+              .filter((h) => h.position !== null)
+              .map((h) => h.position as number)
+              .reverse();
+            if (positions.length > 0) {
+              setHistories((prev) => ({ ...prev, [kw.id]: positions }));
+            }
+          })
+          .catch(() => {});
+      }
+    } catch { toast.error("Failed to load keywords"); }
+    finally { setLoading(false); }
+  }, [projectId, apiKey]);
 
-  async function addKeyword(e: React.FormEvent) {
+  useEffect(() => { loadKeywords(); }, [loadKeywords]);
+
+  async function handleAddKeyword(e: React.FormEvent) {
     e.preventDefault();
     try {
-      const res = await fetch(`${API}/projects/${projectId}/keywords`, {
-        method: "POST",
-        headers: { "X-API-KEY": apiKey, "Content-Type": "application/json" },
-        body: JSON.stringify(newKw),
-      });
-      if (!res.ok) throw new Error(await res.text());
-      toast.success("Keyword added!");
-      setNewKw({ keyword: "", region: "IN", locale: "en-US" });
+      await addKeyword(projectId, newKw, apiKey);
+      toast.success("Keyword added");
+      setNewKw({ keyword: "", region: "IN", locale: "en-US", is_primary: false });
       setShowAdd(false);
       loadKeywords();
     } catch (err: any) { toast.error(err.message); }
   }
 
-  async function deleteKeyword(id: string) {
-    await fetch(`${API}/keywords/${id}`, { method: "DELETE", headers: { "X-API-KEY": apiKey } });
-    loadKeywords();
+  async function handleDelete(id: string) {
+    await deleteKeyword(id, apiKey);
+    setKeywords((kws) => kws.filter((k) => k.id !== id));
+    toast.success("Keyword removed");
   }
 
-  async function triggerRankCheck() {
+  async function handleRankCheck() {
     setChecking(true);
     try {
-      const res = await fetch(`${API}/projects/${projectId}/rank-check`, { method: "POST", headers: { "X-API-KEY": apiKey } });
-      if (res.ok) toast.success("Rank check started! Results will appear shortly.");
-    } catch { toast.error("Failed"); }
+      await triggerRankCheck(projectId, apiKey);
+      toast.success("Rank check started — results in ~2 min");
+      setTimeout(loadKeywords, 30000);
+    } catch { toast.error("Rank check failed"); }
     finally { setChecking(false); }
   }
 
-  async function loadHistory(kwId: string) {
-    setSelectedKw(kwId);
-    try {
-      const res = await fetch(`${API}/keywords/${kwId}/rank-history?limit=30`, { headers: { "X-API-KEY": apiKey } });
-      if (res.ok) {
-        const data = await res.json();
-        setHistory(prev => ({ ...prev, [kwId]: data }));
-      }
-    } catch {}
-  }
+  const topMover = keywords.reduce<any>((best, kw) => {
+    const delta = posChange(kw.latest_position, kw.previous_position);
+    if (delta !== null && (best === null || delta > best.delta)) return { kw, delta };
+    return best;
+  }, null);
 
-  const posChange = (curr: number | null, prev: number | null) => {
-    if (!curr || !prev) return null;
-    return prev - curr; // positive = improved
-  };
+  const avgPosition = keywords.length
+    ? Math.round(keywords.filter((k) => k.latest_position).reduce((s, k) => s + k.latest_position, 0) /
+        keywords.filter((k) => k.latest_position).length)
+    : null;
+
+  const top10Count = keywords.filter((k) => k.latest_position && k.latest_position <= 10).length;
 
   return (
     <div className="animate-fade-in">
-      <div className="flex items-center justify-between mb-8">
+      <div className="flex items-start justify-between mb-8">
         <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2"><BarChart3 className="w-6 h-6 text-teal-400" /> Rank Tracker</h1>
-          <p className="text-sm text-zinc-400 mt-1">Monitor keyword positions daily with SERP feature detection.</p>
+          <h1 className="text-2xl font-bold flex items-center gap-2">
+            <BarChart3 className="w-6 h-6 text-teal-400" /> Rank Tracker
+          </h1>
+          {businessProfile?.city && (
+            <div className="flex items-center gap-1.5 mt-2 text-xs text-brand-400 bg-brand-500/10 border border-brand-500/20 rounded-lg px-3 py-1.5 w-fit">
+              <Sparkles className="w-3.5 h-3.5" />
+              Tracking for {businessProfile.city} · {businessProfile.businessTypeLabel}
+            </div>
+          )}
         </div>
+
+        {projectId && (
+          <div className="flex items-center gap-2">
+            <button onClick={loadKeywords} disabled={loading} className="btn-ghost flex items-center gap-1.5 text-sm">
+              <RefreshCw className={cn("w-3.5 h-3.5", loading && "animate-spin")} />
+            </button>
+            <button
+              onClick={handleRankCheck}
+              disabled={checking || !projectId}
+              className="btn-secondary flex items-center gap-2 text-sm"
+            >
+              {checking ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Search className="w-3.5 h-3.5" />}
+              {checking ? "Checking…" : "Check Rankings"}
+            </button>
+            <button
+              onClick={() => setShowAdd(!showAdd)}
+              className="btn-primary flex items-center gap-2 text-sm"
+            >
+              <Plus className="w-3.5 h-3.5" /> Add Keyword
+            </button>
+          </div>
+        )}
       </div>
 
-      {/* Project Selector */}
+      {/* Project selector */}
       <div className="card p-4 mb-6">
         <div className="flex items-center gap-4">
           <div className="flex-1">
-            <label className="label">Project ID</label>
-            <input type="text" value={projectId} onChange={e => setProjectId(e.target.value)} className="input-field" placeholder="Paste project ID from Projects page" />
-          </div>
-          <div className="flex items-end gap-2">
-            <button onClick={loadKeywords} disabled={!projectId || loading} className="btn-primary flex items-center gap-2">
-              {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <BarChart3 className="w-4 h-4" />} Load
-            </button>
-            {keywords.length > 0 && (
-              <button onClick={triggerRankCheck} disabled={checking} className="btn-secondary flex items-center gap-2">
-                <RefreshCw className={cn("w-4 h-4", checking && "animate-spin")} /> Check Now
-              </button>
+            {projects.length > 0 ? (
+              <select
+                value={projectId}
+                onChange={(e) => setProjectId(e.target.value)}
+                className="input-field"
+              >
+                <option value="">Select a project…</option>
+                {projects.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <input
+                type="text"
+                value={projectId}
+                onChange={(e) => setProjectId(e.target.value)}
+                className="input-field"
+                placeholder="Project ID"
+              />
             )}
           </div>
+          <span className="text-xs text-zinc-500 shrink-0">{keywords.length} keywords tracked</span>
         </div>
       </div>
 
-      {/* Add Keyword */}
-      {projectId && (
-        <div className="mb-6">
-          {showAdd ? (
-            <div className="card p-4 animate-fade-in">
-              <form onSubmit={addKeyword} className="flex items-end gap-3">
-                <div className="flex-1">
-                  <label className="label">Keyword</label>
-                  <input type="text" value={newKw.keyword} onChange={e => setNewKw({ ...newKw, keyword: e.target.value })} className="input-field" placeholder="e.g. best seo tools india" required />
-                </div>
-                <div className="w-32">
-                  <label className="label">Region</label>
-                  <select value={newKw.region} onChange={e => setNewKw({ ...newKw, region: e.target.value })} className="input-field">
-                    <option value="IN">India</option><option value="US">US</option><option value="GB">UK</option>
-                  </select>
-                </div>
-                <button type="submit" className="btn-primary">Add</button>
-                <button type="button" onClick={() => setShowAdd(false)} className="btn-ghost p-2"><X className="w-4 h-4" /></button>
-              </form>
+      {/* Add keyword panel */}
+      {showAdd && (
+        <form onSubmit={handleAddKeyword} className="card p-5 mb-6 animate-fade-in space-y-4">
+          <div className="flex items-center justify-between mb-1">
+            <h3 className="text-sm font-semibold">Add keyword</h3>
+            <button type="button" onClick={() => setShowAdd(false)} className="btn-ghost p-1">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="md:col-span-2">
+              <label className="label">Keyword</label>
+              <input
+                type="text"
+                value={newKw.keyword}
+                onChange={(e) => setNewKw({ ...newKw, keyword: e.target.value })}
+                className="input-field"
+                placeholder={businessProfile?.city ? `e.g. best ${businessProfile.businessType} in ${businessProfile.city}` : "e.g. seo tools india"}
+                required
+                autoFocus
+              />
             </div>
-          ) : (
-            <button onClick={() => setShowAdd(true)} className="btn-ghost text-sm flex items-center gap-1.5"><Plus className="w-3.5 h-3.5" /> Add keyword</button>
-          )}
+            <div>
+              <label className="label">Region</label>
+              <select
+                value={newKw.region}
+                onChange={(e) => setNewKw({ ...newKw, region: e.target.value })}
+                className="input-field"
+              >
+                <option value="IN">India</option>
+                <option value="US">US</option>
+                <option value="GB">UK</option>
+              </select>
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <label className="flex items-center gap-2 text-sm text-zinc-400 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={newKw.is_primary}
+                onChange={(e) => setNewKw({ ...newKw, is_primary: e.target.checked })}
+                className="rounded"
+              />
+              Mark as primary keyword
+            </label>
+            <div className="flex-1" />
+            <button type="button" onClick={() => setShowAdd(false)} className="btn-ghost text-sm">Cancel</button>
+            <button type="submit" className="btn-primary text-sm">Add Keyword</button>
+          </div>
+        </form>
+      )}
+
+      {/* Summary KPIs */}
+      {keywords.length > 0 && (
+        <div className="grid grid-cols-3 gap-4 mb-6">
+          {[
+            { label: "Avg Position", value: avgPosition ?? "—", icon: TrendingUp, color: "text-teal-400" },
+            { label: "Top 10", value: top10Count, icon: ArrowUp, color: "text-emerald-400" },
+            { label: "Best Mover", value: topMover ? `+${topMover.delta}` : "—", icon: Sparkles, color: "text-brand-400" },
+          ].map((m) => (
+            <div key={m.label} className="metric-card">
+              <div className="flex items-center justify-between mb-2">
+                <span className="metric-label">{m.label}</span>
+                <m.icon className={cn("w-4 h-4", m.color)} />
+              </div>
+              <div className={cn("metric-value", m.color)}>{m.value}</div>
+            </div>
+          ))}
         </div>
       )}
 
-      {/* Keywords Table */}
-      {keywords.length > 0 && (
-        <div className="card overflow-hidden mb-6">
+      {/* Keywords table */}
+      {loading ? (
+        <div className="card p-12 text-center">
+          <Loader2 className="w-6 h-6 animate-spin text-zinc-500 mx-auto mb-2" />
+          <p className="text-sm text-zinc-500">Loading keywords…</p>
+        </div>
+      ) : keywords.length === 0 ? (
+        <div className="card p-12 text-center">
+          <Search className="w-10 h-10 text-zinc-700 mx-auto mb-3" />
+          <p className="text-sm text-zinc-400 mb-5">
+            {projectId ? "No keywords tracked yet." : "Select a project to view keywords."}
+          </p>
+          {projectId && (
+            <button onClick={() => setShowAdd(true)} className="btn-primary text-sm inline-flex items-center gap-2">
+              <Plus className="w-4 h-4" /> Add first keyword
+            </button>
+          )}
+        </div>
+      ) : (
+        <div className="card overflow-hidden">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-zinc-800 bg-zinc-900/30">
-                <th className="text-left px-5 py-3 text-zinc-500 text-xs uppercase">Keyword</th>
-                <th className="text-center px-4 py-3 text-zinc-500 text-xs uppercase">Position</th>
-                <th className="text-center px-4 py-3 text-zinc-500 text-xs uppercase">Change</th>
-                <th className="text-center px-4 py-3 text-zinc-500 text-xs uppercase">Intent</th>
-                <th className="text-center px-4 py-3 text-zinc-500 text-xs uppercase">Region</th>
-                <th className="text-right px-5 py-3 text-zinc-500 text-xs uppercase">Actions</th>
+              <tr className="border-b border-zinc-800">
+                {["Keyword", "Position", "Change", "Trend", "Volume", "Intent", ""].map((h) => (
+                  <th
+                    key={h}
+                    className={cn(
+                      "px-5 py-3 text-zinc-500 font-medium text-xs uppercase tracking-wider",
+                      h === "" ? "text-right" : "text-left"
+                    )}
+                  >{h}</th>
+                ))}
               </tr>
             </thead>
             <tbody>
               {keywords.map((kw) => {
-                const change = posChange(kw.latest_position, kw.previous_position);
+                const delta = posChange(kw.latest_position, kw.previous_position);
+                const sparkData = histories[kw.id] || [];
                 return (
-                  <tr key={kw.id} className="border-b border-zinc-800/30 hover:bg-zinc-800/20 cursor-pointer" onClick={() => loadHistory(kw.id)}>
-                    <td className="px-5 py-3 font-medium text-zinc-200">{kw.keyword}</td>
-                    <td className="px-4 py-3 text-center">
-                      {kw.latest_position ? (
-                        <span className={cn("font-bold", kw.latest_position <= 3 ? "text-emerald-400" : kw.latest_position <= 10 ? "text-amber-400" : "text-zinc-400")}>
+                  <tr key={kw.id} className="border-b border-zinc-800/50 hover:bg-zinc-800/20 transition-colors">
+                    <td className="px-5 py-3">
+                      <div className="flex items-center gap-2">
+                        {kw.is_primary && (
+                          <span className="text-[9px] font-bold bg-brand-500/20 text-brand-400 border border-brand-500/30 rounded px-1.5 py-0.5 uppercase">
+                            Primary
+                          </span>
+                        )}
+                        <span className="font-medium text-zinc-200">{kw.keyword}</span>
+                      </div>
+                      <span className="text-[10px] text-zinc-600">{kw.target_region}</span>
+                    </td>
+                    <td className="px-5 py-3">
+                      {kw.latest_position != null ? (
+                        <span className={cn(
+                          "text-lg font-bold font-serif",
+                          kw.latest_position <= 3 ? "text-emerald-400" :
+                          kw.latest_position <= 10 ? "text-teal-400" :
+                          kw.latest_position <= 30 ? "text-amber-400" : "text-zinc-400"
+                        )}>
                           #{kw.latest_position}
                         </span>
-                      ) : <span className="text-zinc-600">—</span>}
+                      ) : (
+                        <span className="text-zinc-600 text-xs">Not ranked</span>
+                      )}
                     </td>
-                    <td className="px-4 py-3 text-center">
-                      {change !== null ? (
-                        <span className={cn("flex items-center justify-center gap-0.5 text-xs font-medium", change > 0 ? "text-emerald-400" : change < 0 ? "text-red-400" : "text-zinc-500")}>
-                          {change > 0 ? <ArrowUp className="w-3 h-3" /> : change < 0 ? <ArrowDown className="w-3 h-3" /> : <Minus className="w-3 h-3" />}
-                          {Math.abs(change)}
+                    <td className="px-5 py-3">
+                      {delta !== null ? (
+                        <span className={cn(
+                          "flex items-center gap-1 text-sm font-medium",
+                          delta > 0 ? "text-emerald-400" : delta < 0 ? "text-red-400" : "text-zinc-500"
+                        )}>
+                          {delta > 0 ? <ArrowUp className="w-3.5 h-3.5" /> : delta < 0 ? <ArrowDown className="w-3.5 h-3.5" /> : <Minus className="w-3.5 h-3.5" />}
+                          {Math.abs(delta)}
                         </span>
-                      ) : <span className="text-zinc-600">—</span>}
+                      ) : (
+                        <span className="text-zinc-600 text-xs">—</span>
+                      )}
                     </td>
-                    <td className="px-4 py-3 text-center">
-                      {kw.intent ? <span className="badge badge-info text-xs">{kw.intent}</span> : <span className="text-zinc-600">—</span>}
+                    <td className="px-5 py-3">
+                      <Sparkline data={sparkData} />
                     </td>
-                    <td className="px-4 py-3 text-center text-zinc-400 text-xs">{kw.target_region}</td>
+                    <td className="px-5 py-3 text-zinc-400 text-xs">
+                      {kw.search_volume != null ? kw.search_volume.toLocaleString("en-IN") : "—"}
+                    </td>
+                    <td className="px-5 py-3">
+                      {kw.intent ? (
+                        <span className={cn("badge text-[10px]", {
+                          "badge-info": kw.intent === "informational",
+                          "badge-success": kw.intent === "transactional",
+                          "badge-warning": kw.intent === "commercial",
+                        })}>
+                          {kw.intent}
+                        </span>
+                      ) : (
+                        <span className="text-zinc-600 text-xs">—</span>
+                      )}
+                    </td>
                     <td className="px-5 py-3 text-right">
-                      <button onClick={(e) => { e.stopPropagation(); deleteKeyword(kw.id); }} className="btn-ghost p-1 text-zinc-500 hover:text-red-400">
-                        <X className="w-3.5 h-3.5" />
+                      <button
+                        onClick={() => handleDelete(kw.id)}
+                        className="btn-ghost p-1 text-zinc-600 hover:text-red-400 transition-colors"
+                        title="Remove keyword"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
                       </button>
                     </td>
                   </tr>
@@ -178,50 +391,6 @@ export default function RankTrackerPage() {
               })}
             </tbody>
           </table>
-        </div>
-      )}
-
-      {/* Rank History Chart (simple ASCII/visual) */}
-      {selectedKw && history[selectedKw] && (
-        <div className="card p-6 animate-fade-in">
-          <h3 className="font-semibold mb-4 flex items-center gap-2">
-            <TrendingUp className="w-4 h-4 text-brand-400" />
-            Position History — {keywords.find(k => k.id === selectedKw)?.keyword}
-          </h3>
-          {history[selectedKw].length === 0 ? (
-            <p className="text-sm text-zinc-500">No rank history yet. Run a rank check to start tracking.</p>
-          ) : (
-            <div className="space-y-1">
-              {history[selectedKw].slice(0, 30).reverse().map((h: any, i: number) => {
-                const pos = h.position;
-                const barWidth = pos ? Math.max(5, Math.min(100, (50 - pos) * 2 + 20)) : 0;
-                const date = new Date(h.checked_at).toLocaleDateString("en-IN", { month: "short", day: "numeric" });
-                return (
-                  <div key={i} className="flex items-center gap-3 text-xs">
-                    <span className="text-zinc-500 w-16 text-right">{date}</span>
-                    <div className="flex-1 h-5 bg-zinc-800/30 rounded overflow-hidden relative">
-                      {pos && (
-                        <div
-                          className={cn("h-full rounded transition-all", pos <= 3 ? "bg-emerald-500/30" : pos <= 10 ? "bg-brand-500/30" : "bg-amber-500/30")}
-                          style={{ width: `${barWidth}%` }}
-                        />
-                      )}
-                    </div>
-                    <span className={cn("w-8 text-right font-mono font-medium", pos ? (pos <= 3 ? "text-emerald-400" : pos <= 10 ? "text-brand-400" : "text-zinc-400") : "text-zinc-600")}>
-                      {pos ? `#${pos}` : "—"}
-                    </span>
-                    {h.serp_features?.length > 0 && (
-                      <div className="flex gap-1">
-                        {h.serp_features.map((f: string) => (
-                          <span key={f} className="badge bg-zinc-700/50 text-zinc-400 border-0 text-[10px]">{f.replace("_", " ")}</span>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
         </div>
       )}
     </div>

@@ -122,3 +122,75 @@ export function streamJobLogs(
 export async function healthCheck() {
   return request<{ status: string; service: string; ai: string }>("/health");
 }
+
+// ── Projects ──
+export async function listProjects(apiKey: string) {
+  return request<Array<{
+    id: string; name: string; client_url: string; domain: string | null;
+    target_niche: string | null; status: string; goal_keywords: string[];
+    created_at: string; updated_at: string;
+  }>>("/projects", {}, apiKey);
+}
+
+export async function getProject(projectId: string, apiKey: string) {
+  return request<{
+    id: string; name: string; client_url: string; domain: string | null;
+    target_niche: string | null; status: string; goal_keywords: string[];
+    created_at: string; updated_at: string;
+  }>(`/projects/${projectId}`, {}, apiKey);
+}
+
+export async function listProjectKeywords(projectId: string, apiKey: string) {
+  return request<Array<{
+    id: string; keyword: string; locale: string; target_region: string;
+    search_volume: number | null; difficulty: number | null; intent: string | null;
+    is_primary: boolean; tags: string[];
+    latest_position: number | null; previous_position: number | null;
+  }>>(`/projects/${projectId}/keywords`, {}, apiKey);
+}
+
+export async function addKeyword(projectId: string, payload: {
+  keyword: string; target_region?: string; locale?: string; is_primary?: boolean;
+}, apiKey: string) {
+  return request(`/projects/${projectId}/keywords`, {
+    method: "POST", body: JSON.stringify(payload),
+  }, apiKey);
+}
+
+export async function deleteKeyword(keywordId: string, apiKey: string) {
+  return request(`/keywords/${keywordId}`, { method: "DELETE" }, apiKey);
+}
+
+export async function getKeywordHistory(keywordId: string, apiKey: string, limit = 30) {
+  return request<Array<{
+    position: number | null; url: string | null;
+    serp_features: string[]; checked_at: string;
+  }>>(`/keywords/${keywordId}/rank-history?limit=${limit}`, {}, apiKey);
+}
+
+export async function triggerRankCheck(projectId: string, apiKey: string) {
+  return request(`/projects/${projectId}/rank-check`, { method: "POST" }, apiKey);
+}
+
+// ── Reports ──
+export async function listReports(projectId: string, apiKey: string) {
+  return request<Array<{
+    id: string; title: string; report_type: string;
+    summary: string | null; created_at: string;
+  }>>(`/projects/${projectId}/reports`, {}, apiKey);
+}
+
+export async function generateReport(projectId: string, reportType = "seo_audit", apiKey: string) {
+  return request(`/projects/${projectId}/reports/generate?report_type=${reportType}`, {
+    method: "POST",
+  }, apiKey);
+}
+
+export async function getReportHtml(projectId: string, reportId: string, apiKey: string): Promise<string> {
+  const res = await fetch(
+    `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/projects/${projectId}/reports/${reportId}/html`,
+    { headers: { "X-API-KEY": apiKey } }
+  );
+  if (!res.ok) throw new Error(await res.text());
+  return res.text();
+}
