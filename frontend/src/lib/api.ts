@@ -194,3 +194,68 @@ export async function getReportHtml(projectId: string, reportId: string, apiKey:
   if (!res.ok) throw new Error(await res.text());
   return res.text();
 }
+
+// ── Content Studio ──
+export async function listContent(projectId: string, apiKey: string) {
+  return request<Array<{
+    id: string; title: string; slug: string | null; body_markdown: string;
+    target_keyword: string | null; queue_status: string;
+    publish_target: string | null; created_at: string; updated_at: string;
+  }>>(`/projects/${projectId}/content`, {}, apiKey);
+}
+
+export async function createContentDraft(projectId: string, payload: {
+  title: string; body_markdown: string; target_keyword: string;
+  meta_description?: string; publish_target?: string;
+}, apiKey: string) {
+  return request(`/projects/${projectId}/content`, {
+    method: "POST", body: JSON.stringify(payload),
+  }, apiKey);
+}
+
+export async function updateContent(contentId: string, payload: {
+  body_markdown?: string; queue_status?: string; title?: string; target_keyword?: string;
+}, apiKey: string) {
+  return request(`/content/${contentId}`, {
+    method: "PATCH", body: JSON.stringify(payload),
+  }, apiKey);
+}
+
+export async function aiRewriteContent(contentId: string, instruction: string, apiKey: string) {
+  const qs = new URLSearchParams({ instruction });
+  return request<{ rewritten: boolean; word_count: number }>(
+    `/content/${contentId}/ai-rewrite?${qs}`, { method: "POST" }, apiKey,
+  );
+}
+
+// ── Competitors ──
+export async function listCompetitors(projectId: string, apiKey: string) {
+  return request<Array<{
+    id: string; source_url: string; scraped_content: string | null;
+    entity_maps: Record<string, any>; backlink_profiles: Record<string, any>;
+    captured_at: string;
+  }>>(`/projects/${projectId}/competitors`, {}, apiKey);
+}
+
+export async function triggerCompetitorScan(projectId: string, apiKey: string) {
+  return request(`/projects/${projectId}/competitors/check`, { method: "POST" }, apiKey);
+}
+
+// ── Job PDF report ──
+export function getJobReportUrl(jobId: string): string {
+  return `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/jobs/${jobId}/report`;
+}
+
+// ── Content generation with AI ──
+export async function generateContentWithAI(projectId: string, payload: {
+  primary_keyword: string;
+  city?: string;
+  business_type?: string;
+  content_type?: string;
+}, apiKey: string) {
+  return request<{ job_id: string; status: string }>(
+    "/jobs/content",
+    { method: "POST", body: JSON.stringify({ project_id: projectId, ...payload }) },
+    apiKey,
+  );
+}

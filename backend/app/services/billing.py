@@ -22,15 +22,19 @@ logger = logging.getLogger("omnirank.billing")
 PLANS = {
     "starter": {
         "name": "Starter",
-        "price_inr": 199900,  # paise
+        "price_inr": 1999,          # rupees (display + test)
+        "price_paise": 199900,      # paise (Razorpay API)
+        "currency": "INR",
         "max_projects": 1,
         "max_keywords": 50,
         "max_reports_per_month": 5,
-        "razorpay_plan_id": "",  # set via env or DB
+        "razorpay_plan_id": "",     # set via env
     },
     "growth": {
         "name": "Growth",
-        "price_inr": 499900,
+        "price_inr": 4999,
+        "price_paise": 499900,
+        "currency": "INR",
         "max_projects": 5,
         "max_keywords": 300,
         "max_reports_per_month": 999,
@@ -38,7 +42,9 @@ PLANS = {
     },
     "agency": {
         "name": "Agency",
-        "price_inr": 1499900,
+        "price_inr": 14999,
+        "price_paise": 1499900,
+        "currency": "INR",
         "max_projects": 25,
         "max_keywords": 2000,
         "max_reports_per_month": 999,

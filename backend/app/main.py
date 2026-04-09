@@ -384,6 +384,7 @@ def keyword_research(
     locale: str = "en-US",
     region: str = "IN",
     industry: str = "",
+    city: str = "",
     _auth: None = Depends(require_api_key),
     _rate: None = Depends(enforce_rate_limit),
 ):
@@ -393,18 +394,21 @@ def keyword_research(
     from app.agents.keyword_agent import KeywordStrategyAgent
     serper = SerperHTTPClient(api_key=settings.serper_api_key) if settings.serper_api_key else None
     agent = KeywordStrategyAgent(claude_client=claude, serper_client=serper)
-    result = agent.research(seed_keyword, domain, locale, region, industry)
+    # Localise seed keyword when city is provided
+    localised_seed = f"{seed_keyword} in {city.title()}" if city and city.lower() not in seed_keyword.lower() else seed_keyword
+    result = agent.research(localised_seed, domain, locale, region, industry, city=city)
     return {
         "primary_keyword": result.primary_keyword,
         "opportunities": [
             {
                 "keyword": o.keyword,
-                "volume": o.search_volume_est,
-                "difficulty": o.difficulty_est,
+                "search_volume_est": o.search_volume_est,
+                "difficulty_est": o.difficulty_est,
                 "intent": o.intent,
                 "content_type": o.content_type,
-                "priority": o.priority_score,
+                "priority_score": o.priority_score,
                 "cluster": o.cluster,
+                "notes": o.notes,
             }
             for o in result.opportunities
         ],
@@ -690,6 +694,19 @@ def ai_rewrite_content(
 
 # ── Competitor Monitoring ──────────────────────────────────────────
 
+@app.get("/projects/{project_id}/competitors")
+def list_competitors(
+    project_id: str,
+    _auth: None = Depends(require_api_key),
+):
+    """List stored competitor intel for a project."""
+    rows = _supabase_rest(
+        "get", "competitor_intel",
+        params=f"project_id=eq.{project_id}&order=captured_at.desc&limit=30",
+    )
+    return rows if isinstance(rows, list) else []
+
+
 @app.post("/projects/{project_id}/competitors/check")
 def check_competitors(
     project_id: str,
@@ -910,11 +927,12 @@ def get_report_html(
 
     claude = _get_claude_client()
     generator = ReportGenerator(claude_client=claude)
-    html = generator.generate_seo_report(
+    report_result = generator.generate_seo_report(
         project=project_rows[0],
         keywords=keywords,
         white_label=white_label,
     )
+    html = report_result["html"] if isinstance(report_result, dict) else report_result
 
     from fastapi.responses import HTMLResponse
     return HTMLResponse(content=html)
@@ -924,12 +942,57 @@ def get_job_report(job_id: str):
     from fastapi.responses import HTMLResponse
     from app.services.pdf_report import generate_seo_report_html
     job = job_store.get_job(job_id)
-    if not job: raise HTTPException(404, "Job not found")
-    if job.status != "completed" or not job.result: raise HTTPException(400, "Not completed")
+    if not job:
+        raise HTTPException(404, "Job not found")
+    if job.status != "completed" or not job.result:
+        raise HTTPException(400, "Job not completed yet")
+
     result = job.result
-    comps = [c.model_dump() if hasattr(c, "model_dump") else c.__dict__ for c in result.result.competitor_profiles]
-    gap = result.result.gap_analysis.model_dump() if hasattr(result.result.gap_analysis, "model_dump") else result.result.gap_analysis.__dict__
-    html = generate_seo_report_html(client_url=result.result.client_profile.url, keyword=job.payload.get("primary_keyword",""), seo_score=result.final_score, competitors=comps, gap_analysis=gap, recommendations=result.result.recommendations, raw_metrics=result.result.raw_metrics, project_name=job.payload.get("project_id",""))
+    research_req = job.payload.get("research_request", job.payload)
+    client_url = str(result.result.client_profile.url)
+    primary_kw = research_req.get("primary_keyword", "")
+    city = research_req.get("city", "")
+    business_type = research_req.get("business_type", "")
+
+    comps = [
+        c.model_dump() if hasattr(c, "model_dump") else c.__dict__
+        for c in result.result.competitor_profiles
+    ]
+    gap = (
+        result.result.gap_analysis.model_dump()
+        if hasattr(result.result.gap_analysis, "model_dump")
+        else result.result.gap_analysis.__dict__
+    )
+
+    # Build keywords_with_ranks from job context if project_id present
+    project_id = research_req.get("project_id", "")
+    keywords_with_ranks = []
+    if project_id:
+        try:
+            kw_rows = _supabase_rest("get", "keywords", params=f"project_id=eq.{project_id}&limit=20")
+            keywords_with_ranks = [
+                {"keyword": r.get("keyword", ""), "current_rank": r.get("latest_position")}
+                for r in (kw_rows if isinstance(kw_rows, list) else [])
+            ]
+        except Exception:
+            pass
+
+    if not keywords_with_ranks:
+        keywords_with_ranks = [{"keyword": primary_kw, "current_rank": None}]
+
+    html = generate_seo_report_html(
+        client_url=client_url,
+        keyword=primary_kw,
+        seo_score=result.final_score,
+        competitors=comps,
+        gap_analysis=gap,
+        recommendations=result.result.recommendations,
+        raw_metrics=result.result.raw_metrics,
+        project_name=project_id,
+        keywords_with_ranks=keywords_with_ranks,
+        city=city.title() if city else "",
+        business_type=business_type,
+    )
     return HTMLResponse(content=html)
 
 @app.get("/api/llm/status")

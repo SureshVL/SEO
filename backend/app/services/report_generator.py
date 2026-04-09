@@ -31,8 +31,8 @@ class ReportGenerator:
         competitor_data: list[dict] | None = None,
         white_label: bool = False,
         brand_name: str = "OMNI-RANK",
-    ) -> str:
-        """Generate a full HTML report."""
+    ) -> dict[str, Any]:
+        """Generate a full SEO report. Returns dict with title, summary, and html keys."""
 
         # Gather metrics
         domain = project.get("domain", project.get("client_url", "Unknown"))
@@ -167,7 +167,11 @@ td {{ padding: 10px 12px; border-bottom: 1px solid #e5e7eb; }}
 </body>
 </html>"""
 
-        return html
+        domain = project.get("domain", project.get("client_url", "Unknown"))
+        title = f"SEO Report — {project.get('name', domain)}"
+        summary = narrative if isinstance(narrative, str) else str(narrative)
+
+        return {"title": title, "summary": summary[:500], "html": html}
 
     def _generate_narrative(
         self,

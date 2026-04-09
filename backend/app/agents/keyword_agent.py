@@ -56,6 +56,7 @@ class KeywordStrategyAgent:
         locale: str = "en-US",
         region: str = "IN",
         industry: str = "",
+        city: str = "",
     ) -> KeywordStrategyResult:
         """Full keyword research from a seed keyword."""
 
@@ -107,6 +108,7 @@ Respond ONLY with JSON:
 Domain: {domain}
 Target market: {region} ({locale})
 Industry: {industry or 'General'}
+{f"City / Local market: {city.title()} (prioritise local-intent and near-me keywords)" if city else ""}
 {serp_context}
 
 Generate 20-30 keyword opportunities with clustering and a content plan."""
