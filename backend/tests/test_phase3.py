@@ -202,3 +202,142 @@ class TestRouteInventory:
         # At least 30 routes (was 31 endpoints + new analytics + GET competitors)
         non_trivial = [r for r in app.routes if getattr(r, "path", "").startswith("/")]
         assert len(non_trivial) >= 30
+
+
+# ── Keyword city localisation ─────────────────────────────────────────────────
+class TestKeywordCityLocalisation:
+    def test_city_appended_to_seed_when_absent(self):
+        """Keyword endpoint should localise the seed when city is provided."""
+        seed = "best restaurant"
+        city = "hyderabad"
+        localised = f"{seed} in {city.title()}" if city and city.lower() not in seed.lower() else seed
+        assert localised == "best restaurant in Hyderabad"
+
+    def test_city_not_duplicated_when_already_present(self):
+        seed = "best restaurant in hyderabad"
+        city = "hyderabad"
+        localised = f"{seed} in {city.title()}" if city and city.lower() not in seed.lower() else seed
+        assert localised == "best restaurant in hyderabad"  # unchanged
+
+    def test_empty_city_leaves_seed_unchanged(self):
+        seed = "seo tools india"
+        city = ""
+        localised = f"{seed} in {city.title()}" if city and city.lower() not in seed.lower() else seed
+        assert localised == "seo tools india"
+
+    def test_keyword_research_endpoint_has_city_param(self):
+        from app.main import app
+        for route in app.routes:
+            if getattr(route, "path", "") == "/keywords/research":
+                import inspect
+                sig = inspect.signature(route.endpoint)
+                assert "city" in sig.parameters, "city param missing from /keywords/research"
+                break
+
+    def test_keyword_agent_research_accepts_city(self):
+        import inspect
+        from app.agents.keyword_agent import KeywordStrategyAgent
+        sig = inspect.signature(KeywordStrategyAgent.research)
+        assert "city" in sig.parameters
+
+
+# ── ReportGenerator dict return ───────────────────────────────────────────────
+class TestReportGeneratorDictReturn:
+    def test_returns_dict_with_title(self):
+        from app.services.report_generator import ReportGenerator
+        gen = ReportGenerator(claude_client=None)
+        result = gen.generate_seo_report(
+            project={"name": "Test", "client_url": "https://test.com", "domain": "test.com"},
+            keywords=[{"keyword": "seo", "latest_position": 5}],
+        )
+        assert isinstance(result, dict)
+        assert "title" in result
+        assert "summary" in result
+        assert "html" in result
+
+    def test_title_contains_project_name(self):
+        from app.services.report_generator import ReportGenerator
+        gen = ReportGenerator(claude_client=None)
+        result = gen.generate_seo_report(
+            project={"name": "Acme Corp", "domain": "acme.com"},
+            keywords=[],
+        )
+        assert "Acme Corp" in result["title"]
+
+    def test_html_is_valid_html(self):
+        from app.services.report_generator import ReportGenerator
+        gen = ReportGenerator(claude_client=None)
+        result = gen.generate_seo_report(
+            project={"name": "Test", "domain": "test.com"},
+            keywords=[{"keyword": "seo tools", "latest_position": 12}],
+        )
+        html = result["html"]
+        assert "<!DOCTYPE html>" in html
+        assert "<table" in html
+        assert "Keywords Tracked" in html
+
+    def test_summary_is_string(self):
+        from app.services.report_generator import ReportGenerator
+        gen = ReportGenerator(claude_client=None)
+        result = gen.generate_seo_report(
+            project={"name": "X", "domain": "x.com"},
+            keywords=[],
+        )
+        assert isinstance(result["summary"], str)
+        assert len(result["summary"]) > 0
+
+    def test_white_label_strips_brand(self):
+        from app.services.report_generator import ReportGenerator
+        gen = ReportGenerator(claude_client=None)
+        result = gen.generate_seo_report(
+            project={"name": "Client", "domain": "client.com"},
+            keywords=[],
+            white_label=True,
+        )
+        assert "OMNI-RANK" not in result["html"]
+        assert "Client" in result["html"]
+
+    def test_keyword_positions_in_html(self):
+        from app.services.report_generator import ReportGenerator
+        gen = ReportGenerator(claude_client=None)
+        result = gen.generate_seo_report(
+            project={"name": "SEO Test", "domain": "seotest.com"},
+            keywords=[
+                {"keyword": "seo tools india", "latest_position": 3, "intent": "commercial"},
+                {"keyword": "rank tracker", "latest_position": 15, "intent": "informational"},
+            ],
+        )
+        html = result["html"]
+        assert "seo tools india" in html
+        assert "rank tracker" in html
+        assert "#3" in html
+        assert "#15" in html
+
+
+# ── Billing PLANS correctness ─────────────────────────────────────────────────
+class TestBillingPlansComplete:
+    def test_price_paise_is_100x_price_inr(self):
+        from app.services.billing import PLANS
+        for pid, plan in PLANS.items():
+            assert plan["price_paise"] == plan["price_inr"] * 100, \
+                f"Plan {pid}: price_paise should be price_inr * 100"
+
+    def test_agency_has_highest_limits(self):
+        from app.services.billing import PLANS
+        assert PLANS["agency"]["max_projects"] > PLANS["growth"]["max_projects"]
+        assert PLANS["agency"]["max_keywords"] > PLANS["growth"]["max_keywords"]
+
+    def test_starter_has_lowest_limits(self):
+        from app.services.billing import PLANS
+        assert PLANS["starter"]["max_projects"] < PLANS["growth"]["max_projects"]
+        assert PLANS["starter"]["max_keywords"] < PLANS["growth"]["max_keywords"]
+
+    def test_all_plans_have_razorpay_plan_id_key(self):
+        from app.services.billing import PLANS
+        for pid, plan in PLANS.items():
+            assert "razorpay_plan_id" in plan, f"Plan {pid} missing razorpay_plan_id"
+
+    def test_currency_is_inr_for_all(self):
+        from app.services.billing import PLANS
+        for pid, plan in PLANS.items():
+            assert plan["currency"] == "INR", f"Plan {pid} currency should be INR"

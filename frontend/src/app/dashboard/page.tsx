@@ -9,7 +9,7 @@ import {
 import { cn, scoreColor } from "@/lib/utils";
 import { useAppStore } from "@/lib/store";
 import {
-  healthCheck, listJobs, listProjects, listProjectKeywords,
+  healthCheck, listJobs, listProjects, listProjectKeywords, getJobReportUrl,
 } from "@/lib/api";
 
 export default function DashboardPage() {
@@ -236,9 +236,22 @@ export default function DashboardPage() {
                       {new Date(job.created_at).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}
                     </td>
                     <td className="px-5 py-3 text-right">
-                      <Link href={`/dashboard/research?job=${job.job_id}`} className="text-brand-400 hover:text-brand-300 text-xs">
-                        View →
-                      </Link>
+                      <div className="flex items-center justify-end gap-3">
+                        <Link href={`/dashboard/research?job=${job.job_id}`} className="text-brand-400 hover:text-brand-300 text-xs">
+                          View →
+                        </Link>
+                        {job.status === "completed" && (
+                          <a
+                            href={getJobReportUrl(job.job_id)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex items-center gap-1 text-zinc-500 hover:text-emerald-400 text-xs transition-colors"
+                            title="Download PDF report"
+                          >
+                            <FileText className="w-3 h-3" /> PDF
+                          </a>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 );
