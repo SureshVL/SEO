@@ -12,6 +12,8 @@ class ResearchRequest(BaseModel):
     app_link: HttpUrl | None = None
     app_name: str | None = None
     app_category: str | None = None
+    city: str | None = None          # Indian city code e.g. "hyderabad"
+    business_type: str | None = None  # e.g. "restaurant", "saas"
 
 
 class CompetitorPageProfile(BaseModel):

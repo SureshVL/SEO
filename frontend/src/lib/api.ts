@@ -79,6 +79,7 @@ export async function keywordResearch(params: {
   locale?: string;
   region?: string;
   industry?: string;
+  city?: string;
 }, apiKey: string) {
   const qs = new URLSearchParams({
     seed_keyword: params.seed_keyword,
@@ -86,6 +87,7 @@ export async function keywordResearch(params: {
     locale: params.locale || "en-US",
     region: params.region || "IN",
     industry: params.industry || "",
+    city: params.city || "",
   });
   return request(`/keywords/research?${qs}`, { method: "POST" }, apiKey);
 }

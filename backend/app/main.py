@@ -20,6 +20,7 @@ from app.api.rate_limit import enforce_rate_limit
 from app.api.security import require_api_key, require_project_access
 from app.api.auth import get_current_user, get_optional_user
 from app.api.ai import router as ai_router
+from app.api.analytics import router as analytics_router
 from app.clients.llm import llm_client
 
 def _get_llm_client():
@@ -63,6 +64,7 @@ job_store = SQLiteJobStore(settings.job_store_path)
 
 # Register AI router
 app.include_router(ai_router, prefix="/api/ai")
+app.include_router(analytics_router)
 
 if settings.environment.lower() == "prod" and settings.orchestrator_api_key == "dev-orchestrator-key":
     raise RuntimeError("Refusing to start in prod with default orchestrator_api_key")

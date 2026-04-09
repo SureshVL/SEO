@@ -1,0 +1,14 @@
+Metadata-Version: 2.4
+Name: omnirank-backend
+Version: 2.0.0
+Summary: OMNI-RANK OR-1 — AI-Powered SEO Agent Platform
+Requires-Python: >=3.11
+Requires-Dist: fastapi>=0.116.0
+Requires-Dist: uvicorn[standard]>=0.35.0
+Requires-Dist: pydantic>=2.11.0
+Requires-Dist: pydantic-settings>=2.10.0
+Requires-Dist: requests>=2.32.0
+Requires-Dist: httpx>=0.27.0
+Provides-Extra: dev
+Requires-Dist: pytest>=8.4.0; extra == "dev"
+Requires-Dist: ruff>=0.8.0; extra == "dev"
