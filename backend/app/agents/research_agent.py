@@ -38,7 +38,7 @@ def _scrape_page(url, timeout=10):
     try:
         with httpx.Client(timeout=timeout, follow_redirects=True) as client:
             resp = client.get(url, headers={"User-Agent": "Mozilla/5.0 OmniRank/2.0"})
-            if resp.status_code == 200:
+            if resp.status_code == 200 and "text/html" in resp.headers.get("content-type", ""):
                 return resp.text[:50000]
     except Exception as exc:
         logger.debug("Scrape failed for %s: %s", url, exc)
@@ -58,7 +58,7 @@ def _extract_from_html(html):
     text = re.sub(r'\s+', ' ', text).strip()
     words = [w for w in re.findall(r'[A-Za-z][A-Za-z\-\']+', text.lower()) if w not in STOPWORDS and len(w) > 2]
     entities = [e for e, _ in Counter(re.findall(r'\b([A-Z][a-z]+(?:\s+[A-Z][a-z0-9&]+)+)\b', text)).most_common(25)]
-    questions = [q.strip() for q in re.findall(r'([^.!?]{20,180}\?)', text)][:12]
+    questions = [q.strip() for q in re.findall(r'([^.!?]{20,180}\?)', text) if q.isprintable()][:12]
     return {"title": title, "h1": h1, "h2s": h2s, "word_count": len(words), "entities": entities, "questions": questions, "words": words}
 
 
@@ -89,7 +89,143 @@ class AlgorithmicReverseEngineerAgent:
             raise ValueError("No data provider. Add DATAFORSEO or SERPER credentials.")
 
     def _run_dfs(self, request, keyword, client_url, client_domain):
-        serp = self.dfs.serp_competitors(keyword, location_code=2356, language_code="en")
+        # ── Smart Location Targeting ──────────────────────────────
+        # Hierarchy: City → State → Country → International
+        # Based on business type detection from URL + keyword
+        
+        INDIA_CITIES = {
+            "hyderabad": 1007768, "mumbai": 1007785, "delhi": 1007751, "new delhi": 1007751,
+            "bangalore": 1007739, "bengaluru": 1007739, "chennai": 1007745, "kolkata": 1007776,
+            "pune": 1007792, "ahmedabad": 1007737, "jaipur": 1007769, "lucknow": 1007782,
+            "kochi": 1007775, "cochin": 1007775, "chandigarh": 1007744, "indore": 1007767,
+            "bhopal": 1007741, "visakhapatnam": 1007800, "vizag": 1007800, "nagpur": 1007786,
+            "coimbatore": 1007748, "goa": 1007756, "surat": 1007797, "vadodara": 1007799,
+            "patna": 1007790, "ranchi": 1007793, "guwahati": 1007759, "bhubaneswar": 1007742,
+            "thiruvananthapuram": 1007798, "trivandrum": 1007798, "mysore": 1007784, "mysuru": 1007784,
+            "mangalore": 1007783, "mangaluru": 1007783, "madurai": 1007781, "varanasi": 1007800,
+            "agra": 1007736, "noida": 1007751, "gurgaon": 1007758, "gurugram": 1007758,
+            "faridabad": 1007754, "ghaziabad": 1007755, "dehradun": 1007750, "shimla": 1007796,
+            "amritsar": 1007738, "ludhiana": 1007780, "jodhpur": 1007772, "udaipur": 1007799,
+            "raipur": 1007793, "vijayawada": 1007800, "guntur": 1007757, "warangal": 1007800,
+            "nellore": 1007787, "kakinada": 1007773, "tirupati": 1007798, "rajahmundry": 1007793,
+            "secunderabad": 1007768, "kukatpally": 1007768, "gachibowli": 1007768, "hitech city": 1007768,
+            "jubilee hills": 1007768, "banjara hills": 1007768, "ameerpet": 1007768, "kphb": 1007768,
+        }
+        
+        # ── Business type categories ──
+        # CITY-LEVEL: Serve customers who physically visit or are nearby
+        LOCAL_SIGNALS = [
+            # Food & Dining
+            "restaurant", "hotel", "cafe", "dhaba", "mess", "bhojanam", "biryani",
+            "bakery", "sweets", "mithai", "catering", "tiffin", "food court",
+            "bar", "pub", "lounge", "ice cream", "juice", "chai", "coffee",
+            # Health & Wellness
+            "hospital", "clinic", "doctor", "dentist", "pharmacy", "medical",
+            "ayurveda", "homeopathy", "physiotherapy", "lab", "diagnostic",
+            "gym", "fitness", "yoga", "spa", "salon", "parlour", "parlor",
+            "beauty", "barber", "tattoo", "massage", "wellness",
+            # Retail & Shopping
+            "shop", "store", "showroom", "boutique", "jewellery", "jewelry",
+            "furniture", "electronics", "mobile", "optical", "florist",
+            "supermarket", "kirana", "grocery", "mart", "bazaar", "market",
+            # Services
+            "plumber", "electrician", "carpenter", "painter", "mechanic",
+            "tailor", "laundry", "dry clean", "pest control", "cleaning",
+            "packers", "movers", "courier", "repair", "service center",
+            "ac repair", "car wash", "garage", "tyre", "tire",
+            # Education
+            "school", "college", "university", "coaching", "tuition", "tutorial",
+            "institute", "academy", "preschool", "playschool", "daycare", "creche",
+            "library", "training", "certification",
+            # Religious & Cultural
+            "temple", "church", "mosque", "gurudwara", "ashram", "mandir",
+            "havan", "puja", "pooja", "yagna", "mandal", "samaj", "seva",
+            "math", "mutt", "dargah", "synagogue",
+            # Real Estate & Property
+            "pg", "paying guest", "hostel", "lodge", "guest house", "oyo",
+            "apartment", "flat", "villa", "plot", "real estate", "property",
+            "builder", "construction", "interior", "architect",
+            # Legal & Financial (local offices)
+            "advocate", "lawyer", "ca firm", "chartered accountant", "notary",
+            "insurance agent", "loan", "chit fund",
+            # Auto & Transport
+            "driving school", "auto", "taxi", "cab", "car rental", "bike rental",
+            "travel agent", "tour operator",
+            # Events & Entertainment
+            "wedding", "event", "banquet", "hall", "auditorium", "theatre", "theater",
+            "cinema", "photographer", "videographer", "dj", "decorator", "florist",
+            # Pet & Animal
+            "vet", "veterinary", "pet shop", "pet care", "grooming",
+        ]
+        
+        # STATE-LEVEL: Regional businesses, state government, regional brands
+        STATE_SIGNALS = [
+            "state government", "regional", "district", "mandal", "taluk",
+            "wholesale", "distributor", "dealer", "franchise",
+            "tourism", "heritage", "pilgrimage", "circuit",
+            "state board", "regional office", "zonal",
+        ]
+        
+        # NATIONAL-LEVEL: Pan-India brands, e-commerce, national services
+        NATIONAL_SIGNALS = [
+            "india", "pan india", "nationwide", "all india",
+            "ecommerce", "e-commerce", "online store", "startup",
+            "saas", "software", "app", "platform", "fintech",
+            "insurance company", "bank", "nbfc", "mutual fund",
+            "airline", "railway", "logistics", "shipping",
+            "news", "media", "magazine", "publication",
+            "brand", "manufacturer", "exporter", "importer",
+        ]
+        
+        # INTERNATIONAL: Global companies, exports, multinational
+        INTERNATIONAL_SIGNALS = [
+            "global", "international", "worldwide", "export",
+            "multinational", "offshore", "overseas", "foreign",
+            ".com", ".io", ".ai", ".co",  # Generic TLDs suggest broader scope
+        ]
+        
+        # ── Detection logic ──
+        url_lower = client_url.lower() + " " + client_domain.lower()
+        kw_lower = keyword.lower()
+        search_context = url_lower + " " + kw_lower
+        
+        # Step 1: Try to detect city from URL/domain
+        location_code = 2356  # India default
+        detected_city = None
+        detected_level = "country"  # city, state, country, international
+        
+        for city, code in INDIA_CITIES.items():
+            if city in url_lower or city in kw_lower:
+                location_code = code
+                detected_city = city
+                detected_level = "city"
+                break
+        
+        # Step 2: If no city found, classify business type
+        if not detected_city:
+            is_local = any(s in search_context for s in LOCAL_SIGNALS)
+            is_national = any(s in search_context for s in NATIONAL_SIGNALS)
+            is_international = any(s in search_context for s in INTERNATIONAL_SIGNALS)
+            
+            if is_local and not is_national:
+                # Local business but no city detected — use India-level
+                # (user should add city to project settings for best results)
+                detected_level = "city"
+                location_code = 2356  # Will search India-wide but flag as local
+            elif is_national:
+                detected_level = "country"
+                location_code = 2356  # India
+            elif is_international:
+                detected_level = "international"
+                location_code = 2840  # US as global default
+            else:
+                detected_level = "country"
+                location_code = 2356  # India default
+        
+        logger.info("Search targeting: level=%s, city=%s, location_code=%d", 
+                     detected_level, detected_city or "none", location_code)
+        
+        serp = self.dfs.serp_competitors(keyword, location_code=location_code, language_code="en")
         if not serp:
             raise ValueError(f"No SERP results for '{keyword}'")
 
