@@ -13,6 +13,7 @@ from typing import Any
 import httpx
 
 from app.clients.claude_client import AIUsageAccumulator
+from app.clients.dataforseo_client import DataForSEOClient
 from app.schemas.research import ResearchResponse
 
 logger = logging.getLogger("omnirank.technical")
@@ -40,16 +41,66 @@ class TechnicalAuditResult:
     raw_lighthouse: dict[str, Any] = field(default_factory=dict)
 
 
+@dataclass
+class SiteCrawlResult:
+    domain: str
+    task_id: str = ""
+    status: str = "pending"  # pending|crawling|finished|failed
+    pages_crawled: int = 0
+    pages_in_queue: int = 0
+    max_crawl_pages: int | None = None
+    onpage_score: float | None = None
+    issues_by_check: dict[str, int] = field(default_factory=dict)
+    actions: list[TechnicalAction] = field(default_factory=list)
+    sample_pages: list[dict[str, Any]] = field(default_factory=list)
+    duplicate_titles: list[dict[str, Any]] = field(default_factory=list)
+    duplicate_descriptions: list[dict[str, Any]] = field(default_factory=list)
+    broken_links: list[dict[str, Any]] = field(default_factory=list)
+    raw_summary: dict[str, Any] = field(default_factory=dict)
+    error: str | None = None
+
+
 class TechnicalAgent:
-    """Real technical SEO auditing with PageSpeed Insights + Claude analysis."""
+    """Real technical SEO auditing with PageSpeed Insights + DataForSEO On-Page crawl."""
+
+    # Human-readable labels + impact weights for DataForSEO on-page checks.
+    _CHECK_META: dict[str, tuple[str, str, str]] = {
+        "is_5xx_code": ("crawl_errors", "critical", "5xx server errors returned during crawl"),
+        "is_4xx_code": ("crawl_errors", "high", "4xx client errors returned during crawl"),
+        "is_broken": ("broken_links", "critical", "Broken internal links detected"),
+        "has_links_to_broken_resources": ("broken_links", "high", "Pages link to broken resources"),
+        "duplicate_title": ("metadata", "high", "Pages share identical title tags"),
+        "duplicate_description": ("metadata", "medium", "Pages share identical meta descriptions"),
+        "duplicate_content": ("content", "high", "Pages with near-duplicate body content"),
+        "no_title": ("metadata", "critical", "Pages missing a title tag"),
+        "no_description": ("metadata", "high", "Pages missing a meta description"),
+        "no_h1_tag": ("on_page", "critical", "Pages without an H1"),
+        "no_image_alt": ("accessibility", "medium", "Images without alt attributes"),
+        "no_canonical": ("indexation", "medium", "Pages without a canonical tag"),
+        "redirect_chain": ("indexation", "medium", "Multi-hop redirect chains"),
+        "canonical_to_redirect": ("indexation", "high", "Canonical points to a redirect"),
+        "canonical_to_broken": ("indexation", "critical", "Canonical points to a broken URL"),
+        "has_render_blocking_resources": ("performance", "medium", "Render-blocking scripts or styles"),
+        "high_loading_time": ("performance", "high", "Pages with slow server response"),
+        "large_page_size": ("performance", "medium", "Pages exceeding recommended weight"),
+        "low_content_rate": ("content", "medium", "Pages with thin body content"),
+        "has_links_to_redirects": ("indexation", "low", "Internal links pointing to redirects"),
+        "www_redirect": ("indexation", "low", "Missing canonical www/non-www redirect"),
+        "lorem_ipsum": ("content", "high", "Placeholder copy detected"),
+        "frame": ("accessibility", "low", "Iframes detected on pages"),
+        "deprecated_html_tags": ("code_quality", "low", "Deprecated HTML tags used"),
+        "seo_friendly_url_characters_check": ("indexation", "low", "URLs with unfriendly characters"),
+    }
 
     def __init__(
         self,
         claude_client: ClaudeClient | None = None,
         pagespeed_api_key: str = "",
+        dataforseo_client: DataForSEOClient | None = None,
     ):
         self.claude = claude_client
         self.pagespeed_key = pagespeed_api_key
+        self.dataforseo = dataforseo_client
         self.usage = AIUsageAccumulator()
 
     def full_audit(self, url: str, research: ResearchResponse | None = None) -> TechnicalAuditResult:
@@ -265,3 +316,151 @@ Entity coverage: {len(research.client_profile.top_entities)} entities found"""
         cat = categories.get(key, {})
         score = cat.get("score")
         return round(score * 100, 1) if score is not None else None
+
+    # ── Full site crawl (DataForSEO On-Page) ─────────────────────────
+
+    def start_site_crawl(self, domain: str, max_pages: int = 100) -> SiteCrawlResult:
+        """Kick off a DataForSEO on-page crawl. Returns a result with task_id set."""
+        result = SiteCrawlResult(domain=domain, max_crawl_pages=max_pages)
+        if not self.dataforseo or not self.dataforseo.enabled:
+            result.status = "failed"
+            result.error = "DataForSEO credentials not configured"
+            return result
+        try:
+            task_id = self.dataforseo.onpage_audit(domain, max_pages=max_pages)
+        except Exception as exc:
+            logger.warning("onpage_audit kickoff failed for %s: %s", domain, exc)
+            result.status = "failed"
+            result.error = str(exc)
+            return result
+
+        if not task_id:
+            result.status = "failed"
+            result.error = "DataForSEO did not return a task id"
+            return result
+
+        result.task_id = task_id
+        result.status = "crawling"
+        return result
+
+    def fetch_site_crawl(
+        self,
+        task_id: str,
+        domain: str = "",
+        include_samples: bool = True,
+    ) -> SiteCrawlResult:
+        """Fetch crawl status + parsed results for a task_id."""
+        result = SiteCrawlResult(domain=domain, task_id=task_id)
+        if not self.dataforseo or not self.dataforseo.enabled:
+            result.status = "failed"
+            result.error = "DataForSEO credentials not configured"
+            return result
+
+        try:
+            summary = self.dataforseo.onpage_summary(task_id)
+        except Exception as exc:
+            logger.warning("onpage_summary failed for %s: %s", task_id, exc)
+            result.status = "failed"
+            result.error = str(exc)
+            return result
+
+        if not summary:
+            result.status = "crawling"
+            return result
+
+        result.raw_summary = summary.get("raw_summary", {})
+        crawl_status = (summary.get("crawl_status") or "").lower()
+        pages_in_queue = summary.get("pages_in_queue") or 0
+        result.pages_crawled = summary.get("pages_crawled", 0) or 0
+        result.pages_in_queue = pages_in_queue
+        result.max_crawl_pages = summary.get("max_crawl_pages")
+
+        if crawl_status in ("finished", "done") or (pages_in_queue == 0 and result.pages_crawled):
+            result.status = "finished"
+        else:
+            result.status = "crawling"
+
+        page_metrics = summary.get("page_metrics", {}) or {}
+        result.onpage_score = page_metrics.get("onpage_score")
+        checks = summary.get("checks", {}) or {}
+        result.issues_by_check = {k: int(v or 0) for k, v in checks.items() if v}
+
+        result.actions = self._actions_from_checks(result.issues_by_check, result.pages_crawled)
+
+        if include_samples and result.status == "finished":
+            try:
+                result.sample_pages = self.dataforseo.onpage_pages(task_id, limit=25) or []
+            except Exception as exc:
+                logger.debug("onpage_pages failed: %s", exc)
+            try:
+                result.duplicate_titles = self.dataforseo.onpage_duplicate_tags(task_id, tag="title", limit=20) or []
+            except Exception as exc:
+                logger.debug("duplicate_titles failed: %s", exc)
+            try:
+                result.duplicate_descriptions = self.dataforseo.onpage_duplicate_tags(task_id, tag="description", limit=20) or []
+            except Exception as exc:
+                logger.debug("duplicate_descriptions failed: %s", exc)
+            try:
+                result.broken_links = self.dataforseo.onpage_links(
+                    task_id,
+                    limit=50,
+                    filters=[["is_broken", "=", True]],
+                ) or []
+            except Exception as exc:
+                logger.debug("onpage_links broken filter failed: %s", exc)
+
+        return result
+
+    def run_site_crawl(
+        self,
+        domain: str,
+        max_pages: int = 100,
+        max_wait_seconds: int = 180,
+    ) -> SiteCrawlResult:
+        """Blocking convenience: start crawl, poll until ready, return results."""
+        started = self.start_site_crawl(domain, max_pages=max_pages)
+        if started.status != "crawling" or not started.task_id:
+            return started
+
+        assert self.dataforseo is not None
+        ready = self.dataforseo.onpage_wait_for_ready(
+            started.task_id, max_wait_seconds=max_wait_seconds
+        )
+        if not ready:
+            # Return whatever partial summary we can
+            partial = self.fetch_site_crawl(started.task_id, domain=domain, include_samples=False)
+            if partial.status == "finished":
+                return partial
+            partial.status = "crawling"
+            partial.error = partial.error or "Crawl still in progress; poll /audit/crawl/{task_id}"
+            return partial
+
+        return self.fetch_site_crawl(started.task_id, domain=domain, include_samples=True)
+
+    def _actions_from_checks(
+        self, issues_by_check: dict[str, int], pages_crawled: int
+    ) -> list[TechnicalAction]:
+        """Convert DataForSEO issue counts to prioritized TechnicalAction list."""
+        actions: list[TechnicalAction] = []
+        pages_crawled = max(pages_crawled, 1)
+        for check, count in issues_by_check.items():
+            if not count:
+                continue
+            meta = self._CHECK_META.get(check)
+            if meta:
+                category, impact, label = meta
+            else:
+                category, impact, label = "technical", "medium", check.replace("_", " ").title()
+
+            pct = round(count / pages_crawled * 100, 1)
+            actions.append(TechnicalAction(
+                category=category,
+                action=f"{label} — {count} page(s) affected ({pct}%)",
+                impact=impact,
+                details=f"DataForSEO on-page check '{check}' flagged {count} of {pages_crawled} crawled pages.",
+                auto_fixable=check in {"no_h1_tag", "no_title", "no_description", "no_image_alt", "no_canonical"},
+            ))
+
+        severity_rank = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+        actions.sort(key=lambda a: severity_rank.get(a.impact, 9))
+        return actions
