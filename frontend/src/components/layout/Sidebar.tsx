@@ -1,10 +1,10 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BarChart3, Bot, Braces, ClipboardList, Coins, Eye, FileText, Grid3x3, Home, LayoutDashboard, Lightbulb, Link2, LogOut, Palette, Search, Settings, Shield, Sparkles, Zap } from "lucide-react";
+import { BarChart3, Bot, Braces, Calendar, ClipboardList, Coins, Eye, FileText, Grid3x3, Home, LayoutDashboard, Lightbulb, Link2, LogOut, Palette, Search, Settings, Shield, Sparkles, Zap } from "lucide-react";
 import { ThemeToggle } from "../ui/ThemeToggle";
 const navSections = [
-  { label: "Command", items: [{ href: "/dashboard", label: "Overview", icon: Home },{ href: "/dashboard/projects", label: "Projects", icon: LayoutDashboard }]},
+  { label: "Command", items: [{ href: "/dashboard", label: "Overview", icon: Home },{ href: "/dashboard/projects", label: "Projects", icon: LayoutDashboard },{ href: "/dashboard/workflow", label: "Workflow", icon: Calendar }]},
   { label: "Intelligence", items: [{ href: "/dashboard/research", label: "AI Research", icon: Bot },{ href: "/dashboard/keywords", label: "Keywords", icon: Search },{ href: "/dashboard/rank-tracker", label: "Rank Tracker", icon: BarChart3 },{ href: "/dashboard/ai-visibility", label: "AI Visibility", icon: Sparkles },{ href: "/dashboard/attribution", label: "Attribution", icon: Coins },{ href: "/dashboard/competitors", label: "Competitors", icon: Eye }]},
   { label: "Execute", items: [{ href: "/dashboard/audit", label: "Technical Audit", icon: Shield },{ href: "/dashboard/schema", label: "Schema Markup", icon: Braces },{ href: "/dashboard/brief", label: "Content Brief", icon: Lightbulb },{ href: "/dashboard/content", label: "Content Studio", icon: FileText },{ href: "/dashboard/programmatic", label: "Programmatic", icon: Grid3x3 },{ href: "/dashboard/links", label: "Link Building", icon: Link2 },{ href: "/dashboard/reports", label: "Reports", icon: ClipboardList }]},
   { label: "Account", items: [{ href: "/dashboard/branding", label: "White-label", icon: Palette },{ href: "/dashboard/settings", label: "Settings", icon: Settings },{ href: "/dashboard/billing", label: "Billing", icon: Zap }]},

@@ -828,3 +828,64 @@ export async function generateProgrammaticPages(
     apiKey,
   );
 }
+
+// ── Monthly workflow (Week 1-4 cadence) ──────────────────────────
+
+export interface WorkflowSchedule {
+  project_id: string;
+  week: number;
+  week_label: string;
+  tasks: string[];
+  as_of: string;
+}
+
+export interface WorkflowTaskResult {
+  name: string;
+  status: "completed" | "skipped" | "failed";
+  detail: string;
+  data: Record<string, unknown>;
+}
+
+export interface WorkflowRun {
+  project_id: string;
+  week: number;
+  week_label: string;
+  started_at: string;
+  finished_at: string;
+  completed: number;
+  skipped: number;
+  failed: number;
+  tasks: WorkflowTaskResult[];
+}
+
+export async function getWorkflowSchedule(projectId: string, apiKey: string) {
+  return request<WorkflowSchedule>(
+    `/workflow/schedule/${projectId}`,
+    { method: "GET" },
+    apiKey,
+  );
+}
+
+export async function runWorkflow(
+  projectId: string,
+  apiKey: string,
+  only?: string[],
+) {
+  return request<WorkflowRun>(
+    `/workflow/run/${projectId}`,
+    { method: "POST", body: JSON.stringify({ only, triggered_by: "manual" }) },
+    apiKey,
+  );
+}
+
+export async function listWorkflowRuns(
+  projectId: string,
+  apiKey: string,
+  limit = 20,
+) {
+  return request<{ runs: Array<WorkflowRun & { id: string; created_at: string; triggered_by: string }> }>(
+    `/workflow/runs/${projectId}?limit=${limit}`,
+    { method: "GET" },
+    apiKey,
+  );
+}

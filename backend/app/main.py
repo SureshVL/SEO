@@ -1274,6 +1274,114 @@ def generate_programmatic_pages(
     }
 
 
+# ── Monthly workflow (Week 1-4 cadence) ────────────────────────────
+
+class WorkflowRunRequest(BaseModel):
+    only: list[str] | None = None
+    triggered_by: str = "manual"
+
+
+def _serialize_task_result(task) -> dict:
+    return {
+        "name": task.name,
+        "status": task.status,
+        "detail": task.detail,
+        "data": task.data,
+    }
+
+
+def _serialize_workflow_run(run) -> dict:
+    return {
+        "project_id": run.project_id,
+        "week": run.week,
+        "week_label": run.week_label,
+        "started_at": run.started_at,
+        "finished_at": run.finished_at,
+        "completed": run.completed,
+        "skipped": run.skipped,
+        "failed": run.failed,
+        "tasks": [_serialize_task_result(t) for t in run.tasks],
+    }
+
+
+def _fetch_project(project_id: str) -> dict | None:
+    rows = _supabase_rest("get", "projects", params=f"id=eq.{project_id}")
+    return rows[0] if rows else None
+
+
+@app.get("/workflow/schedule/{project_id}")
+def workflow_schedule(
+    project_id: str,
+    _auth: None = Depends(require_api_key),
+):
+    """Return this week's Week 1-4 task list for the project."""
+    from app.agents.workflow_agent import WorkflowAgent
+
+    project = _fetch_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return WorkflowAgent().schedule_for(project)
+
+
+@app.post("/workflow/run/{project_id}")
+def workflow_run(
+    project_id: str,
+    body: WorkflowRunRequest | None = None,
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """Execute this week's workflow tasks for the project."""
+    from app.agents.workflow_agent import WorkflowAgent
+
+    project = _fetch_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    agent = WorkflowAgent()
+    run = agent.run(project, only=(body.only if body else None))
+
+    # Persist to workflow_runs (best-effort — don't fail the request if
+    # the table/column isn't there yet; surface a warning header instead).
+    try:
+        _supabase_rest(
+            "post", "workflow_runs",
+            {
+                "project_id": project_id,
+                "week": run.week,
+                "week_label": run.week_label,
+                "started_at": run.started_at,
+                "finished_at": run.finished_at,
+                "completed": run.completed,
+                "skipped": run.skipped,
+                "failed": run.failed,
+                "tasks": [_serialize_task_result(t) for t in run.tasks],
+                "triggered_by": (body.triggered_by if body else "manual"),
+            },
+        )
+    except Exception as exc:
+        logger.warning("Could not persist workflow_run: %s", exc)
+
+    return _serialize_workflow_run(run)
+
+
+@app.get("/workflow/runs/{project_id}")
+def workflow_runs(
+    project_id: str,
+    limit: int = 20,
+    _auth: None = Depends(require_api_key),
+):
+    """Most-recent workflow runs for the project."""
+    try:
+        rows = _supabase_rest(
+            "get", "workflow_runs",
+            params=f"project_id=eq.{project_id}&order=started_at.desc&limit={max(1, min(limit, 100))}",
+        ) or []
+    except Exception as exc:
+        logger.warning("workflow_runs fetch failed: %s", exc)
+        rows = []
+    return {"runs": rows}
+
+
 # ── Projects CRUD ──────────────────────────────────────────────────
 
 from app.schemas.project import (
