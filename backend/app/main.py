@@ -894,6 +894,216 @@ def content_score(
     return _serialize_score(score)
 
 
+# ── Link-building ──────────────────────────────────────────────────
+
+class BacklinkProfileRequest(BaseModel):
+    domain: str = Field(..., min_length=3, max_length=200)
+    anchors_limit: int = Field(20, ge=1, le=100)
+    referring_limit: int = Field(20, ge=1, le=100)
+
+
+class OutreachDraftRequest(BaseModel):
+    prospect: dict
+    campaign: dict | None = None
+    template: str = Field("intro", pattern="^(intro|broken_link|guest_post|resource_page)$")
+
+
+class LinkProspectCreate(BaseModel):
+    project_id: str
+    domain: str = Field(..., min_length=1, max_length=200)
+    url: str = ""
+    contact_name: str = ""
+    contact_email: str = ""
+    domain_rating: float | None = None
+    referring_domains: int | None = None
+    status: str = Field("new", pattern="^(new|researching|contacted|replied|agreed|placed|declined)$")
+    template: str = ""
+    subject: str = ""
+    notes: str = ""
+    already_linking: bool = False
+
+
+class LinkProspectUpdate(BaseModel):
+    domain: str | None = None
+    url: str | None = None
+    contact_name: str | None = None
+    contact_email: str | None = None
+    domain_rating: float | None = None
+    referring_domains: int | None = None
+    status: str | None = Field(None, pattern="^(new|researching|contacted|replied|agreed|placed|declined)$")
+    template: str | None = None
+    subject: str | None = None
+    notes: str | None = None
+    already_linking: bool | None = None
+    outreach_sent_at: str | None = None
+    response_at: str | None = None
+    placed_at: str | None = None
+
+
+def _build_link_agent():
+    from app.agents.link_agent import LinkAgent
+    from app.clients.dataforseo_client import DataForSEOClient
+    dfs = None
+    if settings.dataforseo_login and settings.dataforseo_password:
+        dfs = DataForSEOClient(
+            login=settings.dataforseo_login,
+            password=settings.dataforseo_password,
+        )
+    return LinkAgent(dataforseo_client=dfs, claude_client=_get_claude_client())
+
+
+def _serialize_backlink_report(r) -> dict:
+    return {
+        "domain": r.domain,
+        "total_backlinks": r.total_backlinks,
+        "referring_domains": r.referring_domains,
+        "domain_rank": r.domain_rank,
+        "dofollow_ratio": r.dofollow_ratio,
+        "top_anchors": r.top_anchors,
+        "top_referring": r.top_referring,
+        "warnings": r.warnings,
+    }
+
+
+@app.post("/links/backlinks")
+def link_backlinks(
+    body: BacklinkProfileRequest,
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """Fetch a domain's backlink profile via DataForSEO."""
+    agent = _build_link_agent()
+    report = agent.backlink_profile(
+        domain=body.domain,
+        anchors_limit=body.anchors_limit,
+        referring_limit=body.referring_limit,
+    )
+    return _serialize_backlink_report(report)
+
+
+@app.post("/links/outreach/draft")
+def link_outreach_draft(
+    body: OutreachDraftRequest,
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """Draft an outreach email for a given prospect + campaign."""
+    agent = _build_link_agent()
+    email = agent.draft_outreach_email(
+        prospect=body.prospect,
+        campaign=body.campaign,
+        template=body.template,
+    )
+    return {
+        "subject": email.subject,
+        "body": email.body,
+        "template": email.template,
+        "model_used": email.model_used,
+        "cost_usd": email.cost_usd,
+        "fallback": email.fallback,
+    }
+
+
+@app.get("/projects/{project_id}/link-prospects")
+def list_link_prospects(
+    project_id: str,
+    status: str = "",
+    _auth: None = Depends(require_api_key),
+):
+    params = f"project_id=eq.{project_id}&order=created_at.desc&limit=200"
+    if status:
+        params = f"project_id=eq.{project_id}&status=eq.{status}&order=created_at.desc&limit=200"
+    return _supabase_rest("get", "link_prospects", params=params)
+
+
+@app.post("/projects/{project_id}/link-prospects")
+def create_link_prospect(
+    project_id: str,
+    body: LinkProspectCreate,
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    from app.agents.link_agent import LinkAgent
+    score = LinkAgent.score_prospect({
+        "domain_rating": body.domain_rating,
+        "referring_domains": body.referring_domains,
+        "contact_email": body.contact_email,
+        "already_linking": body.already_linking,
+    })
+    payload = body.model_dump()
+    payload["project_id"] = project_id
+    payload["opportunity_score"] = score
+    data = _supabase_rest("post", "link_prospects", payload)
+    return data[0] if isinstance(data, list) else data
+
+
+@app.patch("/link-prospects/{prospect_id}")
+def update_link_prospect(
+    prospect_id: str,
+    body: LinkProspectUpdate,
+    _auth: None = Depends(require_api_key),
+):
+    updates = {k: v for k, v in body.model_dump().items() if v is not None}
+    if not updates:
+        raise HTTPException(status_code=400, detail="No fields to update.")
+    updates["updated_at"] = "now()"
+    data = _supabase_rest("patch", f"link_prospects?id=eq.{prospect_id}", updates)
+    if not data:
+        raise HTTPException(status_code=404, detail="Link prospect not found")
+    return data[0]
+
+
+@app.delete("/link-prospects/{prospect_id}")
+def delete_link_prospect(
+    prospect_id: str,
+    _auth: None = Depends(require_api_key),
+):
+    _supabase_rest("delete", f"link_prospects?id=eq.{prospect_id}")
+    return {"deleted": True}
+
+
+@app.post("/link-prospects/{prospect_id}/draft-email")
+def draft_prospect_email(
+    prospect_id: str,
+    body: OutreachDraftRequest,
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """Generate an email draft for a persisted prospect and save subject+template."""
+    rows = _supabase_rest("get", "link_prospects", params=f"id=eq.{prospect_id}")
+    if not rows:
+        raise HTTPException(status_code=404, detail="Link prospect not found")
+    prospect_row = rows[0]
+
+    merged_prospect = {
+        "domain": prospect_row.get("domain"),
+        "url": prospect_row.get("url"),
+        "contact_name": prospect_row.get("contact_name"),
+        "contact_email": prospect_row.get("contact_email"),
+        "domain_rating": prospect_row.get("domain_rating"),
+        "notes": prospect_row.get("notes"),
+        **(body.prospect or {}),
+    }
+    agent = _build_link_agent()
+    email = agent.draft_outreach_email(
+        prospect=merged_prospect,
+        campaign=body.campaign,
+        template=body.template,
+    )
+    _supabase_rest(
+        "patch", f"link_prospects?id=eq.{prospect_id}",
+        {"subject": email.subject, "template": email.template, "updated_at": "now()"},
+    )
+    return {
+        "subject": email.subject,
+        "body": email.body,
+        "template": email.template,
+        "model_used": email.model_used,
+        "cost_usd": email.cost_usd,
+        "fallback": email.fallback,
+    }
+
+
 # ── Projects CRUD ──────────────────────────────────────────────────
 
 from app.schemas.project import (

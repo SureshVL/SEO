@@ -574,3 +574,161 @@ export async function attributionReport(
     apiKey,
   );
 }
+
+// ── Link building ────────────────────────────────────────────────
+
+export interface BacklinkAnchor {
+  anchor: string;
+  backlinks: number;
+  referring_domains: number;
+  dofollow: boolean;
+}
+
+export interface BacklinkReferrer {
+  domain: string;
+  rank: number;
+  backlinks: number;
+  dofollow: boolean;
+  first_seen?: string | null;
+}
+
+export interface BacklinkProfile {
+  domain: string;
+  total_backlinks: number;
+  referring_domains: number;
+  domain_rank: number;
+  dofollow_ratio: number;
+  top_anchors: BacklinkAnchor[];
+  top_referring: BacklinkReferrer[];
+  warnings: string[];
+}
+
+export type LinkProspectStatus =
+  | "new"
+  | "researching"
+  | "contacted"
+  | "replied"
+  | "agreed"
+  | "placed"
+  | "declined";
+
+export interface LinkProspect {
+  id: string;
+  project_id: string;
+  domain: string;
+  url: string | null;
+  contact_name: string | null;
+  contact_email: string | null;
+  domain_rating: number | null;
+  referring_domains: number | null;
+  status: LinkProspectStatus;
+  template: string | null;
+  subject: string | null;
+  notes: string | null;
+  opportunity_score: number | null;
+  already_linking: boolean;
+  outreach_sent_at: string | null;
+  response_at: string | null;
+  placed_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface OutreachEmailDraft {
+  subject: string;
+  body: string;
+  template: string;
+  model_used?: string;
+  cost_usd?: number;
+  fallback?: boolean;
+}
+
+export async function fetchBacklinkProfile(
+  payload: { domain: string; anchors_limit?: number; referring_limit?: number },
+  apiKey: string,
+) {
+  return request<BacklinkProfile>(
+    "/links/backlinks",
+    { method: "POST", body: JSON.stringify(payload) },
+    apiKey,
+  );
+}
+
+export async function draftOutreachEmail(
+  payload: {
+    prospect: Record<string, unknown>;
+    campaign?: Record<string, unknown>;
+    template?: "intro" | "broken_link" | "guest_post" | "resource_page";
+  },
+  apiKey: string,
+) {
+  return request<OutreachEmailDraft>(
+    "/links/outreach/draft",
+    { method: "POST", body: JSON.stringify(payload) },
+    apiKey,
+  );
+}
+
+export async function listLinkProspects(
+  projectId: string,
+  apiKey: string,
+  status?: LinkProspectStatus,
+) {
+  const qs = status ? `?status=${status}` : "";
+  return request<LinkProspect[]>(
+    `/projects/${projectId}/link-prospects${qs}`,
+    { method: "GET" },
+    apiKey,
+  );
+}
+
+export async function createLinkProspect(
+  projectId: string,
+  payload: Partial<LinkProspect> & { domain: string },
+  apiKey: string,
+) {
+  return request<LinkProspect>(
+    `/projects/${projectId}/link-prospects`,
+    {
+      method: "POST",
+      body: JSON.stringify({ project_id: projectId, ...payload }),
+    },
+    apiKey,
+  );
+}
+
+export async function updateLinkProspect(
+  prospectId: string,
+  payload: Partial<LinkProspect>,
+  apiKey: string,
+) {
+  return request<LinkProspect>(
+    `/link-prospects/${prospectId}`,
+    { method: "PATCH", body: JSON.stringify(payload) },
+    apiKey,
+  );
+}
+
+export async function deleteLinkProspect(prospectId: string, apiKey: string) {
+  return request<{ deleted: boolean }>(
+    `/link-prospects/${prospectId}`,
+    { method: "DELETE" },
+    apiKey,
+  );
+}
+
+export async function draftProspectEmail(
+  prospectId: string,
+  payload: {
+    prospect?: Record<string, unknown>;
+    campaign?: Record<string, unknown>;
+    template?: "intro" | "broken_link" | "guest_post" | "resource_page";
+  },
+  apiKey: string,
+) {
+  return request<OutreachEmailDraft>(
+    `/link-prospects/${prospectId}/draft-email`,
+    { method: "POST", body: JSON.stringify({ prospect: {}, ...payload }) },
+    apiKey,
+  );
+}
