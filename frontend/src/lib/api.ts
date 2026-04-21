@@ -233,6 +233,49 @@ export async function projectAiVisibility(
   );
 }
 
+// ── Schema markup ──
+export interface SchemaDetectionResult {
+  url: string;
+  blocks_found: number;
+  detected_types: string[];
+  detected: Array<{ type: string; name: string | null; raw: Record<string, any> }>;
+  missing_recommended: string[];
+  generated: Array<Record<string, any>>;
+  parse_errors: string[];
+}
+
+export async function detectSchema(
+  payload: {
+    url: string;
+    html?: string;
+    business_type?: string;
+    business_name?: string;
+  },
+  apiKey: string,
+): Promise<SchemaDetectionResult> {
+  return request<SchemaDetectionResult>(
+    "/schema/detect",
+    { method: "POST", body: JSON.stringify(payload) },
+    apiKey,
+  );
+}
+
+export async function generateSchema(
+  payload: {
+    schema_types: string[];
+    url?: string;
+    business_name?: string;
+    city?: string;
+  },
+  apiKey: string,
+): Promise<{ generated: Array<{ type: string; jsonld: Record<string, any> }>; unsupported: string[] }> {
+  return request(
+    "/schema/generate",
+    { method: "POST", body: JSON.stringify(payload) },
+    apiKey,
+  );
+}
+
 // ── SSE stream for job logs ──
 export function streamJobLogs(
   jobId: string,

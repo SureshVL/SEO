@@ -15,6 +15,7 @@ from app.agents.aso_agent import AsoAgent
 from app.agents.content_agent import ContentAgent
 from app.agents.deploy_agent import DeployAgent
 from app.agents.research_agent import AlgorithmicReverseEngineerAgent
+from app.agents.schema_agent import SchemaAgent
 from app.agents.technical_agent import TechnicalAgent
 from app.agents.workflow import SEOAutonomousLoop
 from app.api.rate_limit import enforce_rate_limit
@@ -660,6 +661,84 @@ def project_ai_visibility(
         include_ai_mode=include_ai_mode,
     )
     return _serialize_ai_visibility(report)
+
+
+# ── Schema markup detection & generation ──────────────────────────
+
+class SchemaDetectRequest(BaseModel):
+    url: str
+    html: str | None = None  # optional pre-fetched HTML
+    business_type: str = "default"
+    business_name: str = ""
+
+
+class SchemaGenerateRequest(BaseModel):
+    schema_types: list[str] = Field(..., min_length=1, max_length=20)
+    url: str = ""
+    business_name: str = ""
+    city: str = ""
+
+
+def _build_schema_agent() -> SchemaAgent:
+    firecrawl = None
+    if settings.firecrawl_api_key:
+        firecrawl = FirecrawlHTTPClient(api_key=settings.firecrawl_api_key)
+    return SchemaAgent(firecrawl_client=firecrawl)
+
+
+def _serialize_schema_detection(result) -> dict:
+    return {
+        "url": result.url,
+        "blocks_found": result.blocks_found,
+        "detected_types": result.detected_types,
+        "detected": [
+            {"type": d.type, "name": d.name, "raw": d.raw} for d in result.detected
+        ],
+        "missing_recommended": result.missing_recommended,
+        "generated": result.generated,
+        "parse_errors": result.parse_errors,
+    }
+
+
+@app.post("/schema/detect")
+def schema_detect(
+    body: SchemaDetectRequest,
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """Detect JSON-LD schema on a URL and return gap-analysis + stubs."""
+    agent = _build_schema_agent()
+    result = agent.detect(
+        url=body.url,
+        html=body.html or "",
+        business_type=body.business_type,
+        business_name=body.business_name,
+    )
+    return _serialize_schema_detection(result)
+
+
+@app.post("/schema/generate")
+def schema_generate(
+    body: SchemaGenerateRequest,
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """Generate JSON-LD stubs for a list of schema types."""
+    agent = _build_schema_agent()
+    context = {
+        "url": body.url,
+        "business_name": body.business_name,
+        "city": body.city,
+    }
+    out = []
+    unknown: list[str] = []
+    for t in body.schema_types:
+        stub = agent.generate(t, context)
+        if stub:
+            out.append({"type": t, "jsonld": stub})
+        else:
+            unknown.append(t)
+    return {"generated": out, "unsupported": unknown}
 
 
 # ── Projects CRUD ──────────────────────────────────────────────────

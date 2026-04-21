@@ -74,3 +74,10 @@ class FirecrawlHTTPClient(_BaseHTTPClient):
         payload = {"url": url, "formats": ["markdown"]}
         data = self._post_with_retry(self.base_url, headers, payload, self.timeout, fallback_url=self.fallback_url)
         return data.get("data", {}).get("markdown", "")
+
+    def scrape_html(self, url: str) -> str:
+        headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
+        payload = {"url": url, "formats": ["html"]}
+        data = self._post_with_retry(self.base_url, headers, payload, self.timeout, fallback_url=self.fallback_url)
+        inner = data.get("data", {})
+        return inner.get("html") or inner.get("rawHtml") or ""
