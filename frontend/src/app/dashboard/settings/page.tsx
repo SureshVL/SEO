@@ -50,13 +50,14 @@ function useOAuthCallback() {
     setExchanging(true);
     exchangeCode(code, service, projectId, apiKey)
       .then((data) => {
+        const token = data.access_token || "";
         if (service === "ga4") {
           const firstProp = data.properties?.[0]?.property_id || "";
-          setGa4Connected(true, firstProp);
+          setGa4Connected(true, firstProp, token);
           toast.success(`Google Analytics 4 connected${data.email ? " · " + data.email : ""}`);
         } else {
           const firstSite = data.properties?.[0]?.site_url || "";
-          setGscConnected(true, firstSite);
+          setGscConnected(true, firstSite, token);
           toast.success(`Search Console connected${data.email ? " · " + data.email : ""}`);
         }
         // Clean URL

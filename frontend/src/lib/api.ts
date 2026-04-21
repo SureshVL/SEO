@@ -508,3 +508,69 @@ export async function scoreContent(
     apiKey,
   );
 }
+
+// ── Revenue attribution (GA4 + GSC merged) ──
+export interface AttributionPage {
+  page_path: string;
+  sessions: number;
+  organic_sessions: number;
+  revenue: number;
+  organic_revenue: number;
+  conversions: number;
+  gsc_clicks: number;
+  gsc_impressions: number;
+  avg_position: number;
+  top_queries: { query: string; clicks: number; impressions: number; position: number }[];
+}
+
+export interface AttributionQuery {
+  query: string;
+  clicks: number;
+  impressions: number;
+  ctr: number;
+  position: number;
+  landing_pages: string[];
+  attributed_revenue: number;
+}
+
+export interface AttributionReport {
+  date_range_days: number;
+  ga4_property_id: string;
+  gsc_site_url: string;
+  ga4: {
+    total_sessions: number;
+    organic_sessions: number;
+    organic_share_pct: number;
+    total_revenue: number;
+    organic_revenue: number;
+    organic_revenue_share_pct: number;
+    total_conversions: number;
+    organic_conversions: number;
+  };
+  gsc: {
+    total_clicks: number;
+    total_impressions: number;
+    avg_position: number;
+  };
+  top_pages: AttributionPage[];
+  top_queries: AttributionQuery[];
+  warnings: string[];
+}
+
+export async function attributionReport(
+  payload: {
+    ga4_access_token: string;
+    ga4_property_id: string;
+    gsc_access_token: string;
+    gsc_site_url: string;
+    date_range_days?: number;
+    top_n?: number;
+  },
+  apiKey: string,
+) {
+  return request<AttributionReport>(
+    "/analytics/attribution",
+    { method: "POST", body: JSON.stringify(payload) },
+    apiKey,
+  );
+}
