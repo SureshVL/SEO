@@ -780,3 +780,51 @@ export function brandingPreviewUrl(projectId: string) {
   const base = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
   return `${base}/projects/${projectId}/branding/preview`;
 }
+
+// ── Programmatic SEO ─────────────────────────────────────────────
+
+export interface ProgrammaticTemplate {
+  name?: string;
+  slug_template: string;
+  title_template: string;
+  meta_description_template: string;
+  h1_template?: string;
+  body_template: string;
+}
+
+export interface ProgrammaticPage {
+  slug: string;
+  title: string;
+  meta_description: string;
+  h1: string;
+  body_markdown: string;
+  variables: Record<string, unknown>;
+  warnings: string[];
+}
+
+export interface ProgrammaticResult {
+  template_name: string;
+  total_rows: number;
+  generated: number;
+  skipped: number;
+  variables_used: string[];
+  warnings: string[];
+  pages: ProgrammaticPage[];
+}
+
+export async function generateProgrammaticPages(
+  payload: {
+    template: ProgrammaticTemplate;
+    rows?: Record<string, unknown>[];
+    csv?: string;
+    dedupe_on?: string;
+    max_pages?: number;
+  },
+  apiKey: string,
+) {
+  return request<ProgrammaticResult>(
+    "/programmatic/generate",
+    { method: "POST", body: JSON.stringify(payload) },
+    apiKey,
+  );
+}

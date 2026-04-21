@@ -1207,6 +1207,73 @@ def preview_branded_report(
     return HTMLResponse(content=report["html"])
 
 
+# ── Programmatic SEO ──────────────────────────────────────────────
+
+class ProgrammaticTemplate(BaseModel):
+    name: str | None = None
+    slug_template: str = "/{{slug}}"
+    title_template: str = "{{title}}"
+    meta_description_template: str = ""
+    h1_template: str | None = None
+    body_template: str = ""
+
+
+class ProgrammaticGenerateRequest(BaseModel):
+    template: ProgrammaticTemplate
+    rows: list[dict] | None = None
+    csv: str | None = None
+    dedupe_on: str = "slug"
+    max_pages: int = Field(500, ge=1, le=5000)
+
+
+def _serialize_programmatic_page(page) -> dict:
+    return {
+        "slug": page.slug,
+        "title": page.title,
+        "meta_description": page.meta_description,
+        "h1": page.h1,
+        "body_markdown": page.body_markdown,
+        "variables": page.variables,
+        "warnings": page.warnings,
+    }
+
+
+@app.post("/programmatic/generate")
+def generate_programmatic_pages(
+    body: ProgrammaticGenerateRequest,
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """Generate bulk SEO pages from a template + CSV/JSON dataset."""
+    from app.agents.programmatic_agent import ProgrammaticAgent
+
+    agent = ProgrammaticAgent()
+    rows = body.rows
+    if not rows and body.csv:
+        rows = agent.parse_csv(body.csv)
+    rows = rows or []
+
+    template_dict = body.template.model_dump()
+    if not template_dict.get("h1_template"):
+        template_dict["h1_template"] = template_dict["title_template"]
+
+    result = agent.generate(
+        template_dict,
+        rows,
+        dedupe_on=body.dedupe_on,
+        max_pages=body.max_pages,
+    )
+    return {
+        "template_name": result.template_name,
+        "total_rows": result.total_rows,
+        "generated": result.generated,
+        "skipped": result.skipped,
+        "variables_used": result.variables_used,
+        "warnings": result.warnings,
+        "pages": [_serialize_programmatic_page(p) for p in result.pages],
+    }
+
+
 # ── Projects CRUD ──────────────────────────────────────────────────
 
 from app.schemas.project import (
