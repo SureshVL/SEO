@@ -420,14 +420,58 @@ def keyword_research(
 
 # ── Technical Audit (NEW) ──────────────────────────────────────────
 
+def _build_technical_agent() -> TechnicalAgent:
+    claude = _get_claude_client()
+    dfs = None
+    if settings.dataforseo_login and settings.dataforseo_password:
+        from app.clients.dataforseo_client import DataForSEOClient
+        dfs = DataForSEOClient(
+            login=settings.dataforseo_login,
+            password=settings.dataforseo_password,
+        )
+    return TechnicalAgent(
+        claude_client=claude,
+        pagespeed_api_key=settings.pagespeed_api_key,
+        dataforseo_client=dfs,
+    )
+
+
+def _serialize_crawl(result) -> dict:
+    """Serialize SiteCrawlResult to JSON-safe dict for API responses."""
+    return {
+        "domain": result.domain,
+        "task_id": result.task_id,
+        "status": result.status,
+        "error": result.error,
+        "pages_crawled": result.pages_crawled,
+        "pages_in_queue": result.pages_in_queue,
+        "max_crawl_pages": result.max_crawl_pages,
+        "onpage_score": result.onpage_score,
+        "issues_by_check": result.issues_by_check,
+        "actions": [
+            {
+                "category": a.category,
+                "action": a.action,
+                "impact": a.impact,
+                "details": a.details,
+                "auto_fixable": a.auto_fixable,
+            }
+            for a in result.actions
+        ],
+        "sample_pages": result.sample_pages,
+        "duplicate_titles": result.duplicate_titles,
+        "duplicate_descriptions": result.duplicate_descriptions,
+        "broken_links": result.broken_links,
+    }
+
+
 @app.post("/audit/technical")
 def technical_audit(
     url: str,
     _auth: None = Depends(require_api_key),
     _rate: None = Depends(enforce_rate_limit),
 ):
-    claude = _get_claude_client()
-    agent = TechnicalAgent(claude_client=claude, pagespeed_api_key=settings.pagespeed_api_key)
+    agent = _build_technical_agent()
     result = agent.full_audit(url)
     return {
         "url": result.url,
@@ -441,6 +485,57 @@ def technical_audit(
         "actions": result.execution_queue,
         "issues_count": len(result.actions),
     }
+
+
+@app.post("/audit/crawl")
+def start_crawl_audit(
+    domain: str,
+    max_pages: int = 100,
+    wait: bool = False,
+    max_wait_seconds: int = 120,
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """Start a full-site crawl using DataForSEO On-Page.
+
+    - wait=False (default): returns task_id immediately; poll GET /audit/crawl/{task_id}.
+    - wait=True: blocks until crawl finishes or max_wait_seconds elapses.
+    """
+    if not settings.dataforseo_login or not settings.dataforseo_password:
+        raise HTTPException(
+            status_code=400,
+            detail="DATAFORSEO_LOGIN and DATAFORSEO_PASSWORD required for full-site crawl.",
+        )
+    if max_pages < 1 or max_pages > 1000:
+        raise HTTPException(status_code=400, detail="max_pages must be between 1 and 1000.")
+
+    agent = _build_technical_agent()
+    clean_domain = domain.replace("https://", "").replace("http://", "").rstrip("/")
+    if wait:
+        result = agent.run_site_crawl(
+            clean_domain, max_pages=max_pages, max_wait_seconds=max_wait_seconds
+        )
+    else:
+        result = agent.start_site_crawl(clean_domain, max_pages=max_pages)
+    return _serialize_crawl(result)
+
+
+@app.get("/audit/crawl/{task_id}")
+def get_crawl_audit(
+    task_id: str,
+    domain: str = "",
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """Poll a running crawl task; returns results when status == 'finished'."""
+    if not settings.dataforseo_login or not settings.dataforseo_password:
+        raise HTTPException(
+            status_code=400,
+            detail="DATAFORSEO_LOGIN and DATAFORSEO_PASSWORD required.",
+        )
+    agent = _build_technical_agent()
+    result = agent.fetch_site_crawl(task_id, domain=domain, include_samples=True)
+    return _serialize_crawl(result)
 
 
 # ── Projects CRUD ──────────────────────────────────────────────────

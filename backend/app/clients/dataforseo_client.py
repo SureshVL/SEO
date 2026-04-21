@@ -405,6 +405,42 @@ class DataForSEOClient:
 
     # ── On-Page API ───────────────────────────────────────────────
 
+    ONPAGE_CHECK_KEYS = (
+        "duplicate_title",
+        "duplicate_description",
+        "duplicate_content",
+        "no_title",
+        "no_description",
+        "no_h1_tag",
+        "no_image_alt",
+        "no_image_title",
+        "no_favicon",
+        "no_canonical",
+        "no_doctype",
+        "no_encoding_meta_tag",
+        "high_loading_time",
+        "high_waiting_time",
+        "is_4xx_code",
+        "is_5xx_code",
+        "is_broken",
+        "is_redirect",
+        "low_content_rate",
+        "large_page_size",
+        "frame",
+        "lorem_ipsum",
+        "seo_friendly_url_characters_check",
+        "has_render_blocking_resources",
+        "redirect_chain",
+        "canonical_to_redirect",
+        "canonical_to_broken",
+        "has_links_to_redirects",
+        "has_links_to_broken_resources",
+        "deprecated_html_tags",
+        "www_redirect",
+        "irrelevant_title",
+        "irrelevant_description",
+    )
+
     def onpage_audit(self, domain: str, max_pages: int = 100) -> str:
         """Start an on-page audit task. Returns task_id."""
         payload = [{
@@ -414,6 +450,7 @@ class DataForSEOClient:
             "enable_javascript": True,
             "enable_browser_rendering": True,
             "check_spell": True,
+            "calculate_keyword_density": True,
         }]
         data = self._post("on_page/task_post", payload)
 
@@ -421,27 +458,159 @@ class DataForSEOClient:
             return task.get("id", "")
         return ""
 
+    def onpage_tasks_ready(self) -> list[dict]:
+        """List on-page tasks that have finished crawling."""
+        url = f"{BASE_URL}/on_page/tasks_ready"
+        try:
+            with httpx.Client(timeout=30) as client:
+                resp = client.get(url, auth=self._auth())
+                data = resp.json()
+                ready: list[dict] = []
+                for task in data.get("tasks", []) or []:
+                    for item in task.get("result", []) or []:
+                        ready.append(item)
+                return ready
+        except httpx.HTTPError as exc:
+            logger.warning("onpage_tasks_ready failed: %s", exc)
+            return []
+
     def onpage_summary(self, task_id: str) -> dict:
         """Get on-page audit summary results."""
-        payload = [{"id": task_id}]
-        data = self._post("on_page/summary", payload)
+        url = f"{BASE_URL}/on_page/summary/{task_id}"
+        with httpx.Client(timeout=60) as client:
+            resp = client.get(url, auth=self._auth())
+            data = resp.json()
 
-        for task in data.get("tasks", []):
-            for result in task.get("result", []):
+        if data.get("status_code") == 20000:
+            self._request_count += 1
+            self.total_cost += data.get("cost", 0) or 0
+
+        for task in data.get("tasks", []) or []:
+            for result in task.get("result", []) or []:
+                page_metrics = result.get("page_metrics", {}) or {}
+                checks = page_metrics.get("checks", {}) or {}
+                crawl_progress = result.get("crawl_progress", "finished")
+                pages_crawled = result.get("crawl_progress", {}).get("pages_crawled") if isinstance(result.get("crawl_progress"), dict) else None
                 return {
-                    "pages_crawled": result.get("crawl_progress", {}).get("pages_crawled", 0),
-                    "pages_with_errors": result.get("crawl_status", {}).get("pages_with_errors", 0),
-                    "duplicate_titles": result.get("page_metrics", {}).get("checks", {}).get("duplicate_title", 0),
-                    "duplicate_descriptions": result.get("page_metrics", {}).get("checks", {}).get("duplicate_description", 0),
-                    "broken_links": result.get("page_metrics", {}).get("checks", {}).get("is_broken", 0),
-                    "no_h1": result.get("page_metrics", {}).get("checks", {}).get("no_h1_tag", 0),
-                    "low_content": result.get("page_metrics", {}).get("checks", {}).get("low_content_rate", 0),
-                    "no_image_alt": result.get("page_metrics", {}).get("checks", {}).get("no_image_alt", 0),
-                    "slow_pages": result.get("page_metrics", {}).get("checks", {}).get("high_loading_time", 0),
-                    "no_canonical": result.get("page_metrics", {}).get("checks", {}).get("no_canonical_tag", 0),
+                    "crawl_status": crawl_progress if isinstance(crawl_progress, str) else "in_progress",
+                    "pages_crawled": result.get("pages_crawled") or pages_crawled or 0,
+                    "pages_in_queue": result.get("crawl_progress", {}).get("pages_in_queue") if isinstance(result.get("crawl_progress"), dict) else 0,
+                    "max_crawl_pages": result.get("crawl_progress", {}).get("max_crawl_pages") if isinstance(result.get("crawl_progress"), dict) else None,
+                    "domain_info": result.get("domain_info", {}) or {},
+                    "page_metrics": {
+                        "onpage_score": page_metrics.get("onpage_score"),
+                        "links_external": page_metrics.get("links_external"),
+                        "links_internal": page_metrics.get("links_internal"),
+                        "duplicate_title": checks.get("duplicate_title", 0),
+                        "duplicate_description": checks.get("duplicate_description", 0),
+                        "duplicate_content": checks.get("duplicate_content", 0),
+                        "broken_links": checks.get("is_broken", 0),
+                        "no_h1": checks.get("no_h1_tag", 0),
+                        "no_title": checks.get("no_title", 0),
+                        "no_description": checks.get("no_description", 0),
+                        "no_image_alt": checks.get("no_image_alt", 0),
+                        "no_canonical": checks.get("no_canonical", 0),
+                        "low_content": checks.get("low_content_rate", 0),
+                        "slow_pages": checks.get("high_loading_time", 0),
+                        "redirect_chain": checks.get("redirect_chain", 0),
+                        "is_4xx": checks.get("is_4xx_code", 0),
+                        "is_5xx": checks.get("is_5xx_code", 0),
+                        "render_blocking": checks.get("has_render_blocking_resources", 0),
+                        "links_to_broken": checks.get("has_links_to_broken_resources", 0),
+                        "links_to_redirects": checks.get("has_links_to_redirects", 0),
+                    },
+                    "checks": {k: checks.get(k, 0) for k in self.ONPAGE_CHECK_KEYS},
                     "raw_summary": result,
                 }
         return {}
+
+    def onpage_pages(self, task_id: str, limit: int = 50, offset: int = 0) -> list[dict]:
+        """Return per-page crawl details, sorted by onpage_score ascending (worst first)."""
+        payload = [{
+            "id": task_id,
+            "limit": limit,
+            "offset": offset,
+            "order_by": ["meta.internal_links_count,desc"],
+        }]
+        data = self._post("on_page/pages", payload)
+
+        pages: list[dict] = []
+        for task in data.get("tasks", []) or []:
+            for result in task.get("result", []) or []:
+                for item in result.get("items", []) or []:
+                    meta = item.get("meta", {}) or {}
+                    checks = item.get("checks", {}) or {}
+                    pages.append({
+                        "url": item.get("url", ""),
+                        "status_code": item.get("status_code"),
+                        "onpage_score": item.get("onpage_score"),
+                        "page_timing": item.get("page_timing", {}) or {},
+                        "title": meta.get("title"),
+                        "description": meta.get("description"),
+                        "word_count": meta.get("content", {}).get("plain_text_word_count") if isinstance(meta.get("content"), dict) else None,
+                        "h1": meta.get("htags", {}).get("h1", []) if isinstance(meta.get("htags"), dict) else [],
+                        "internal_links": meta.get("internal_links_count"),
+                        "external_links": meta.get("external_links_count"),
+                        "images_count": meta.get("images_count"),
+                        "issues": [k for k, v in checks.items() if v],
+                    })
+        return pages
+
+    def onpage_duplicate_tags(self, task_id: str, tag: str = "title", limit: int = 50) -> list[dict]:
+        """Return groups of pages sharing duplicate title or description."""
+        if tag not in ("title", "description"):
+            raise ValueError("tag must be 'title' or 'description'")
+        payload = [{"id": task_id, "limit": limit}]
+        endpoint = f"on_page/duplicate_{tag}s"
+        data = self._post(endpoint, payload)
+
+        groups: list[dict] = []
+        for task in data.get("tasks", []) or []:
+            for result in task.get("result", []) or []:
+                for item in result.get("items", []) or []:
+                    groups.append({
+                        "value": item.get("title") or item.get("description"),
+                        "pages": [p.get("url", "") for p in (item.get("pages", []) or [])],
+                        "total_count": item.get("total_count"),
+                    })
+        return groups
+
+    def onpage_links(self, task_id: str, limit: int = 100, filters: list | None = None) -> list[dict]:
+        """Return link records, optionally filtered (e.g. broken)."""
+        body: dict = {"id": task_id, "limit": limit}
+        if filters:
+            body["filters"] = filters
+        data = self._post("on_page/links", [body])
+
+        links: list[dict] = []
+        for task in data.get("tasks", []) or []:
+            for result in task.get("result", []) or []:
+                for item in result.get("items", []) or []:
+                    links.append({
+                        "link_from": item.get("link_from"),
+                        "link_to": item.get("link_to"),
+                        "type": item.get("type"),
+                        "direction": item.get("direction"),
+                        "dofollow": item.get("dofollow"),
+                        "broken": item.get("is_broken"),
+                        "anchor": item.get("link_attribute") or item.get("text"),
+                    })
+        return links
+
+    def onpage_wait_for_ready(
+        self,
+        task_id: str,
+        max_wait_seconds: int = 180,
+        poll_interval: int = 5,
+    ) -> bool:
+        """Poll tasks_ready until task appears or timeout. Returns True if ready."""
+        deadline = time.time() + max_wait_seconds
+        while time.time() < deadline:
+            ready = self.onpage_tasks_ready()
+            if any(item.get("id") == task_id for item in ready):
+                return True
+            time.sleep(poll_interval)
+        return False
 
     # ── Utility ───────────────────────────────────────────────────
 

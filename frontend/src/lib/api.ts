@@ -98,6 +98,64 @@ export async function technicalAudit(url: string, apiKey: string) {
   return request(`/audit/technical?${qs}`, { method: "POST" }, apiKey);
 }
 
+// ── Full site crawl (DataForSEO on-page) ──
+export interface SiteCrawlResult {
+  domain: string;
+  task_id: string;
+  status: "pending" | "crawling" | "finished" | "failed";
+  error: string | null;
+  pages_crawled: number;
+  pages_in_queue: number;
+  max_crawl_pages: number | null;
+  onpage_score: number | null;
+  issues_by_check: Record<string, number>;
+  actions: Array<{
+    category: string;
+    action: string;
+    impact: "critical" | "high" | "medium" | "low";
+    details: string;
+    auto_fixable: boolean;
+  }>;
+  sample_pages: Array<{
+    url: string;
+    status_code: number | null;
+    onpage_score: number | null;
+    title: string | null;
+    description: string | null;
+    word_count: number | null;
+    h1: string[];
+    internal_links: number | null;
+    external_links: number | null;
+    issues: string[];
+  }>;
+  duplicate_titles: Array<{ value: string; pages: string[]; total_count: number | null }>;
+  duplicate_descriptions: Array<{ value: string; pages: string[]; total_count: number | null }>;
+  broken_links: Array<{
+    link_from: string | null;
+    link_to: string | null;
+    type: string | null;
+    anchor: string | null;
+  }>;
+}
+
+export async function startSiteCrawl(
+  domain: string,
+  maxPages: number,
+  apiKey: string,
+): Promise<SiteCrawlResult> {
+  const qs = new URLSearchParams({ domain, max_pages: String(maxPages) });
+  return request<SiteCrawlResult>(`/audit/crawl?${qs}`, { method: "POST" }, apiKey);
+}
+
+export async function getSiteCrawl(
+  taskId: string,
+  domain: string,
+  apiKey: string,
+): Promise<SiteCrawlResult> {
+  const qs = new URLSearchParams({ domain });
+  return request<SiteCrawlResult>(`/audit/crawl/${taskId}?${qs}`, {}, apiKey);
+}
+
 // ── ASO ──
 export async function runAso(payload: any, apiKey: string) {
   return request("/aso/run", { method: "POST", body: JSON.stringify(payload) }, apiKey);
