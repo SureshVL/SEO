@@ -25,7 +25,7 @@ export default function LandingPage() {
       <nav style={{ borderBottom: "1px solid rgba(200, 180, 150, 0.06)", background: "rgba(17, 15, 13, 0.9)", backdropFilter: "blur(12px)" }} className="sticky top-0 z-50">
         <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg flex items-center justify-center font-serif font-bold text-sm" style={{ background: "linear-gradient(135deg, #c87941, #8b5a2b)", color: "#faf8f5" }}>OR</div>
+            <div className="w-8 h-8 rounded-lg flex items-center justify-center font-serif font-bold text-sm" style={{ background: "linear-gradient(135deg, #8B5CF6, #EC4899)", color: "#ffffff" }}>OR</div>
             <span className="font-serif text-lg" style={{ color: "#e8e0d4" }}>Omni-Rank</span>
           </div>
           <div className="hidden md:flex items-center gap-8 text-sm font-sans" style={{ color: "rgba(200, 180, 150, 0.5)" }}>

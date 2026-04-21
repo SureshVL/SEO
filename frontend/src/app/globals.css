@@ -6,8 +6,9 @@
   :root {
     --bg-primary: #110f0d; --bg-secondary: rgba(44,39,35,0.6); --bg-card: rgba(44,39,35,0.5); --bg-hover: rgba(44,39,35,0.8);
     --text-primary: #e8e0d4; --text-secondary: rgba(200,180,150,0.6); --text-muted: rgba(200,180,150,0.35); --text-faint: rgba(200,180,150,0.2);
-    --border: rgba(200,180,150,0.08); --border-hover: rgba(200,121,65,0.2);
-    --copper: #c87941; --copper-light: #e09d6a; --copper-dark: #8b5a2b;
+    --border: rgba(200,180,150,0.08); --border-hover: rgba(139,92,246,0.35);
+    --copper: #8B5CF6; --copper-light: #A78BFA; --copper-dark: #6D28D9;
+    --accent: #EC4899; --accent-cyan: #22D3EE; --accent-lime: #A3E635; --accent-sun: #FACC15;
     --sage: #6b8f71; --sage-light: #8fb896;
     --success: #1D9E75; --warning: #BA7517; --error: #E24B4A; --info: #378ADD;
     color-scheme: dark;
@@ -15,8 +16,9 @@
   [data-theme="light"] {
     --bg-primary: #faf8f5; --bg-secondary: #f2ede6; --bg-card: #ffffff; --bg-hover: #e8dfd3;
     --text-primary: #2c2723; --text-secondary: #6b6560; --text-muted: #9a948e; --text-faint: #c4bdb5;
-    --border: rgba(44,39,35,0.1); --border-hover: rgba(200,121,65,0.25);
-    --copper: #b06830; --copper-light: #c87941; --copper-dark: #8b5a2b;
+    --border: rgba(44,39,35,0.1); --border-hover: rgba(139,92,246,0.35);
+    --copper: #7C3AED; --copper-light: #8B5CF6; --copper-dark: #5B21B6;
+    --accent: #DB2777; --accent-cyan: #0891B2; --accent-lime: #65A30D; --accent-sun: #CA8A04;
     --sage: #537a5a; --sage-light: #6b8f71;
     color-scheme: light;
   }
@@ -28,16 +30,16 @@
   .card { @apply rounded-2xl; background: var(--bg-card); border: 1px solid var(--border); backdrop-filter: blur(12px); transition: background 0.3s, border-color 0.3s; }
   .card-hover { @apply card; }
   .card-hover:hover { border-color: var(--border-hover); background: var(--bg-hover); transform: translateY(-1px); transition: all 0.3s; }
-  .btn-primary { background: linear-gradient(135deg, var(--copper), var(--copper-dark)); @apply text-white font-medium px-5 py-2.5 rounded-xl transition-all duration-200 disabled:opacity-50; box-shadow: 0 2px 12px rgba(200,121,65,0.2); }
-  .btn-primary:hover:not(:disabled) { box-shadow: 0 4px 20px rgba(200,121,65,0.35); transform: translateY(-1px); }
+  .btn-primary { background: linear-gradient(135deg, #8B5CF6, #EC4899); @apply text-white font-medium px-5 py-2.5 rounded-xl transition-all duration-200 disabled:opacity-50; box-shadow: 0 2px 12px rgba(139,92,246,0.3); }
+  .btn-primary:hover:not(:disabled) { box-shadow: 0 4px 20px rgba(236,72,153,0.45); transform: translateY(-1px); }
   .btn-secondary { @apply font-medium px-5 py-2.5 rounded-xl transition-all duration-200; background: var(--bg-secondary); border: 1px solid var(--border); color: var(--text-secondary); }
   .btn-secondary:hover { background: var(--bg-hover); }
   .input-field { @apply w-full rounded-xl px-4 py-3 transition-all duration-200; background: var(--bg-primary); border: 1px solid var(--border); color: var(--text-primary); }
   .input-field::placeholder { color: var(--text-muted); }
-  .input-field:focus { outline: none; border-color: var(--copper); box-shadow: 0 0 0 3px rgba(200,121,65,0.1); }
+  .input-field:focus { outline: none; border-color: var(--copper); box-shadow: 0 0 0 3px rgba(139,92,246,0.15); }
   .label { @apply block text-sm font-medium mb-1.5; color: var(--text-secondary); }
   .badge-success { @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium; background: rgba(29,158,117,0.12); color: var(--success); }
-  .badge-warning { @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium; background: rgba(200,121,65,0.12); color: var(--copper-light); }
+  .badge-warning { @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium; background: rgba(250,204,21,0.15); color: var(--accent-sun); }
   .badge-error { @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium; background: rgba(226,75,74,0.12); color: var(--error); }
   .metric-card { @apply card p-5; }
   .metric-label { @apply text-xs font-medium uppercase tracking-widest; color: var(--text-muted); letter-spacing: 0.1em; }

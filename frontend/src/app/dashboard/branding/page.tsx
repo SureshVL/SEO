@@ -14,9 +14,9 @@ import { toast } from "sonner";
 const EMPTY: BrandingConfig = {
   agency_name: "",
   logo_url: "",
-  primary_color: "#c87941",
-  secondary_color: "#8b5a2b",
-  accent_color: "#1D9E75",
+  primary_color: "#8B5CF6",
+  secondary_color: "#EC4899",
+  accent_color: "#22D3EE",
   text_color: "#2c2723",
   background_color: "#faf8f5",
   cover_title: "",
@@ -315,7 +315,7 @@ function ColorField({
           value={value}
           onChange={e => onChange(e.target.value)}
           className="input-field font-mono text-sm"
-          placeholder="#c87941"
+          placeholder="#8B5CF6"
         />
       </div>
     </label>
