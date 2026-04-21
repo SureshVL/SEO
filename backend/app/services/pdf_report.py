@@ -79,11 +79,15 @@ def generate_seo_report_html(
         else: bb, bc, bt = "#E6F1FB", "#378ADD", "MEDIUM"
         clean = r.replace("[CRITICAL] ", "").replace("[HIGH] ", "").replace("[MEDIUM] ", "")
         parts = clean.split(" -> ")
+        expected_html = (
+            f'<p style="margin:4px 0 0;font-size:12px;color:#888780;">Expected: {parts[1]}</p>'
+            if len(parts) > 1 else ""
+        )
         rec_html += (
             f'<div style="padding:16px;border:1px solid #e8e0d4;border-radius:8px;margin-bottom:8px;">'
             f'<span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:600;background:{bb};color:{bc};">{bt}</span>'
             f'<p style="margin:4px 0 0;font-size:13px;line-height:1.6;color:#2c2723;">{parts[0]}</p>'
-            f'{"<p style=\'margin:4px 0 0;font-size:12px;color:#888780;\'>Expected: " + parts[1] + "</p>" if len(parts) > 1 else ""}</div>'
+            f'{expected_html}</div>'
         )
 
     # ── Entity gap tags ───────────────────────────────────────────────────────

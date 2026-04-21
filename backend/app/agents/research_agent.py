@@ -388,4 +388,4 @@ Heading gaps: {', '.join(gap.heading_gaps[:5])}"""
         recs = []
         if client_p.word_count<aw: recs.append(f"Expand content by ~{int(aw-client_p.word_count)} words")
         if gap.missing_entities: recs.append("Add entities: "+", ".join(gap.missing_entities[:6]))
-        return ResearchResponse(seo_score=score, competitor_profiles=profiles, client_profile=client_p, gap_analysis=gap, recommendations=recs or ["Aligned"], raw_metrics={})
+        return ResearchResponse(seo_score=score, competitor_profiles=profiles, client_profile=client_p, gap_analysis=gap, recommendations=recs or ["Aligned"], raw_metrics={"ai_usage": {"total_input_tokens": self.usage.total_input_tokens, "total_output_tokens": self.usage.total_output_tokens, "total_cost_usd": self.usage.total_cost_usd}})
