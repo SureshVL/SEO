@@ -1104,6 +1104,109 @@ def draft_prospect_email(
     }
 
 
+# ── White-label branding ──────────────────────────────────────────
+
+class BrandingUpdate(BaseModel):
+    agency_name: str | None = None
+    logo_url: str | None = None
+    primary_color: str | None = None
+    secondary_color: str | None = None
+    accent_color: str | None = None
+    text_color: str | None = None
+    background_color: str | None = None
+    cover_title: str | None = None
+    cover_subtitle: str | None = None
+    footer_text: str | None = None
+    website: str | None = None
+    email: str | None = None
+    enabled: bool | None = None
+
+
+@app.get("/projects/{project_id}/branding")
+def get_project_branding(
+    project_id: str,
+    _auth: None = Depends(require_api_key),
+):
+    from app.services.branding import BrandingConfig
+    rows = _supabase_rest("get", "projects", params=f"id=eq.{project_id}&select=settings")
+    if not rows:
+        raise HTTPException(status_code=404, detail="Project not found")
+    branding_dict = (rows[0].get("settings") or {}).get("branding") or {}
+    cfg = BrandingConfig.from_dict(branding_dict)
+    return {
+        "branding": cfg.to_dict(),
+        "validation_warnings": cfg.validate(),
+    }
+
+
+@app.patch("/projects/{project_id}/branding")
+def update_project_branding(
+    project_id: str,
+    body: BrandingUpdate,
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    from app.services.branding import BrandingConfig
+    rows = _supabase_rest("get", "projects", params=f"id=eq.{project_id}&select=settings")
+    if not rows:
+        raise HTTPException(status_code=404, detail="Project not found")
+    settings_obj = rows[0].get("settings") or {}
+    existing = settings_obj.get("branding") or {}
+    updates = {k: v for k, v in body.model_dump().items() if v is not None}
+    merged = {**existing, **updates}
+    cfg = BrandingConfig.from_dict(merged)
+    warnings = cfg.validate()
+    if warnings:
+        raise HTTPException(status_code=400, detail={"validation_warnings": warnings})
+    settings_obj["branding"] = cfg.to_dict()
+    _supabase_rest(
+        "patch", f"projects?id=eq.{project_id}",
+        {"settings": settings_obj},
+    )
+    return {"branding": cfg.to_dict()}
+
+
+@app.post("/projects/{project_id}/branding/preview")
+def preview_branded_report(
+    project_id: str,
+    body: BrandingUpdate | None = None,
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """Render a small sample report HTML with the given branding for preview."""
+    from app.services.branding import BrandingConfig
+    from app.services.report_generator import ReportGenerator
+    rows = _supabase_rest("get", "projects", params=f"id=eq.{project_id}")
+    project = rows[0] if rows else {"name": "Preview", "domain": "example.com"}
+
+    if body:
+        overrides = {k: v for k, v in body.model_dump().items() if v is not None}
+        existing = (project.get("settings") or {}).get("branding") or {}
+        branding = BrandingConfig.from_dict({**existing, **overrides, "enabled": True})
+    else:
+        branding = BrandingConfig.from_dict(
+            (project.get("settings") or {}).get("branding") or {},
+        )
+        branding.enabled = True
+
+    gen = ReportGenerator()
+    sample_keywords = [
+        {"keyword": "seo software", "latest_position": 4, "previous_position": 7, "intent": "commercial"},
+        {"keyword": "rank tracker", "latest_position": 12, "previous_position": 15, "intent": "commercial"},
+        {"keyword": "content brief tool", "latest_position": 28, "previous_position": 31, "intent": "informational"},
+    ]
+    report = gen.generate_seo_report(
+        project=project,
+        keywords=sample_keywords,
+        rank_data=sample_keywords,
+        audit_data={"scores": {"performance": 82, "seo": 90, "accessibility": 88, "best_practices": 85}},
+        branding=branding,
+        white_label=True,
+    )
+    from fastapi.responses import HTMLResponse
+    return HTMLResponse(content=report["html"])
+
+
 # ── Projects CRUD ──────────────────────────────────────────────────
 
 from app.schemas.project import (
@@ -1641,6 +1744,16 @@ def get_job_report(job_id: str):
     if not keywords_with_ranks:
         keywords_with_ranks = [{"keyword": primary_kw, "current_rank": None}]
 
+    # Pull project branding if we have a project_id
+    branding = None
+    if project_id:
+        try:
+            proj_rows = _supabase_rest("get", "projects", params=f"id=eq.{project_id}&select=settings")
+            if proj_rows:
+                branding = (proj_rows[0].get("settings") or {}).get("branding")
+        except Exception:
+            branding = None
+
     html = generate_seo_report_html(
         client_url=client_url,
         keyword=primary_kw,
@@ -1653,6 +1766,7 @@ def get_job_report(job_id: str):
         keywords_with_ranks=keywords_with_ranks,
         city=city.title() if city else "",
         business_type=business_type,
+        branding=branding,
     )
     return HTMLResponse(content=html)
 

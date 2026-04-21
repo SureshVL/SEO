@@ -732,3 +732,51 @@ export async function draftProspectEmail(
     apiKey,
   );
 }
+
+// ── White-label branding ─────────────────────────────────────────
+
+export interface BrandingConfig {
+  agency_name: string;
+  logo_url: string;
+  primary_color: string;
+  secondary_color: string;
+  accent_color: string;
+  text_color: string;
+  background_color: string;
+  cover_title: string;
+  cover_subtitle: string;
+  footer_text: string;
+  website: string;
+  email: string;
+  enabled: boolean;
+}
+
+export interface BrandingResponse {
+  branding: BrandingConfig;
+  validation_warnings: string[];
+}
+
+export async function getProjectBranding(projectId: string, apiKey: string) {
+  return request<BrandingResponse>(
+    `/projects/${projectId}/branding`,
+    { method: "GET" },
+    apiKey,
+  );
+}
+
+export async function updateProjectBranding(
+  projectId: string,
+  updates: Partial<BrandingConfig>,
+  apiKey: string,
+) {
+  return request<{ branding: BrandingConfig }>(
+    `/projects/${projectId}/branding`,
+    { method: "PATCH", body: JSON.stringify(updates) },
+    apiKey,
+  );
+}
+
+export function brandingPreviewUrl(projectId: string) {
+  const base = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
+  return `${base}/projects/${projectId}/branding/preview`;
+}
