@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import {
-  ArrowDown, ArrowUp, BarChart3, Loader2, Minus,
+  ArrowDown, ArrowUp, BarChart3, FolderOpen, Loader2, Minus,
   Plus, RefreshCw, Search, Sparkles, TrendingUp, Trash2, X,
 } from "lucide-react";
 import { cn, scoreColor } from "@/lib/utils";
@@ -11,6 +11,8 @@ import {
   listProjects, listProjectKeywords, addKeyword,
   deleteKeyword, getKeywordHistory, triggerRankCheck,
 } from "@/lib/api";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { Select } from "@/components/ui/Select";
 import { toast } from "sonner";
 
 // Tiny sparkline component
@@ -142,72 +144,65 @@ export default function RankTrackerPage() {
 
   return (
     <div className="animate-fade-in">
-      <div className="flex items-start justify-between mb-8">
-        <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2">
-            <BarChart3 className="w-6 h-6 text-teal-400" /> Rank Tracker
-          </h1>
-          {businessProfile?.city && (
-            <div className="flex items-center gap-1.5 mt-2 text-xs text-brand-400 bg-brand-500/10 border border-brand-500/20 rounded-lg px-3 py-1.5 w-fit">
-              <Sparkles className="w-3.5 h-3.5" />
-              Tracking for {businessProfile.city} · {businessProfile.businessTypeLabel}
-            </div>
-          )}
-        </div>
-
-        {projectId && (
-          <div className="flex items-center gap-2">
-            <button onClick={loadKeywords} disabled={loading} className="btn-ghost flex items-center gap-1.5 text-sm">
-              <RefreshCw className={cn("w-3.5 h-3.5", loading && "animate-spin")} />
-            </button>
-            <button
-              onClick={handleRankCheck}
-              disabled={checking || !projectId}
-              className="btn-secondary flex items-center gap-2 text-sm"
-            >
-              {checking ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Search className="w-3.5 h-3.5" />}
-              {checking ? "Checking…" : "Check Rankings"}
-            </button>
-            <button
-              onClick={() => setShowAdd(!showAdd)}
-              className="btn-primary flex items-center gap-2 text-sm"
-            >
-              <Plus className="w-3.5 h-3.5" /> Add Keyword
-            </button>
-          </div>
+      <PageHeader
+        title="Rank Tracker"
+        subtitle="Live keyword positions from DataForSEO with sparklines, week-over-week deltas, and top-10 share."
+        icon={BarChart3}
+        accent="#EC4899"
+        chips={businessProfile?.city && (
+          <span
+            className="inline-flex items-center gap-1.5 text-xs font-medium rounded-full px-3 py-1"
+            style={{ background: "rgba(236,72,153,0.12)", color: "#F9A8D4", border: "1px solid rgba(236,72,153,0.3)" }}
+          >
+            <Sparkles className="w-3.5 h-3.5" />
+            {businessProfile.city} · {businessProfile.businessTypeLabel}
+          </span>
         )}
-      </div>
-
-      {/* Project selector */}
-      <div className="card p-4 mb-6">
-        <div className="flex items-center gap-4">
-          <div className="flex-1">
+        actions={
+          <div className="flex items-center gap-2 flex-wrap">
             {projects.length > 0 ? (
-              <select
+              <Select
+                icon={FolderOpen}
+                accent="#EC4899"
+                placeholder="Select a project…"
                 value={projectId}
                 onChange={(e) => setProjectId(e.target.value)}
-                className="input-field"
-              >
-                <option value="">Select a project…</option>
-                {projects.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-              </select>
+                options={projects.map((p) => ({ value: p.id, label: p.name }))}
+                widthClass="min-w-[240px]"
+              />
             ) : (
               <input
                 type="text"
                 value={projectId}
                 onChange={(e) => setProjectId(e.target.value)}
-                className="input-field"
+                className="input-field max-w-[240px]"
                 placeholder="Project ID"
               />
             )}
+            {projectId && (
+              <>
+                <button onClick={loadKeywords} disabled={loading} className="btn-ghost flex items-center gap-1.5 text-sm px-3 py-2.5">
+                  <RefreshCw className={cn("w-3.5 h-3.5", loading && "animate-spin")} />
+                </button>
+                <button
+                  onClick={handleRankCheck}
+                  disabled={checking || !projectId}
+                  className="btn-secondary flex items-center gap-2 text-sm"
+                >
+                  {checking ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Search className="w-3.5 h-3.5" />}
+                  {checking ? "Checking…" : "Check Rankings"}
+                </button>
+                <button
+                  onClick={() => setShowAdd(!showAdd)}
+                  className="btn-primary flex items-center gap-2 text-sm"
+                >
+                  <Plus className="w-3.5 h-3.5" /> Add Keyword
+                </button>
+              </>
+            )}
           </div>
-          <span className="text-xs text-zinc-500 shrink-0">{keywords.length} keywords tracked</span>
-        </div>
-      </div>
+        }
+      />
 
       {/* Add keyword panel */}
       {showAdd && (

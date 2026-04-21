@@ -10,6 +10,7 @@ import {
   Sparkles,
   Target,
 } from "lucide-react";
+import { PageHeader } from "@/components/ui/PageHeader";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/lib/store";
 import {
@@ -103,16 +104,12 @@ export default function ContentBriefPage() {
 
   return (
     <div className="animate-fade-in">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold flex items-center gap-2">
-          <Lightbulb className="w-6 h-6 text-amber-400" /> Content Brief &amp; Score
-        </h1>
-        <p className="text-sm text-zinc-400 mt-1">
-          Pull the top SERP competitors, generate a writing brief (headings,
-          entities, questions), then score any URL or draft against the
-          competitive landscape.
-        </p>
-      </div>
+      <PageHeader
+        title="Content Brief & Score"
+        subtitle="Pull top SERP competitors, generate a writing brief (headings, entities, questions), then score any URL or draft against the competitive landscape."
+        icon={Lightbulb}
+        accent="#F97316"
+      />
 
       <div className="card p-6 mb-6">
         <form onSubmit={handleGenerateBrief} className="grid md:grid-cols-[2fr_1fr_auto] gap-3 items-end">

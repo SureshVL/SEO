@@ -1,12 +1,14 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Download, FileText, Loader2, Plus, RefreshCw } from "lucide-react";
+import { ClipboardList, Download, FileText, FolderOpen, Loader2, Plus, RefreshCw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/lib/store";
 import {
   listProjects, listReports, generateReport, getReportHtml,
 } from "@/lib/api";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { Select } from "@/components/ui/Select";
 import { toast } from "sonner";
 
 export default function ReportsPage() {
@@ -79,75 +81,58 @@ export default function ReportsPage() {
 
   return (
     <div className="animate-fade-in">
-      <div className="flex items-start justify-between mb-8">
-        <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2">
-            <FileText className="w-6 h-6 text-brand-400" /> Reports
-          </h1>
-          <p className="text-sm text-zinc-400 mt-1">
-            AI-powered SEO reports with monthly rank trend table.
-          </p>
-        </div>
-
-        {!viewHtml && projectId && (
-          <div className="flex items-center gap-2">
-            <button
-              onClick={loadReports}
-              disabled={loading}
-              className="btn-ghost flex items-center gap-1.5 text-sm"
-            >
-              <RefreshCw className={cn("w-3.5 h-3.5", loading && "animate-spin")} /> Refresh
-            </button>
-            <button
-              onClick={() => handleGenerate("seo_audit")}
-              disabled={generating}
-              className="btn-primary flex items-center gap-2 text-sm"
-            >
-              {generating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
-              {generating ? "Generating…" : "Generate Report"}
-            </button>
-          </div>
-        )}
-      </div>
-
-      {/* Project selector */}
       {!viewHtml && (
-        <div className="card p-4 mb-6">
-          <div className="flex items-center gap-4">
-            <div className="flex-1">
-              <label className="label mb-1">Project</label>
+        <PageHeader
+          title="Reports"
+          subtitle="AI-powered SEO reports with monthly rank trends, audit summaries, and exportable PDFs."
+          icon={ClipboardList}
+          accent="#EC4899"
+          actions={
+            <div className="flex items-center gap-2 flex-wrap">
               {projects.length > 0 ? (
-                <select
+                <Select
+                  icon={FolderOpen}
+                  accent="#EC4899"
+                  placeholder="Select a project…"
                   value={projectId}
                   onChange={(e) => setProjectId(e.target.value)}
-                  className="input-field"
-                >
-                  <option value="">Select a project…</option>
-                  {projects.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name} ({p.domain || new URL(p.client_url).hostname})
-                    </option>
-                  ))}
-                </select>
+                  options={projects.map((p) => ({
+                    value: p.id,
+                    label: `${p.name} (${p.domain || (() => { try { return new URL(p.client_url).hostname; } catch { return p.client_url; } })()})`,
+                  }))}
+                  widthClass="min-w-[280px]"
+                />
               ) : (
                 <input
                   type="text"
                   value={projectId}
                   onChange={(e) => setProjectId(e.target.value)}
-                  className="input-field"
+                  className="input-field max-w-[240px]"
                   placeholder="Project ID"
                 />
               )}
+              {projectId && (
+                <>
+                  <button
+                    onClick={loadReports}
+                    disabled={loading}
+                    className="btn-ghost flex items-center gap-1.5 text-sm px-3 py-2.5"
+                  >
+                    <RefreshCw className={cn("w-3.5 h-3.5", loading && "animate-spin")} />
+                  </button>
+                  <button
+                    onClick={() => handleGenerate("seo_audit")}
+                    disabled={generating}
+                    className="btn-primary flex items-center gap-2 text-sm"
+                  >
+                    {generating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+                    {generating ? "Generating…" : "Generate Report"}
+                  </button>
+                </>
+              )}
             </div>
-            {selectedProject && (
-              <div className="text-xs text-zinc-500 shrink-0">
-                <span className="text-zinc-400 font-medium">{selectedProject.name}</span>
-                <br />
-                {selectedProject.client_url}
-              </div>
-            )}
-          </div>
-        </div>
+          }
+        />
       )}
 
       {/* Report viewer */}

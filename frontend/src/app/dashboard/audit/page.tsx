@@ -10,6 +10,7 @@ import {
   getSiteCrawl,
   type SiteCrawlResult,
 } from "@/lib/api";
+import { PageHeader } from "@/components/ui/PageHeader";
 import { toast } from "sonner";
 
 type Tab = "single" | "crawl";
@@ -108,37 +109,45 @@ export default function AuditPage() {
 
   return (
     <div className="animate-fade-in">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold flex items-center gap-2">
-          <Shield className="w-6 h-6 text-amber-400" /> Technical SEO Audit
-        </h1>
-        {businessProfile?.websiteUrl && (
-          <div className="flex items-center gap-1.5 mt-2 text-xs text-brand-400 bg-brand-500/10 border border-brand-500/20 rounded-lg px-3 py-1.5 w-fit">
-            <Sparkles className="w-3.5 h-3.5" /> Auto-filled from your project
-          </div>
+      <PageHeader
+        title="Technical SEO Audit"
+        subtitle="PageSpeed single-page diagnostics and full-site crawls — surfaces hidden issues before they hurt rankings."
+        icon={Shield}
+        accent="#A3E635"
+        chips={businessProfile?.websiteUrl && (
+          <span
+            className="inline-flex items-center gap-1.5 text-xs font-medium rounded-full px-3 py-1"
+            style={{ background: "rgba(163,230,53,0.15)", color: "#BEF264", border: "1px solid rgba(163,230,53,0.3)" }}
+          >
+            <Sparkles className="w-3.5 h-3.5" /> Auto-filled
+          </span>
         )}
-      </div>
+      />
 
-      <div className="flex gap-2 mb-6 border-b border-zinc-800">
+      <div className="flex gap-2 mb-6" style={{ borderBottom: "1px solid var(--border)" }}>
         <button
           onClick={() => setTab("single")}
           className={cn(
-            "px-4 py-2 text-sm font-medium flex items-center gap-2 border-b-2 -mb-px transition",
-            tab === "single"
-              ? "border-amber-400 text-amber-400"
-              : "border-transparent text-zinc-400 hover:text-zinc-200",
+            "px-4 py-2.5 text-sm font-semibold flex items-center gap-2 border-b-2 -mb-px transition",
+            tab === "single" ? "" : "border-transparent"
           )}
+          style={{
+            color: tab === "single" ? "#A3E635" : "var(--text-muted)",
+            borderColor: tab === "single" ? "#A3E635" : "transparent",
+          }}
         >
           <Gauge className="w-4 h-4" /> Single-page (PageSpeed)
         </button>
         <button
           onClick={() => setTab("crawl")}
           className={cn(
-            "px-4 py-2 text-sm font-medium flex items-center gap-2 border-b-2 -mb-px transition",
-            tab === "crawl"
-              ? "border-amber-400 text-amber-400"
-              : "border-transparent text-zinc-400 hover:text-zinc-200",
+            "px-4 py-2.5 text-sm font-semibold flex items-center gap-2 border-b-2 -mb-px transition",
+            tab === "crawl" ? "" : "border-transparent"
           )}
+          style={{
+            color: tab === "crawl" ? "#A3E635" : "var(--text-muted)",
+            borderColor: tab === "crawl" ? "#A3E635" : "transparent",
+          }}
         >
           <Globe className="w-4 h-4" /> Full-site crawl (DataForSEO)
         </button>

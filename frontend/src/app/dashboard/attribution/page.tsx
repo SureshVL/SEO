@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { useAppStore } from "@/lib/store";
 import { attributionReport, type AttributionReport } from "@/lib/api";
+import { PageHeader } from "@/components/ui/PageHeader";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
@@ -77,15 +78,12 @@ export default function AttributionPage() {
 
   return (
     <div className="animate-fade-in">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold flex items-center gap-2">
-          <Coins className="w-6 h-6 text-amber-400" /> Revenue Attribution
-        </h1>
-        <p className="text-sm text-zinc-400 mt-1">
-          Which keywords and pages actually drive organic revenue — GA4 landing-
-          page revenue merged with Search Console query-level data.
-        </p>
-      </div>
+      <PageHeader
+        title="Revenue Attribution"
+        subtitle="Which keywords and pages actually drive organic revenue — GA4 landing-page revenue merged with Search Console query data."
+        icon={Coins}
+        accent="#F97316"
+      />
 
       {!bothConnected && (
         <div className="card p-6 border border-amber-500/30 bg-amber-500/5 mb-6">

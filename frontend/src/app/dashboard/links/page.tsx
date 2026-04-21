@@ -5,6 +5,7 @@ import {
   Briefcase,
   Copy,
   ExternalLink,
+  FolderOpen,
   Link2,
   Loader2,
   Mail,
@@ -15,6 +16,8 @@ import {
   Trash2,
 } from "lucide-react";
 import { useAppStore } from "@/lib/store";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { Select } from "@/components/ui/Select";
 import {
   listProjects,
   listLinkProspects,
@@ -241,35 +244,26 @@ export default function LinksPage() {
 
   return (
     <div className="animate-fade-in">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold flex items-center gap-2">
-          <Link2 className="w-6 h-6 text-violet-400" /> Link Building
-        </h1>
-        <p className="text-sm text-zinc-400 mt-1">
-          Track backlink prospects, draft personalised outreach, and monitor your
-          live backlink profile via DataForSEO.
-        </p>
-      </div>
-
-      {/* Project picker */}
-      <div className="card p-4 mb-6">
-        <label className="text-xs text-zinc-500 uppercase tracking-wider block mb-1">
-          Project
-        </label>
-        <select
-          value={projectId}
-          onChange={e => setProjectId(e.target.value)}
-          className="input-field"
-        >
-          <option value="">Select a project…</option>
-          {projects.map(p => (
-            <option key={p.id} value={p.id}>{p.name}</option>
-          ))}
-        </select>
-      </div>
+      <PageHeader
+        title="Link Building"
+        subtitle="Track backlink prospects, draft personalised outreach, and monitor your live backlink profile via DataForSEO."
+        icon={Link2}
+        accent="#2DD4BF"
+        actions={
+          <Select
+            icon={FolderOpen}
+            accent="#2DD4BF"
+            placeholder="Select a project…"
+            value={projectId}
+            onChange={(e) => setProjectId(e.target.value)}
+            options={projects.map((p) => ({ value: p.id, label: p.name }))}
+            widthClass="min-w-[240px]"
+          />
+        }
+      />
 
       {/* Tabs */}
-      <div className="flex gap-2 mb-6 border-b border-zinc-800">
+      <div className="flex gap-2 mb-6" style={{ borderBottom: "1px solid var(--border)" }}>
         <TabButton active={tab === "pipeline"} onClick={() => setTab("pipeline")}>
           <Briefcase className="w-4 h-4" /> Outreach pipeline
         </TabButton>

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { Loader2, Sparkles, Bot, Check, X } from "lucide-react";
 import { cn, scoreBg, scoreColor } from "@/lib/utils";
 import { useAppStore } from "@/lib/store";
+import { PageHeader } from "@/components/ui/PageHeader";
 import {
   geoCheck,
   type AIVisibilityReport,
@@ -87,15 +88,12 @@ export default function AIVisibilityPage() {
 
   return (
     <div className="animate-fade-in">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold flex items-center gap-2">
-          <Sparkles className="w-6 h-6 text-amber-400" /> AI Visibility (GEO)
-        </h1>
-        <p className="text-sm text-zinc-400 mt-1">
-          Track whether your domain is cited in Google AI Overviews, AI Mode,
-          and LLM responses from ChatGPT, Perplexity, and Gemini.
-        </p>
-      </div>
+      <PageHeader
+        title="AI Visibility (GEO)"
+        subtitle="Track whether your domain is cited in Google AI Overviews, AI Mode, and LLM responses from ChatGPT, Perplexity, and Gemini."
+        icon={Sparkles}
+        accent="#A3E635"
+      />
 
       <div className="card p-6 mb-6">
         <form onSubmit={handleSubmit} className="space-y-4">

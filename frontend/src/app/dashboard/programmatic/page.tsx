@@ -8,6 +8,7 @@ import {
   type ProgrammaticResult,
   type ProgrammaticTemplate,
 } from "@/lib/api";
+import { PageHeader } from "@/components/ui/PageHeader";
 import { toast } from "sonner";
 
 const DEFAULT_TEMPLATE: ProgrammaticTemplate = {
@@ -80,16 +81,12 @@ export default function ProgrammaticPage() {
 
   return (
     <div className="animate-fade-in">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold flex items-center gap-2">
-          <Grid3x3 className="w-6 h-6 text-emerald-400" /> Programmatic SEO
-        </h1>
-        <p className="text-sm text-zinc-400 mt-1">
-          Generate hundreds of SEO pages by combining a template with a CSV dataset.
-          Use <code className="text-emerald-300">{`{{variable}}`}</code> placeholders that match
-          your CSV column names.
-        </p>
-      </div>
+      <PageHeader
+        title="Programmatic SEO"
+        subtitle="Generate hundreds of SEO pages by combining a template with a CSV dataset. Use {{variable}} placeholders matching your CSV column names."
+        icon={Grid3x3}
+        accent="#FACC15"
+      />
 
       <div className="grid lg:grid-cols-2 gap-6">
         <div className="space-y-4">

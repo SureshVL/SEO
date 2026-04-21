@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Calendar, CheckCircle2, CircleDashed, Loader2, Play, XCircle } from "lucide-react";
+import { Calendar, CheckCircle2, CircleDashed, FolderOpen, Loader2, Play, XCircle } from "lucide-react";
 import { useAppStore } from "@/lib/store";
 import {
   getWorkflowSchedule,
@@ -11,6 +11,8 @@ import {
   type WorkflowRun,
   type WorkflowSchedule,
 } from "@/lib/api";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { Select } from "@/components/ui/Select";
 import { toast } from "sonner";
 
 const TASK_LABELS: Record<string, string> = {
@@ -22,6 +24,13 @@ const TASK_LABELS: Record<string, string> = {
   keyword_expansion: "Keyword expansion",
   link_outreach: "Link outreach follow-ups",
   monthly_report: "Monthly report",
+};
+
+const WEEK_COLORS: Record<number, string> = {
+  1: "#A3E635", // lime — technical
+  2: "#F97316", // orange — content
+  3: "#EC4899", // magenta — rankings
+  4: "#22D3EE", // cyan — links & report
 };
 
 export default function WorkflowPage() {
@@ -75,50 +84,57 @@ export default function WorkflowPage() {
     }
   }
 
+  const weekAccent = schedule ? WEEK_COLORS[schedule.week] || "#8B5CF6" : "#FACC15";
+
   return (
     <div className="animate-fade-in">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold flex items-center gap-2">
-          <Calendar className="w-6 h-6 text-sky-400" /> Monthly Workflow
-        </h1>
-        <p className="text-sm text-zinc-400 mt-1">
-          The Week 1-4 SEO cadence: technical → content → rankings → links & report.
-          Runs automatically on cron; manual trigger available below.
-        </p>
-      </div>
-
-      <div className="card p-4 mb-6">
-        <label className="text-xs text-zinc-500 uppercase tracking-wider block mb-1">
-          Project
-        </label>
-        <select
-          value={projectId}
-          onChange={e => setProjectId(e.target.value)}
-          className="input-field"
-        >
-          <option value="">Select a project…</option>
-          {projects.map(p => (
-            <option key={p.id} value={p.id}>{p.name}</option>
-          ))}
-        </select>
-      </div>
+      <PageHeader
+        title="Monthly Workflow"
+        subtitle="The Week 1-4 SEO cadence — technical → content → rankings → links & report. Runs automatically on cron."
+        icon={Calendar}
+        accent="#FACC15"
+        actions={
+          <Select
+            icon={FolderOpen}
+            accent="#8B5CF6"
+            placeholder="Select a project…"
+            value={projectId}
+            onChange={(e) => setProjectId(e.target.value)}
+            options={projects.map((p) => ({ value: p.id, label: p.name }))}
+            widthClass="min-w-[260px]"
+          />
+        }
+      />
 
       {loading ? (
-        <div className="card p-10 flex items-center justify-center text-zinc-400">
+        <div className="card p-10 flex items-center justify-center" style={{ color: "var(--text-muted)" }}>
           <Loader2 className="w-5 h-5 animate-spin" />
         </div>
       ) : schedule ? (
         <>
-          <div className="card p-6 mb-6">
-            <div className="flex items-start justify-between gap-4">
+          {/* Hero week card */}
+          <div
+            className="relative rounded-2xl p-6 mb-6 overflow-hidden"
+            style={{
+              background: `linear-gradient(135deg, ${weekAccent}1f, ${weekAccent}08)`,
+              border: `1px solid ${weekAccent}55`,
+            }}
+          >
+            <div className="absolute top-0 left-0 right-0 h-1" style={{ background: weekAccent }} />
+            <div className="flex items-start justify-between gap-4 flex-wrap">
               <div>
-                <div className="text-xs text-zinc-500 uppercase tracking-wider mb-1">
+                <div className="text-[11px] uppercase tracking-[0.18em] font-semibold mb-2" style={{ color: weekAccent }}>
                   This week
                 </div>
-                <div className="text-xl font-semibold text-zinc-100">
-                  {schedule.week_label}
+                <div className="flex items-baseline gap-3">
+                  <div className="text-5xl font-extrabold tracking-tight" style={{ color: weekAccent }}>
+                    W{schedule.week}
+                  </div>
+                  <div className="text-xl font-semibold" style={{ color: "var(--text-primary)" }}>
+                    {schedule.week_label.replace(/^Week \d+ — /, "")}
+                  </div>
                 </div>
-                <div className="text-xs text-zinc-500 mt-1">
+                <div className="text-xs mt-2" style={{ color: "var(--text-muted)" }}>
                   As of {new Date(schedule.as_of).toLocaleString()}
                 </div>
               </div>
@@ -132,74 +148,91 @@ export default function WorkflowPage() {
               </button>
             </div>
 
-            <div className="mt-5 space-y-2">
-              {schedule.tasks.map(t => (
+            <div className="mt-5 grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {schedule.tasks.map((t) => (
                 <div
                   key={t}
-                  className="flex items-center gap-3 p-3 rounded border border-zinc-800 bg-zinc-900/30"
+                  className="flex items-center gap-3 p-3 rounded-xl transition-colors"
+                  style={{ background: "var(--bg-card)", border: "1px solid var(--border)" }}
                 >
-                  <CircleDashed className="w-4 h-4 text-sky-300" />
-                  <span className="text-sm text-zinc-200">{TASK_LABELS[t] || t}</span>
+                  <span
+                    className="w-7 h-7 rounded-lg flex items-center justify-center"
+                    style={{ background: `${weekAccent}22`, color: weekAccent }}
+                  >
+                    <CircleDashed className="w-4 h-4" />
+                  </span>
+                  <span className="text-sm font-medium" style={{ color: "var(--text-primary)" }}>
+                    {TASK_LABELS[t] || t}
+                  </span>
                 </div>
               ))}
               {schedule.tasks.length === 0 && (
-                <div className="text-sm text-zinc-500">
+                <div className="text-sm" style={{ color: "var(--text-muted)" }}>
                   No tasks scheduled for this week.
                 </div>
               )}
             </div>
           </div>
 
-          <div className="card p-0 overflow-hidden">
-            <div className="px-6 py-4 border-b border-zinc-800">
-              <h3 className="font-semibold text-zinc-200">Recent runs</h3>
+          {/* History */}
+          <div className="card overflow-hidden">
+            <div className="px-6 py-4 flex items-center justify-between" style={{ borderBottom: "1px solid var(--border)" }}>
+              <h3 className="font-semibold" style={{ color: "var(--text-primary)" }}>Recent runs</h3>
+              <span className="text-xs" style={{ color: "var(--text-muted)" }}>{runs.length} total</span>
             </div>
             {runs.length === 0 ? (
-              <div className="p-6 text-sm text-zinc-500">
+              <div className="p-8 text-sm text-center" style={{ color: "var(--text-muted)" }}>
                 No runs recorded yet. Hit <em>Run now</em> or wait for the next scheduled cycle.
               </div>
             ) : (
-              <div className="divide-y divide-zinc-800">
-                {runs.map((r, i) => (
-                  <div key={i} className="p-4">
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="text-sm font-semibold text-zinc-200">{r.week_label}</div>
-                      <div className="text-xs text-zinc-500">
-                        {r.started_at && new Date(r.started_at).toLocaleString()}
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-4 text-xs mb-2">
-                      <Pill tone="good" icon={<CheckCircle2 className="w-3 h-3" />}>
-                        {r.completed} done
-                      </Pill>
-                      <Pill tone="warn" icon={<CircleDashed className="w-3 h-3" />}>
-                        {r.skipped} skipped
-                      </Pill>
-                      <Pill tone="bad" icon={<XCircle className="w-3 h-3" />}>
-                        {r.failed} failed
-                      </Pill>
-                    </div>
-                    <div className="space-y-1">
-                      {r.tasks?.map((t, j) => (
-                        <div key={j} className="flex items-start gap-2 text-xs">
-                          <StatusIcon status={t.status} />
-                          <div className="flex-1">
-                            <span className="text-zinc-300">{TASK_LABELS[t.name] || t.name}</span>
-                            {t.detail && (
-                              <span className="text-zinc-500"> · {t.detail}</span>
-                            )}
+              <div>
+                {runs.map((r, i) => {
+                  const accent = WEEK_COLORS[r.week] || "#8B5CF6";
+                  return (
+                    <div key={i} className="p-5" style={{ borderTop: i ? "1px solid var(--border)" : undefined }}>
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="flex items-center gap-2">
+                          <span
+                            className="px-2 py-0.5 rounded-md text-[11px] font-bold text-white"
+                            style={{ background: accent }}
+                          >
+                            W{r.week}
+                          </span>
+                          <div className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
+                            {r.week_label.replace(/^Week \d+ — /, "")}
                           </div>
                         </div>
-                      ))}
+                        <div className="text-xs" style={{ color: "var(--text-muted)" }}>
+                          {r.started_at && new Date(r.started_at).toLocaleString()}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 mb-3 flex-wrap">
+                        <Pill tone="good" icon={<CheckCircle2 className="w-3 h-3" />}>{r.completed} done</Pill>
+                        <Pill tone="warn" icon={<CircleDashed className="w-3 h-3" />}>{r.skipped} skipped</Pill>
+                        <Pill tone="bad" icon={<XCircle className="w-3 h-3" />}>{r.failed} failed</Pill>
+                      </div>
+                      <div className="space-y-1.5">
+                        {r.tasks?.map((t, j) => (
+                          <div key={j} className="flex items-start gap-2 text-xs">
+                            <StatusIcon status={t.status} />
+                            <div className="flex-1">
+                              <span style={{ color: "var(--text-secondary)" }}>{TASK_LABELS[t.name] || t.name}</span>
+                              {t.detail && (
+                                <span style={{ color: "var(--text-muted)" }}> · {t.detail}</span>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
         </>
       ) : (
-        <div className="card p-10 text-center text-sm text-zinc-500">
+        <div className="card p-10 text-center text-sm" style={{ color: "var(--text-muted)" }}>
           Select a project to see its workflow.
         </div>
       )}
@@ -207,24 +240,19 @@ export default function WorkflowPage() {
   );
 }
 
-function Pill({
-  tone, icon, children,
-}: {
+function Pill({ tone, icon, children }: {
   tone: "good" | "warn" | "bad"; icon: React.ReactNode; children: React.ReactNode;
 }) {
-  const color =
-    tone === "good" ? "bg-emerald-500/10 text-emerald-300" :
-    tone === "warn" ? "bg-amber-500/10 text-amber-300" :
-    "bg-red-500/10 text-red-300";
+  const cls = tone === "good" ? "badge-success" : tone === "warn" ? "badge-warning" : "badge-error";
   return (
-    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded ${color}`}>
+    <span className={`${cls} inline-flex items-center gap-1`}>
       {icon}{children}
     </span>
   );
 }
 
 function StatusIcon({ status }: { status: string }) {
-  if (status === "completed") return <CheckCircle2 className="w-3 h-3 text-emerald-400 mt-0.5" />;
-  if (status === "failed") return <XCircle className="w-3 h-3 text-red-400 mt-0.5" />;
-  return <CircleDashed className="w-3 h-3 text-amber-400 mt-0.5" />;
+  if (status === "completed") return <CheckCircle2 className="w-3.5 h-3.5 mt-0.5" style={{ color: "#A3E635" }} />;
+  if (status === "failed") return <XCircle className="w-3.5 h-3.5 mt-0.5" style={{ color: "#F43F5E" }} />;
+  return <CircleDashed className="w-3.5 h-3.5 mt-0.5" style={{ color: "#FACC15" }} />;
 }

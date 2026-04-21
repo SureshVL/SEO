@@ -3,15 +3,19 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import {
-  ArrowUpRight, BarChart3, Bot, Globe, Loader2,
+  ArrowUpRight, BarChart3, Bot, Globe, LayoutDashboard, Loader2,
   MapPin, Plus, Star, Trash2, X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/lib/store";
 import { listProjects, listProjectKeywords } from "@/lib/api";
+import { PageHeader } from "@/components/ui/PageHeader";
 import { toast } from "sonner";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
+// Card accent colors, cycled through the project list
+const ACCENTS = ["#8B5CF6", "#EC4899", "#22D3EE", "#A3E635", "#F97316", "#FACC15", "#2DD4BF", "#818CF8"];
 
 export default function ProjectsPage() {
   const { apiKey, businessProfile, setBusinessProfile } = useAppStore();
@@ -29,7 +33,6 @@ export default function ProjectsPage() {
     try {
       const ps = await listProjects(apiKey);
       setProjects(ps);
-      // Fetch keyword counts in parallel
       const counts: Record<string, number> = {};
       await Promise.allSettled(
         ps.map(async (p) => {
@@ -87,7 +90,6 @@ export default function ProjectsPage() {
 
   function handleSetActive(p: any) {
     if (!businessProfile) return;
-    const domain = p.domain || (() => { try { return new URL(p.client_url).hostname; } catch { return p.client_url; } })();
     setBusinessProfile({
       ...businessProfile,
       projectId: p.id,
@@ -100,22 +102,24 @@ export default function ProjectsPage() {
 
   return (
     <div className="animate-fade-in">
-      <div className="flex items-center justify-between mb-8">
-        <div>
-          <h1 className="text-2xl font-bold">Projects</h1>
-          <p className="text-sm text-zinc-400 mt-1">Manage your SEO projects. The active project auto-fills all tools.</p>
-        </div>
-        <button onClick={() => setShowCreate(true)} className="btn-primary flex items-center gap-2">
-          <Plus className="w-4 h-4" /> New Project
-        </button>
-      </div>
+      <PageHeader
+        title="Projects"
+        subtitle="Manage your SEO projects. The active project auto-fills all tools."
+        icon={LayoutDashboard}
+        accent="#EC4899"
+        actions={
+          <button onClick={() => setShowCreate(true)} className="btn-primary flex items-center gap-2">
+            <Plus className="w-4 h-4" /> New Project
+          </button>
+        }
+      />
 
       {/* Create form */}
       {showCreate && (
-        <div className="card p-6 mb-6 border-brand-500/30 animate-fade-in">
+        <div className="card p-6 mb-6 animate-fade-in" style={{ borderColor: "rgba(139,92,246,0.35)" }}>
           <div className="flex items-center justify-between mb-4">
-            <h3 className="font-semibold">Create new project</h3>
-            <button onClick={() => setShowCreate(false)} className="btn-ghost p-1">
+            <h3 className="font-semibold text-base">Create new project</h3>
+            <button onClick={() => setShowCreate(false)} className="btn-ghost p-1.5">
               <X className="w-4 h-4" />
             </button>
           </div>
@@ -176,13 +180,16 @@ export default function ProjectsPage() {
       {/* List */}
       {loading ? (
         <div className="card p-12 text-center">
-          <Loader2 className="w-6 h-6 animate-spin mx-auto text-zinc-500" />
+          <Loader2 className="w-6 h-6 animate-spin mx-auto" style={{ color: "var(--violet)" }} />
         </div>
       ) : projects.length === 0 ? (
         <div className="card p-12 text-center">
-          <Globe className="w-12 h-12 text-zinc-600 mx-auto mb-4" />
+          <div className="w-14 h-14 rounded-2xl flex items-center justify-center mx-auto mb-4"
+               style={{ background: "rgba(139,92,246,0.12)" }}>
+            <Globe className="w-7 h-7" style={{ color: "var(--violet)" }} />
+          </div>
           <h3 className="font-semibold text-lg mb-2">No projects yet</h3>
-          <p className="text-sm text-zinc-400 max-w-sm mx-auto mb-6">
+          <p className="text-sm max-w-sm mx-auto mb-6" style={{ color: "var(--text-muted)" }}>
             Create your first project or complete onboarding to get started.
           </p>
           <div className="flex items-center justify-center gap-3">
@@ -196,7 +203,8 @@ export default function ProjectsPage() {
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {projects.map((p) => {
+          {projects.map((p, idx) => {
+            const accent = ACCENTS[idx % ACCENTS.length];
             const domain = p.domain || (() => { try { return new URL(p.client_url).hostname; } catch { return p.client_url; } })();
             const isActive = businessProfile?.projectId === p.id;
             const kwCount = kwCounts[p.id] ?? null;
@@ -206,61 +214,80 @@ export default function ProjectsPage() {
               <div
                 key={p.id}
                 className={cn(
-                  "card-hover p-5 group relative flex flex-col",
-                  isActive && "border-brand-500/40 bg-brand-500/5"
+                  "relative group rounded-2xl p-5 flex flex-col overflow-hidden transition-all duration-200",
+                  "hover:-translate-y-0.5"
                 )}
+                style={{
+                  background: isActive
+                    ? `linear-gradient(180deg, ${accent}1a, ${accent}05)`
+                    : "var(--bg-card)",
+                  border: `1px solid ${isActive ? accent + "66" : "var(--border)"}`,
+                  boxShadow: isActive ? `0 10px 30px ${accent}22` : "none",
+                }}
               >
+                {/* Accent top strip */}
+                <div className="absolute top-0 left-0 right-0 h-[3px]" style={{ background: accent, opacity: isActive ? 1 : 0.7 }} />
+
                 {isActive && (
-                  <div className="absolute -top-2.5 left-4 bg-brand-600 text-white text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full flex items-center gap-1">
-                    <Star className="w-2.5 h-2.5" /> Active
+                  <div
+                    className="absolute -top-2.5 left-4 text-[10px] font-bold uppercase tracking-[0.12em] px-2.5 py-1 rounded-full flex items-center gap-1 text-white shadow-lg"
+                    style={{ background: accent, boxShadow: `0 4px 14px ${accent}66` }}
+                  >
+                    <Star className="w-2.5 h-2.5" fill="currentColor" /> Active
                   </div>
                 )}
 
-                <div className="flex items-start justify-between mb-3">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-lg bg-brand-500/10 flex items-center justify-center shrink-0">
-                      <Globe className="w-5 h-5 text-brand-400" />
-                    </div>
-                    <div>
-                      <h3 className="font-semibold text-sm">{p.name}</h3>
-                      <p className="text-xs text-zinc-500 truncate max-w-[140px]">{domain}</p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <button
-                      onClick={() => handleDelete(p.id)}
-                      className="btn-ghost p-1.5 text-zinc-500 hover:text-red-400"
-                      title="Delete project"
+                <div className="flex items-start justify-between mb-3 mt-1">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div
+                      className="w-11 h-11 rounded-xl flex items-center justify-center shrink-0"
+                      style={{ background: `${accent}1f`, color: accent }}
                     >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                      <Globe className="w-5 h-5" strokeWidth={2.2} />
+                    </div>
+                    <div className="min-w-0">
+                      <h3 className="font-bold text-[15px] truncate" style={{ color: "var(--text-primary)" }}>{p.name}</h3>
+                      <p className="text-xs truncate" style={{ color: "var(--text-muted)" }}>{domain}</p>
+                    </div>
                   </div>
+                  <button
+                    onClick={() => handleDelete(p.id)}
+                    className="btn-ghost p-1.5 opacity-0 group-hover:opacity-100 transition-opacity"
+                    style={{ color: "var(--text-muted)" }}
+                    title="Delete project"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
                 </div>
 
                 {/* Meta */}
                 <div className="flex flex-wrap gap-1.5 mb-3">
                   {city && (
-                    <span className="flex items-center gap-1 text-[10px] bg-zinc-800/60 border border-zinc-700/40 text-zinc-400 rounded-full px-2 py-0.5">
-                      <MapPin className="w-2.5 h-2.5" /> {city}
+                    <span className="chip">
+                      <MapPin className="w-3 h-3" /> {city}
                     </span>
                   )}
                   {p.target_niche && (
-                    <span className="text-[10px] bg-zinc-800/60 border border-zinc-700/40 text-zinc-400 rounded-full px-2 py-0.5">
-                      {p.target_niche}
-                    </span>
+                    <span className="chip">{p.target_niche}</span>
                   )}
                 </div>
 
                 {/* Keywords */}
                 {p.goal_keywords?.length > 0 && (
                   <div className="flex flex-wrap gap-1 mb-3">
-                    {p.goal_keywords.slice(0, 2).map((kw: string) => (
-                      <span key={kw} className="text-[10px] bg-zinc-800/60 text-zinc-400 px-2 py-0.5 rounded">
+                    {p.goal_keywords.slice(0, 3).map((kw: string) => (
+                      <span
+                        key={kw}
+                        className="text-[10px] px-2 py-0.5 rounded font-medium"
+                        style={{ background: `${accent}15`, color: accent }}
+                      >
                         {kw}
                       </span>
                     ))}
-                    {p.goal_keywords.length > 2 && (
-                      <span className="text-[10px] text-zinc-600">+{p.goal_keywords.length - 2}</span>
+                    {p.goal_keywords.length > 3 && (
+                      <span className="text-[10px]" style={{ color: "var(--text-muted)" }}>
+                        +{p.goal_keywords.length - 3}
+                      </span>
                     )}
                   </div>
                 )}
@@ -268,36 +295,33 @@ export default function ProjectsPage() {
                 <div className="flex-1" />
 
                 {/* Footer */}
-                <div className="flex items-center justify-between mt-3 pt-3 border-t border-zinc-800/50">
+                <div className="flex items-center justify-between mt-3 pt-3" style={{ borderTop: "1px solid var(--border)" }}>
                   <div className="flex items-center gap-3">
-                    <span className={cn("badge text-[10px]", p.status === "active" ? "badge-success" : "badge-warning")}>
+                    <span className={cn("text-[10px]", p.status === "active" ? "badge-success" : "badge-warning")}>
                       {p.status}
                     </span>
                     {kwCount !== null && (
-                      <span className="flex items-center gap-1 text-[10px] text-zinc-500">
+                      <span className="flex items-center gap-1 text-[11px] font-medium" style={{ color: "var(--text-muted)" }}>
                         <BarChart3 className="w-3 h-3" /> {kwCount} kw
                       </span>
                     )}
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-3">
                     {!isActive && businessProfile && (
                       <button
                         onClick={() => handleSetActive(p)}
-                        className="text-[10px] text-brand-400 hover:text-brand-300 font-medium"
+                        className="text-[11px] font-semibold hover:opacity-80 transition-opacity"
+                        style={{ color: accent }}
                       >
                         Set active
                       </button>
                     )}
                     <Link
                       href={`/dashboard/research?project=${p.id}`}
-                      className="text-xs text-zinc-400 hover:text-brand-400 flex items-center gap-1"
+                      className="text-[11px] font-semibold flex items-center gap-1 transition-opacity hover:opacity-80"
+                      style={{ color: accent }}
                     >
                       <Bot className="w-3 h-3" /> Research
-                    </Link>
-                    <Link
-                      href={`/dashboard/rank-tracker`}
-                      className="text-xs text-zinc-400 hover:text-teal-400 flex items-center gap-1"
-                    >
                       <ArrowUpRight className="w-3 h-3" />
                     </Link>
                   </div>

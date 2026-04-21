@@ -5,6 +5,7 @@ import { Check, CreditCard, Loader2, TrendingUp, Zap } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/lib/store";
 import { listProjects, listProjectKeywords, listJobs } from "@/lib/api";
+import { PageHeader } from "@/components/ui/PageHeader";
 import { toast } from "sonner";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -147,12 +148,12 @@ export default function BillingPage() {
 
   return (
     <div className="animate-fade-in">
-      <div className="mb-8">
-        <h1 className="text-2xl font-bold flex items-center gap-2">
-          <Zap className="w-6 h-6 text-amber-400" /> Billing & Plans
-        </h1>
-        <p className="text-sm text-zinc-400 mt-1">Manage your subscription. Prices in INR, billed monthly via Razorpay.</p>
-      </div>
+      <PageHeader
+        title="Billing & Plans"
+        subtitle="Manage your subscription. Prices in INR, billed monthly via Razorpay."
+        icon={Zap}
+        accent="#FACC15"
+      />
 
       {/* Current plan + usage */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-10">

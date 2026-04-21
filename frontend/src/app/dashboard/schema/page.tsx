@@ -5,6 +5,7 @@ import { Braces, Check, Copy, Loader2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/lib/store";
 import { detectSchema, type SchemaDetectionResult } from "@/lib/api";
+import { PageHeader } from "@/components/ui/PageHeader";
 import { toast } from "sonner";
 
 const BUSINESS_TYPE_OPTIONS = [
@@ -67,16 +68,12 @@ export default function SchemaPage() {
 
   return (
     <div className="animate-fade-in">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold flex items-center gap-2">
-          <Braces className="w-6 h-6 text-amber-400" /> Schema Markup
-        </h1>
-        <p className="text-sm text-zinc-400 mt-1">
-          Detect JSON-LD already on the page, flag missing schema types
-          recommended for your business, and generate ready-to-paste markup
-          for the gaps.
-        </p>
-      </div>
+      <PageHeader
+        title="Schema Markup"
+        subtitle="Detect JSON-LD already on the page, flag missing schema types recommended for your business, and generate ready-to-paste markup for the gaps."
+        icon={Braces}
+        accent="#8B5CF6"
+      />
 
       <div className="card p-6 mb-6">
         <form onSubmit={handleSubmit} className="grid md:grid-cols-[2fr_1fr_1fr_auto] gap-3 items-end">

@@ -1,8 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Loader2, Palette, Save, Sparkles } from "lucide-react";
+import { FolderOpen, Loader2, Palette, Save, Sparkles } from "lucide-react";
 import { useAppStore } from "@/lib/store";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { Select } from "@/components/ui/Select";
 import {
   getProjectBranding,
   listProjects,
@@ -117,31 +119,23 @@ export default function BrandingPage() {
 
   return (
     <div className="animate-fade-in">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold flex items-center gap-2">
-          <Palette className="w-6 h-6 text-fuchsia-400" /> White-label Reports
-        </h1>
-        <p className="text-sm text-zinc-400 mt-1">
-          Drop in your agency's logo, colours, and cover copy. Branded PDF
-          reports automatically use these settings for the selected project.
-        </p>
-      </div>
-
-      <div className="card p-4 mb-6">
-        <label className="text-xs text-zinc-500 uppercase tracking-wider block mb-1">
-          Project
-        </label>
-        <select
-          value={projectId}
-          onChange={e => setProjectId(e.target.value)}
-          className="input-field"
-        >
-          <option value="">Select a project…</option>
-          {projects.map(p => (
-            <option key={p.id} value={p.id}>{p.name}</option>
-          ))}
-        </select>
-      </div>
+      <PageHeader
+        title="White-label Reports"
+        subtitle="Drop in your agency's logo, colours, and cover copy. Branded PDFs automatically use these settings for the selected project."
+        icon={Palette}
+        accent="#F43F5E"
+        actions={
+          <Select
+            icon={FolderOpen}
+            accent="#F43F5E"
+            placeholder="Select a project…"
+            value={projectId}
+            onChange={(e) => setProjectId(e.target.value)}
+            options={projects.map((p) => ({ value: p.id, label: p.name }))}
+            widthClass="min-w-[240px]"
+          />
+        }
+      />
 
       {loading ? (
         <div className="card p-10 flex items-center justify-center text-zinc-400">

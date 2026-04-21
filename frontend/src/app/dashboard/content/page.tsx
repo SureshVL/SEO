@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import {
-  ArrowLeft, Check, FileText, Loader2, Plus,
+  ArrowLeft, Check, FileText, FolderOpen, Loader2, Plus,
   RefreshCw, Sparkles, Wand2, X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -11,6 +11,8 @@ import {
   listProjects, listContent, createContentDraft,
   updateContent, aiRewriteContent,
 } from "@/lib/api";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { Select } from "@/components/ui/Select";
 import { toast } from "sonner";
 
 const STATUS_COLORS: Record<string, string> = {
@@ -203,40 +205,35 @@ export default function ContentPage() {
   // ── List view ──────────────────────────────────────────────────────────────
   return (
     <div className="animate-fade-in">
-      <div className="flex items-start justify-between mb-8">
-        <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2">
-            <FileText className="w-6 h-6 text-brand-400" /> Content Studio
-          </h1>
-          <p className="text-sm text-zinc-400 mt-1">
-            AI-written SEO drafts with Claude Sonnet, Markdown editor, publish queue.
-          </p>
-        </div>
-        {projectId && (
-          <div className="flex items-center gap-2">
-            <button onClick={loadDrafts} disabled={loading} className="btn-ghost flex items-center gap-1.5 text-sm">
-              <RefreshCw className={cn("w-3.5 h-3.5", loading && "animate-spin")} />
-            </button>
-            <button onClick={() => setShowCreate(!showCreate)} className="btn-primary flex items-center gap-2 text-sm">
-              <Plus className="w-3.5 h-3.5" /> New Draft
-            </button>
+      <PageHeader
+        title="Content Studio"
+        subtitle="AI-written SEO drafts with Claude Sonnet, Markdown editor, and a publish queue."
+        icon={FileText}
+        accent="#818CF8"
+        actions={
+          <div className="flex items-center gap-2 flex-wrap">
+            <Select
+              icon={FolderOpen}
+              accent="#818CF8"
+              placeholder="Select a project…"
+              value={projectId}
+              onChange={(e) => setProjectId(e.target.value)}
+              options={projects.map((p) => ({ value: p.id, label: p.name }))}
+              widthClass="min-w-[220px]"
+            />
+            {projectId && (
+              <>
+                <button onClick={loadDrafts} disabled={loading} className="btn-ghost flex items-center gap-1.5 text-sm px-3 py-2.5">
+                  <RefreshCw className={cn("w-3.5 h-3.5", loading && "animate-spin")} />
+                </button>
+                <button onClick={() => setShowCreate(!showCreate)} className="btn-primary flex items-center gap-2 text-sm">
+                  <Plus className="w-3.5 h-3.5" /> New Draft
+                </button>
+              </>
+            )}
           </div>
-        )}
-      </div>
-
-      {/* Project selector */}
-      <div className="card p-4 mb-6">
-        <select
-          value={projectId}
-          onChange={e => setProjectId(e.target.value)}
-          className="input-field"
-        >
-          <option value="">Select a project…</option>
-          {projects.map(p => (
-            <option key={p.id} value={p.id}>{p.name}</option>
-          ))}
-        </select>
-      </div>
+        }
+      />
 
       {/* Create form */}
       {showCreate && (
