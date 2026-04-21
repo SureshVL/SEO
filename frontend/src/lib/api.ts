@@ -432,3 +432,79 @@ export async function generateContentWithAI(projectId: string, payload: {
     apiKey,
   );
 }
+
+// ── Content brief + scoring ──
+export interface ContentBriefCompetitor {
+  url: string;
+  title: string;
+  word_count: number;
+  headings: string[];
+  position: number | null;
+}
+
+export interface ContentBrief {
+  keyword: string;
+  target_word_count: number;
+  serp_median_words: number;
+  competitors: ContentBriefCompetitor[];
+  recommended_headings: string[];
+  must_cover_entities: string[];
+  questions_to_answer: string[];
+  meta_title_suggestion: string;
+  meta_description_suggestion: string;
+  internal_links: { anchor: string; path: string }[];
+  ai_overview_present: boolean;
+  ai_overview_snippet: string;
+  ai_generated: boolean;
+}
+
+export interface ContentScore {
+  keyword: string;
+  total: number;
+  word_count: number;
+  serp_median_words: number;
+  breakdown: {
+    length: number;
+    headings: number;
+    entities: number;
+    questions: number;
+    keyword_usage: number;
+  };
+  missing_headings: string[];
+  missing_entities: string[];
+  missing_questions: string[];
+  recommendations: string[];
+}
+
+export async function generateContentBrief(
+  payload: {
+    keyword: string;
+    domain?: string;
+    location_code?: number;
+    language_code?: string;
+    scrape_top_n?: number;
+  },
+  apiKey: string,
+) {
+  return request<ContentBrief>(
+    "/content/brief",
+    { method: "POST", body: JSON.stringify(payload) },
+    apiKey,
+  );
+}
+
+export async function scoreContent(
+  payload: {
+    keyword: string;
+    url?: string;
+    markdown?: string;
+    brief?: ContentBrief;
+  },
+  apiKey: string,
+) {
+  return request<ContentScore>(
+    "/content/score",
+    { method: "POST", body: JSON.stringify(payload) },
+    apiKey,
+  );
+}

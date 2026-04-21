@@ -741,6 +741,159 @@ def schema_generate(
     return {"generated": out, "unsupported": unknown}
 
 
+# ── Content briefs + scoring ──────────────────────────────────────
+
+class ContentBriefRequest(BaseModel):
+    keyword: str = Field(..., min_length=1, max_length=200)
+    domain: str = ""
+    location_code: int = 2356
+    language_code: str = "en"
+    scrape_top_n: int = Field(5, ge=1, le=10)
+
+
+class ContentScoreRequest(BaseModel):
+    keyword: str = Field(..., min_length=1, max_length=200)
+    url: str = ""
+    markdown: str = ""
+    brief: dict | None = None  # optional pre-generated brief payload
+    location_code: int = 2356
+    language_code: str = "en"
+
+
+def _build_content_agent() -> ContentAgent:
+    """Build a ContentAgent wired up with whichever clients are configured."""
+    from app.clients.dataforseo_client import DataForSEOClient
+    claude = _get_claude_client()
+    firecrawl = None
+    if settings.firecrawl_api_key:
+        firecrawl = FirecrawlHTTPClient(api_key=settings.firecrawl_api_key)
+    dfs = None
+    if settings.dataforseo_login and settings.dataforseo_password:
+        dfs = DataForSEOClient(
+            login=settings.dataforseo_login,
+            password=settings.dataforseo_password,
+        )
+    return ContentAgent(
+        claude_client=claude,
+        dataforseo_client=dfs,
+        firecrawl_client=firecrawl,
+    )
+
+
+def _serialize_brief(brief) -> dict:
+    return {
+        "keyword": brief.keyword,
+        "target_word_count": brief.target_word_count,
+        "serp_median_words": brief.serp_median_words,
+        "competitors": [
+            {
+                "url": c.url, "title": c.title,
+                "word_count": c.word_count, "headings": c.headings,
+                "position": c.position,
+            }
+            for c in brief.competitors
+        ],
+        "recommended_headings": brief.recommended_headings,
+        "must_cover_entities": brief.must_cover_entities,
+        "questions_to_answer": brief.questions_to_answer,
+        "meta_title_suggestion": brief.meta_title_suggestion,
+        "meta_description_suggestion": brief.meta_description_suggestion,
+        "internal_links": brief.internal_links,
+        "ai_overview_present": brief.ai_overview_present,
+        "ai_overview_snippet": brief.ai_overview_snippet,
+        "ai_generated": brief.ai_generated,
+    }
+
+
+def _serialize_score(score) -> dict:
+    return {
+        "keyword": score.keyword,
+        "total": score.total,
+        "word_count": score.word_count,
+        "serp_median_words": score.serp_median_words,
+        "breakdown": {
+            "length": score.length_score,
+            "headings": score.heading_score,
+            "entities": score.entity_score,
+            "questions": score.question_score,
+            "keyword_usage": score.keyword_usage_score,
+        },
+        "missing_headings": score.missing_headings,
+        "missing_entities": score.missing_entities,
+        "missing_questions": score.missing_questions,
+        "recommendations": score.recommendations,
+    }
+
+
+@app.post("/content/brief")
+def content_brief(
+    body: ContentBriefRequest,
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """Generate a SERP-driven content brief for a keyword."""
+    agent = _build_content_agent()
+    brief = agent.generate_brief(
+        keyword=body.keyword,
+        domain=body.domain,
+        location_code=body.location_code,
+        language_code=body.language_code,
+        scrape_top_n=body.scrape_top_n,
+    )
+    return _serialize_brief(brief)
+
+
+@app.post("/content/score")
+def content_score(
+    body: ContentScoreRequest,
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """Score content against the SERP competitive landscape."""
+    if not body.url and not body.markdown:
+        raise HTTPException(
+            status_code=400,
+            detail="Provide either `url` or `markdown`.",
+        )
+    from app.agents.content_agent import ContentBrief, CompetitorSummary
+    agent = _build_content_agent()
+
+    brief_obj = None
+    if body.brief:
+        b = body.brief
+        brief_obj = ContentBrief(
+            keyword=b.get("keyword", body.keyword),
+            target_word_count=int(b.get("target_word_count", 1500)),
+            serp_median_words=int(b.get("serp_median_words", 1500)),
+            competitors=[
+                CompetitorSummary(
+                    url=c.get("url", ""), title=c.get("title", ""),
+                    word_count=int(c.get("word_count") or 0),
+                    headings=list(c.get("headings", [])),
+                    position=c.get("position"),
+                )
+                for c in b.get("competitors", [])
+            ],
+            recommended_headings=list(b.get("recommended_headings", [])),
+            must_cover_entities=list(b.get("must_cover_entities", [])),
+            questions_to_answer=list(b.get("questions_to_answer", [])),
+            meta_title_suggestion=b.get("meta_title_suggestion", ""),
+            meta_description_suggestion=b.get("meta_description_suggestion", ""),
+            internal_links=list(b.get("internal_links", [])),
+            ai_overview_present=bool(b.get("ai_overview_present", False)),
+            ai_overview_snippet=b.get("ai_overview_snippet", ""),
+            ai_generated=bool(b.get("ai_generated", False)),
+        )
+
+    score = agent.score_content(
+        keyword=body.keyword,
+        url=body.url,
+        markdown=body.markdown,
+        brief=brief_obj,
+    )
+    return _serialize_score(score)
+
+
 # ── Projects CRUD ──────────────────────────────────────────────────
 
 from app.schemas.project import (
