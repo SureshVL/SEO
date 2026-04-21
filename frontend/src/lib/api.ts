@@ -161,6 +161,78 @@ export async function runAso(payload: any, apiKey: string) {
   return request("/aso/run", { method: "POST", body: JSON.stringify(payload) }, apiKey);
 }
 
+// ── AI Visibility (GEO) ──
+export type LLMEngine = "chat_gpt" | "perplexity" | "gemini";
+
+export interface KeywordVisibility {
+  keyword: string;
+  visibility_score: number;
+  ai_overview_present: boolean;
+  ai_overview_cited: boolean;
+  ai_overview_position: number | null;
+  ai_overview_snippet: string;
+  ai_overview_citations: Array<{ position: number; domain: string; url: string; title: string }>;
+  ai_mode_present: boolean;
+  ai_mode_cited: boolean;
+  ai_mode_snippet: string;
+  llm_results: Record<
+    string,
+    {
+      mentioned: boolean;
+      citation_position: number | null;
+      reference_count: number;
+      snippet: string;
+      error?: string | null;
+    }
+  >;
+}
+
+export interface AIVisibilityReport {
+  domain: string;
+  total_keywords: number;
+  engines: string[];
+  overall_score: number;
+  ai_overview_coverage: number;
+  ai_overview_citation_rate: number;
+  llm_mention_rate: Record<string, number>;
+  keywords: KeywordVisibility[];
+}
+
+export async function geoCheck(
+  payload: {
+    keywords: string[];
+    domain: string;
+    engines?: LLMEngine[];
+    location_code?: number;
+    language_code?: string;
+    include_ai_mode?: boolean;
+    prompt_template?: string;
+  },
+  apiKey: string,
+): Promise<AIVisibilityReport> {
+  return request<AIVisibilityReport>(
+    "/geo/check",
+    { method: "POST", body: JSON.stringify(payload) },
+    apiKey,
+  );
+}
+
+export async function projectAiVisibility(
+  projectId: string,
+  opts: { engines?: string; includeAiMode?: boolean; maxKeywords?: number },
+  apiKey: string,
+): Promise<AIVisibilityReport> {
+  const qs = new URLSearchParams();
+  if (opts.engines) qs.set("engines", opts.engines);
+  if (opts.includeAiMode) qs.set("include_ai_mode", "true");
+  if (opts.maxKeywords) qs.set("max_keywords", String(opts.maxKeywords));
+  return request<AIVisibilityReport>(
+    `/projects/${projectId}/ai-visibility?${qs}`,
+    { method: "POST" },
+    apiKey,
+  );
+}
+
 // ── SSE stream for job logs ──
 export function streamJobLogs(
   jobId: string,

@@ -10,6 +10,7 @@ from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
+from app.agents.ai_visibility_agent import AIVisibilityAgent
 from app.agents.aso_agent import AsoAgent
 from app.agents.content_agent import ContentAgent
 from app.agents.deploy_agent import DeployAgent
@@ -536,6 +537,129 @@ def get_crawl_audit(
     agent = _build_technical_agent()
     result = agent.fetch_site_crawl(task_id, domain=domain, include_samples=True)
     return _serialize_crawl(result)
+
+
+# ── AI Visibility / GEO ────────────────────────────────────────────
+
+from pydantic import BaseModel, Field
+
+
+class GeoCheckRequest(BaseModel):
+    keywords: list[str] = Field(..., min_length=1, max_length=50)
+    domain: str
+    engines: list[str] = Field(default_factory=lambda: ["chat_gpt", "perplexity", "gemini"])
+    location_code: int = 2356
+    language_code: str = "en"
+    include_ai_mode: bool = False
+    prompt_template: str = "What are the best {keyword}? List specific providers with their websites."
+
+
+def _build_ai_visibility_agent() -> AIVisibilityAgent:
+    from app.clients.dataforseo_client import DataForSEOClient
+    if not settings.dataforseo_login or not settings.dataforseo_password:
+        raise HTTPException(
+            status_code=400,
+            detail="DATAFORSEO_LOGIN and DATAFORSEO_PASSWORD required for AI visibility tracking.",
+        )
+    dfs = DataForSEOClient(
+        login=settings.dataforseo_login,
+        password=settings.dataforseo_password,
+    )
+    return AIVisibilityAgent(dataforseo_client=dfs)
+
+
+def _serialize_ai_visibility(report) -> dict:
+    return {
+        "domain": report.domain,
+        "total_keywords": report.total_keywords,
+        "engines": report.engines,
+        "overall_score": report.overall_score,
+        "ai_overview_coverage": report.ai_overview_coverage,
+        "ai_overview_citation_rate": report.ai_overview_citation_rate,
+        "llm_mention_rate": report.llm_mention_rate,
+        "keywords": [
+            {
+                "keyword": k.keyword,
+                "visibility_score": k.visibility_score,
+                "ai_overview_present": k.ai_overview_present,
+                "ai_overview_cited": k.ai_overview_cited,
+                "ai_overview_position": k.ai_overview_position,
+                "ai_overview_snippet": k.ai_overview_snippet,
+                "ai_overview_citations": k.ai_overview_citations,
+                "ai_mode_present": k.ai_mode_present,
+                "ai_mode_cited": k.ai_mode_cited,
+                "ai_mode_snippet": k.ai_mode_snippet,
+                "llm_results": k.llm_results,
+            }
+            for k in report.keywords
+        ],
+    }
+
+
+@app.post("/geo/check")
+def geo_check(
+    body: GeoCheckRequest,
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """Ad-hoc AI visibility check across Google AI Overview + LLM engines."""
+    valid_engines = {"chat_gpt", "perplexity", "gemini"}
+    engines = tuple(e for e in body.engines if e in valid_engines)
+    if not engines:
+        raise HTTPException(status_code=400, detail="At least one valid engine required.")
+
+    agent = _build_ai_visibility_agent()
+    report = agent.run(
+        keywords=body.keywords,
+        domain=body.domain,
+        location_code=body.location_code,
+        language_code=body.language_code,
+        engines=engines,
+        include_ai_mode=body.include_ai_mode,
+        prompt_template=body.prompt_template,
+    )
+    return _serialize_ai_visibility(report)
+
+
+@app.post("/projects/{project_id}/ai-visibility")
+def project_ai_visibility(
+    project_id: str,
+    engines: str = "chat_gpt,perplexity,gemini",
+    include_ai_mode: bool = False,
+    max_keywords: int = 10,
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """Run AI visibility on a project's stored keywords + domain."""
+    project_rows = _supabase_rest("get", "projects", params=f"id=eq.{project_id}")
+    if not project_rows:
+        raise HTTPException(status_code=404, detail="Project not found")
+    project = project_rows[0]
+    domain = project.get("domain") or ""
+    if not domain:
+        raise HTTPException(status_code=400, detail="Project has no domain configured.")
+
+    kw_rows = _supabase_rest(
+        "get", "keywords",
+        params=f"project_id=eq.{project_id}&order=is_primary.desc&limit={max_keywords}",
+    )
+    keywords = [r["keyword"] for r in (kw_rows or []) if r.get("keyword")]
+    if not keywords:
+        raise HTTPException(status_code=400, detail="No keywords tracked for this project.")
+
+    valid = {"chat_gpt", "perplexity", "gemini"}
+    engine_tuple = tuple(e.strip() for e in engines.split(",") if e.strip() in valid)
+    if not engine_tuple:
+        raise HTTPException(status_code=400, detail="No valid engines specified.")
+
+    agent = _build_ai_visibility_agent()
+    report = agent.run(
+        keywords=keywords,
+        domain=domain,
+        engines=engine_tuple,
+        include_ai_mode=include_ai_mode,
+    )
+    return _serialize_ai_visibility(report)
 
 
 # ── Projects CRUD ──────────────────────────────────────────────────
