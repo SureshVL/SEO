@@ -22,14 +22,16 @@ interface AppState {
   gscConnected: boolean;
   ga4PropertyId: string;
   gscSiteUrl: string;
+  ga4AccessToken: string;
+  gscAccessToken: string;
 
   setUser: (user: any) => void;
   setOrg: (org: any) => void;
   setCurrentProject: (project: any) => void;
   setApiKey: (key: string) => void;
   setBusinessProfile: (profile: BusinessProfile) => void;
-  setGa4Connected: (connected: boolean, propertyId?: string) => void;
-  setGscConnected: (connected: boolean, siteUrl?: string) => void;
+  setGa4Connected: (connected: boolean, propertyId?: string, accessToken?: string) => void;
+  setGscConnected: (connected: boolean, siteUrl?: string, accessToken?: string) => void;
 }
 
 export const useAppStore = create<AppState>()(
@@ -44,16 +46,26 @@ export const useAppStore = create<AppState>()(
       gscConnected: false,
       ga4PropertyId: "",
       gscSiteUrl: "",
+      ga4AccessToken: "",
+      gscAccessToken: "",
 
       setUser: (user) => set({ user }),
       setOrg: (org) => set({ org }),
       setCurrentProject: (project) => set({ currentProject: project }),
       setApiKey: (apiKey) => set({ apiKey }),
       setBusinessProfile: (profile) => set({ businessProfile: profile }),
-      setGa4Connected: (connected, propertyId) =>
-        set({ ga4Connected: connected, ga4PropertyId: propertyId || "" }),
-      setGscConnected: (connected, siteUrl) =>
-        set({ gscConnected: connected, gscSiteUrl: siteUrl || "" }),
+      setGa4Connected: (connected, propertyId, accessToken) =>
+        set((s) => ({
+          ga4Connected: connected,
+          ga4PropertyId: propertyId ?? (connected ? s.ga4PropertyId : ""),
+          ga4AccessToken: accessToken ?? (connected ? s.ga4AccessToken : ""),
+        })),
+      setGscConnected: (connected, siteUrl, accessToken) =>
+        set((s) => ({
+          gscConnected: connected,
+          gscSiteUrl: siteUrl ?? (connected ? s.gscSiteUrl : ""),
+          gscAccessToken: accessToken ?? (connected ? s.gscAccessToken : ""),
+        })),
     }),
     {
       name: "omnirank-store",
@@ -64,6 +76,8 @@ export const useAppStore = create<AppState>()(
         gscConnected: state.gscConnected,
         ga4PropertyId: state.ga4PropertyId,
         gscSiteUrl: state.gscSiteUrl,
+        ga4AccessToken: state.ga4AccessToken,
+        gscAccessToken: state.gscAccessToken,
       }),
     }
   )

@@ -1,10 +1,12 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Loader2, MapPin, Search, Sparkles, TrendingUp } from "lucide-react";
+import { Globe2, Loader2, MapPin, Search, Sparkles, TrendingUp } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/lib/store";
 import { keywordResearch } from "@/lib/api";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { Select } from "@/components/ui/Select";
 import { toast } from "sonner";
 
 export default function KeywordsPage() {
@@ -54,17 +56,21 @@ export default function KeywordsPage() {
 
   return (
     <div className="animate-fade-in">
-      <div className="mb-8">
-        <h1 className="text-2xl font-bold flex items-center gap-2">
-          <Search className="w-6 h-6 text-teal-400" /> AI Keyword Research
-        </h1>
-        {businessProfile && (
-          <div className="flex items-center gap-1.5 mt-2 text-xs text-brand-400 bg-brand-500/10 border border-brand-500/20 rounded-lg px-3 py-1.5 w-fit">
+      <PageHeader
+        title="AI Keyword Research"
+        subtitle="Discover high-intent keyword opportunities with volume, difficulty, and priority scoring."
+        icon={Search}
+        accent="#22D3EE"
+        chips={businessProfile && (
+          <span
+            className="inline-flex items-center gap-1.5 text-xs font-medium rounded-full px-3 py-1"
+            style={{ background: "rgba(34,211,238,0.12)", color: "#67E8F9", border: "1px solid rgba(34,211,238,0.3)" }}
+          >
             <Sparkles className="w-3.5 h-3.5" />
-            Auto-filled · {businessProfile.city && <><MapPin className="w-3 h-3 inline" /> {businessProfile.city} · </>}{businessProfile.businessTypeLabel}
-          </div>
+            {businessProfile.city ? `${businessProfile.city} · ` : ""}{businessProfile.businessTypeLabel}
+          </span>
         )}
-      </div>
+      />
 
       <div className="card p-6 mb-6">
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -86,11 +92,18 @@ export default function KeywordsPage() {
             </div>
             <div>
               <label className="label">Region</label>
-              <select value={region} onChange={e => setRegion(e.target.value)} className="input-field">
-                <option value="IN">India</option>
-                <option value="US">United States</option>
-                <option value="GB">United Kingdom</option>
-              </select>
+              <Select
+                icon={Globe2}
+                accent="#22D3EE"
+                widthClass="w-full"
+                value={region}
+                onChange={(e) => setRegion(e.target.value)}
+                options={[
+                  { value: "IN", label: "India" },
+                  { value: "US", label: "United States" },
+                  { value: "GB", label: "United Kingdom" },
+                ]}
+              />
             </div>
           </div>
           <button type="submit" disabled={loading} className="btn-primary flex items-center gap-2 px-6">

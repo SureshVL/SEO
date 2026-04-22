@@ -175,6 +175,167 @@ class DataForSEOClient:
                         features.add(item_type)
         return list(features)
 
+    # ── AI Visibility (GEO) ───────────────────────────────────────
+
+    @staticmethod
+    def _extract_domain(value: str) -> str:
+        if not value:
+            return ""
+        v = value.strip().lower()
+        v = v.replace("https://", "").replace("http://", "")
+        v = v.replace("www.", "")
+        return v.split("/")[0]
+
+    def ai_overview_for_keyword(
+        self,
+        keyword: str,
+        domain: str = "",
+        location_code: int = 2356,
+        language_code: str = "en",
+    ) -> dict:
+        """Extract Google AI Overview presence and citations from live SERP.
+
+        DataForSEO returns an ai_overview item in the SERP feed whenever Google
+        shows one. This method flattens it into {present, snippet, citations,
+        domain_cited, domain_position}.
+        """
+        data = self.serp_live(keyword, location_code, language_code, depth=20)
+        target = self._extract_domain(domain)
+
+        out = {
+            "keyword": keyword,
+            "present": False,
+            "snippet": "",
+            "citations": [],
+            "domain_cited": False,
+            "domain_position": None,
+        }
+
+        for task in data.get("tasks", []) or []:
+            for result in task.get("result", []) or []:
+                for item in result.get("items", []) or []:
+                    if item.get("type") != "ai_overview":
+                        continue
+                    out["present"] = True
+                    references = item.get("references") or []
+                    snippets: list[str] = []
+                    for block in item.get("items", []) or []:
+                        text = block.get("text") or block.get("title") or ""
+                        if text:
+                            snippets.append(text)
+                    out["snippet"] = " ".join(snippets)[:2000]
+
+                    citations: list[dict] = []
+                    for idx, ref in enumerate(references, 1):
+                        ref_domain = self._extract_domain(ref.get("domain") or ref.get("url") or "")
+                        citations.append({
+                            "position": idx,
+                            "domain": ref_domain,
+                            "url": ref.get("url", ""),
+                            "title": ref.get("title", ""),
+                        })
+                        if target and ref_domain == target and not out["domain_cited"]:
+                            out["domain_cited"] = True
+                            out["domain_position"] = idx
+                    out["citations"] = citations
+                    return out
+        return out
+
+    def ai_mode_serp(
+        self,
+        keyword: str,
+        location_code: int = 2356,
+        language_code: str = "en",
+    ) -> dict:
+        """Call DataForSEO's Google AI Mode SERP endpoint.
+
+        AI Mode is Google's conversational search surface. Returns
+        {answer, references, present} parsed from the response.
+        """
+        payload = [{
+            "keyword": keyword,
+            "location_code": location_code,
+            "language_code": language_code,
+        }]
+        try:
+            data = self._post("serp/google/ai_mode/live/advanced", payload)
+        except Exception as exc:
+            logger.debug("AI Mode endpoint failed for %s: %s", keyword, exc)
+            return {"keyword": keyword, "present": False, "answer": "", "references": [], "error": str(exc)}
+
+        out = {"keyword": keyword, "present": False, "answer": "", "references": []}
+        for task in data.get("tasks", []) or []:
+            for result in task.get("result", []) or []:
+                for item in result.get("items", []) or []:
+                    if item.get("type") != "ai_mode":
+                        continue
+                    out["present"] = True
+                    answer_blocks = []
+                    for block in item.get("items", []) or []:
+                        txt = block.get("text") or block.get("title") or ""
+                        if txt:
+                            answer_blocks.append(txt)
+                    out["answer"] = " ".join(answer_blocks)[:2000]
+                    refs = []
+                    for ref in item.get("references") or []:
+                        refs.append({
+                            "domain": self._extract_domain(ref.get("domain") or ref.get("url") or ""),
+                            "url": ref.get("url", ""),
+                            "title": ref.get("title", ""),
+                        })
+                    out["references"] = refs
+                    return out
+        return out
+
+    def llm_response(
+        self,
+        prompt: str,
+        model: str = "chat_gpt",
+        language_code: str = "en",
+    ) -> dict:
+        """Query DataForSEO AI-Optimization endpoints (chat_gpt / perplexity / gemini).
+
+        Returns {model, text, references} parsed from the response. Used to
+        check whether a target domain is mentioned/cited by a given LLM for a
+        prompt — the core GEO (Generative Engine Optimization) signal.
+        """
+        model_key = model.lower().replace("-", "_")
+        if model_key not in {"chat_gpt", "perplexity", "gemini"}:
+            raise ValueError("model must be one of: chat_gpt, perplexity, gemini")
+
+        endpoint = f"ai_optimization/{model_key}/llm_responses/live"
+        payload = [{
+            "user_prompt": prompt,
+            "language_code": language_code,
+        }]
+        try:
+            data = self._post(endpoint, payload)
+        except Exception as exc:
+            logger.debug("LLM endpoint %s failed for %s: %s", model_key, prompt[:60], exc)
+            return {"model": model_key, "prompt": prompt, "text": "", "references": [], "error": str(exc)}
+
+        out = {"model": model_key, "prompt": prompt, "text": "", "references": []}
+        for task in data.get("tasks", []) or []:
+            for result in task.get("result", []) or []:
+                items = result.get("items") or [result]
+                for item in items:
+                    text = item.get("response_text") or item.get("text") or item.get("answer") or ""
+                    if text:
+                        out["text"] = str(text)[:4000]
+                    refs = item.get("references") or item.get("sources") or item.get("citations") or []
+                    if refs:
+                        out["references"] = [
+                            {
+                                "domain": self._extract_domain(r.get("domain") or r.get("url") or ""),
+                                "url": r.get("url", ""),
+                                "title": r.get("title", ""),
+                            }
+                            for r in refs
+                        ]
+                if out["text"]:
+                    return out
+        return out
+
     # ── Keywords Data API ─────────────────────────────────────────
 
     def keyword_metrics(

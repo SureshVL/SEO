@@ -14,3 +14,4 @@ __pycache__/
 *.db
 .next/
 frontend/.next/
+*.tsbuildinfo

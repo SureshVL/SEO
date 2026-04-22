@@ -161,6 +161,121 @@ export async function runAso(payload: any, apiKey: string) {
   return request("/aso/run", { method: "POST", body: JSON.stringify(payload) }, apiKey);
 }
 
+// ── AI Visibility (GEO) ──
+export type LLMEngine = "chat_gpt" | "perplexity" | "gemini";
+
+export interface KeywordVisibility {
+  keyword: string;
+  visibility_score: number;
+  ai_overview_present: boolean;
+  ai_overview_cited: boolean;
+  ai_overview_position: number | null;
+  ai_overview_snippet: string;
+  ai_overview_citations: Array<{ position: number; domain: string; url: string; title: string }>;
+  ai_mode_present: boolean;
+  ai_mode_cited: boolean;
+  ai_mode_snippet: string;
+  llm_results: Record<
+    string,
+    {
+      mentioned: boolean;
+      citation_position: number | null;
+      reference_count: number;
+      snippet: string;
+      error?: string | null;
+    }
+  >;
+}
+
+export interface AIVisibilityReport {
+  domain: string;
+  total_keywords: number;
+  engines: string[];
+  overall_score: number;
+  ai_overview_coverage: number;
+  ai_overview_citation_rate: number;
+  llm_mention_rate: Record<string, number>;
+  keywords: KeywordVisibility[];
+}
+
+export async function geoCheck(
+  payload: {
+    keywords: string[];
+    domain: string;
+    engines?: LLMEngine[];
+    location_code?: number;
+    language_code?: string;
+    include_ai_mode?: boolean;
+    prompt_template?: string;
+  },
+  apiKey: string,
+): Promise<AIVisibilityReport> {
+  return request<AIVisibilityReport>(
+    "/geo/check",
+    { method: "POST", body: JSON.stringify(payload) },
+    apiKey,
+  );
+}
+
+export async function projectAiVisibility(
+  projectId: string,
+  opts: { engines?: string; includeAiMode?: boolean; maxKeywords?: number },
+  apiKey: string,
+): Promise<AIVisibilityReport> {
+  const qs = new URLSearchParams();
+  if (opts.engines) qs.set("engines", opts.engines);
+  if (opts.includeAiMode) qs.set("include_ai_mode", "true");
+  if (opts.maxKeywords) qs.set("max_keywords", String(opts.maxKeywords));
+  return request<AIVisibilityReport>(
+    `/projects/${projectId}/ai-visibility?${qs}`,
+    { method: "POST" },
+    apiKey,
+  );
+}
+
+// ── Schema markup ──
+export interface SchemaDetectionResult {
+  url: string;
+  blocks_found: number;
+  detected_types: string[];
+  detected: Array<{ type: string; name: string | null; raw: Record<string, any> }>;
+  missing_recommended: string[];
+  generated: Array<Record<string, any>>;
+  parse_errors: string[];
+}
+
+export async function detectSchema(
+  payload: {
+    url: string;
+    html?: string;
+    business_type?: string;
+    business_name?: string;
+  },
+  apiKey: string,
+): Promise<SchemaDetectionResult> {
+  return request<SchemaDetectionResult>(
+    "/schema/detect",
+    { method: "POST", body: JSON.stringify(payload) },
+    apiKey,
+  );
+}
+
+export async function generateSchema(
+  payload: {
+    schema_types: string[];
+    url?: string;
+    business_name?: string;
+    city?: string;
+  },
+  apiKey: string,
+): Promise<{ generated: Array<{ type: string; jsonld: Record<string, any> }>; unsupported: string[] }> {
+  return request(
+    "/schema/generate",
+    { method: "POST", body: JSON.stringify(payload) },
+    apiKey,
+  );
+}
+
 // ── SSE stream for job logs ──
 export function streamJobLogs(
   jobId: string,
@@ -314,6 +429,463 @@ export async function generateContentWithAI(projectId: string, payload: {
   return request<{ job_id: string; status: string }>(
     "/jobs/content",
     { method: "POST", body: JSON.stringify({ project_id: projectId, ...payload }) },
+    apiKey,
+  );
+}
+
+// ── Content brief + scoring ──
+export interface ContentBriefCompetitor {
+  url: string;
+  title: string;
+  word_count: number;
+  headings: string[];
+  position: number | null;
+}
+
+export interface ContentBrief {
+  keyword: string;
+  target_word_count: number;
+  serp_median_words: number;
+  competitors: ContentBriefCompetitor[];
+  recommended_headings: string[];
+  must_cover_entities: string[];
+  questions_to_answer: string[];
+  meta_title_suggestion: string;
+  meta_description_suggestion: string;
+  internal_links: { anchor: string; path: string }[];
+  ai_overview_present: boolean;
+  ai_overview_snippet: string;
+  ai_generated: boolean;
+}
+
+export interface ContentScore {
+  keyword: string;
+  total: number;
+  word_count: number;
+  serp_median_words: number;
+  breakdown: {
+    length: number;
+    headings: number;
+    entities: number;
+    questions: number;
+    keyword_usage: number;
+  };
+  missing_headings: string[];
+  missing_entities: string[];
+  missing_questions: string[];
+  recommendations: string[];
+}
+
+export async function generateContentBrief(
+  payload: {
+    keyword: string;
+    domain?: string;
+    location_code?: number;
+    language_code?: string;
+    scrape_top_n?: number;
+  },
+  apiKey: string,
+) {
+  return request<ContentBrief>(
+    "/content/brief",
+    { method: "POST", body: JSON.stringify(payload) },
+    apiKey,
+  );
+}
+
+export async function scoreContent(
+  payload: {
+    keyword: string;
+    url?: string;
+    markdown?: string;
+    brief?: ContentBrief;
+  },
+  apiKey: string,
+) {
+  return request<ContentScore>(
+    "/content/score",
+    { method: "POST", body: JSON.stringify(payload) },
+    apiKey,
+  );
+}
+
+// ── Revenue attribution (GA4 + GSC merged) ──
+export interface AttributionPage {
+  page_path: string;
+  sessions: number;
+  organic_sessions: number;
+  revenue: number;
+  organic_revenue: number;
+  conversions: number;
+  gsc_clicks: number;
+  gsc_impressions: number;
+  avg_position: number;
+  top_queries: { query: string; clicks: number; impressions: number; position: number }[];
+}
+
+export interface AttributionQuery {
+  query: string;
+  clicks: number;
+  impressions: number;
+  ctr: number;
+  position: number;
+  landing_pages: string[];
+  attributed_revenue: number;
+}
+
+export interface AttributionReport {
+  date_range_days: number;
+  ga4_property_id: string;
+  gsc_site_url: string;
+  ga4: {
+    total_sessions: number;
+    organic_sessions: number;
+    organic_share_pct: number;
+    total_revenue: number;
+    organic_revenue: number;
+    organic_revenue_share_pct: number;
+    total_conversions: number;
+    organic_conversions: number;
+  };
+  gsc: {
+    total_clicks: number;
+    total_impressions: number;
+    avg_position: number;
+  };
+  top_pages: AttributionPage[];
+  top_queries: AttributionQuery[];
+  warnings: string[];
+}
+
+export async function attributionReport(
+  payload: {
+    ga4_access_token: string;
+    ga4_property_id: string;
+    gsc_access_token: string;
+    gsc_site_url: string;
+    date_range_days?: number;
+    top_n?: number;
+  },
+  apiKey: string,
+) {
+  return request<AttributionReport>(
+    "/analytics/attribution",
+    { method: "POST", body: JSON.stringify(payload) },
+    apiKey,
+  );
+}
+
+// ── Link building ────────────────────────────────────────────────
+
+export interface BacklinkAnchor {
+  anchor: string;
+  backlinks: number;
+  referring_domains: number;
+  dofollow: boolean;
+}
+
+export interface BacklinkReferrer {
+  domain: string;
+  rank: number;
+  backlinks: number;
+  dofollow: boolean;
+  first_seen?: string | null;
+}
+
+export interface BacklinkProfile {
+  domain: string;
+  total_backlinks: number;
+  referring_domains: number;
+  domain_rank: number;
+  dofollow_ratio: number;
+  top_anchors: BacklinkAnchor[];
+  top_referring: BacklinkReferrer[];
+  warnings: string[];
+}
+
+export type LinkProspectStatus =
+  | "new"
+  | "researching"
+  | "contacted"
+  | "replied"
+  | "agreed"
+  | "placed"
+  | "declined";
+
+export interface LinkProspect {
+  id: string;
+  project_id: string;
+  domain: string;
+  url: string | null;
+  contact_name: string | null;
+  contact_email: string | null;
+  domain_rating: number | null;
+  referring_domains: number | null;
+  status: LinkProspectStatus;
+  template: string | null;
+  subject: string | null;
+  notes: string | null;
+  opportunity_score: number | null;
+  already_linking: boolean;
+  outreach_sent_at: string | null;
+  response_at: string | null;
+  placed_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface OutreachEmailDraft {
+  subject: string;
+  body: string;
+  template: string;
+  model_used?: string;
+  cost_usd?: number;
+  fallback?: boolean;
+}
+
+export async function fetchBacklinkProfile(
+  payload: { domain: string; anchors_limit?: number; referring_limit?: number },
+  apiKey: string,
+) {
+  return request<BacklinkProfile>(
+    "/links/backlinks",
+    { method: "POST", body: JSON.stringify(payload) },
+    apiKey,
+  );
+}
+
+export async function draftOutreachEmail(
+  payload: {
+    prospect: Record<string, unknown>;
+    campaign?: Record<string, unknown>;
+    template?: "intro" | "broken_link" | "guest_post" | "resource_page";
+  },
+  apiKey: string,
+) {
+  return request<OutreachEmailDraft>(
+    "/links/outreach/draft",
+    { method: "POST", body: JSON.stringify(payload) },
+    apiKey,
+  );
+}
+
+export async function listLinkProspects(
+  projectId: string,
+  apiKey: string,
+  status?: LinkProspectStatus,
+) {
+  const qs = status ? `?status=${status}` : "";
+  return request<LinkProspect[]>(
+    `/projects/${projectId}/link-prospects${qs}`,
+    { method: "GET" },
+    apiKey,
+  );
+}
+
+export async function createLinkProspect(
+  projectId: string,
+  payload: Partial<LinkProspect> & { domain: string },
+  apiKey: string,
+) {
+  return request<LinkProspect>(
+    `/projects/${projectId}/link-prospects`,
+    {
+      method: "POST",
+      body: JSON.stringify({ project_id: projectId, ...payload }),
+    },
+    apiKey,
+  );
+}
+
+export async function updateLinkProspect(
+  prospectId: string,
+  payload: Partial<LinkProspect>,
+  apiKey: string,
+) {
+  return request<LinkProspect>(
+    `/link-prospects/${prospectId}`,
+    { method: "PATCH", body: JSON.stringify(payload) },
+    apiKey,
+  );
+}
+
+export async function deleteLinkProspect(prospectId: string, apiKey: string) {
+  return request<{ deleted: boolean }>(
+    `/link-prospects/${prospectId}`,
+    { method: "DELETE" },
+    apiKey,
+  );
+}
+
+export async function draftProspectEmail(
+  prospectId: string,
+  payload: {
+    prospect?: Record<string, unknown>;
+    campaign?: Record<string, unknown>;
+    template?: "intro" | "broken_link" | "guest_post" | "resource_page";
+  },
+  apiKey: string,
+) {
+  return request<OutreachEmailDraft>(
+    `/link-prospects/${prospectId}/draft-email`,
+    { method: "POST", body: JSON.stringify({ prospect: {}, ...payload }) },
+    apiKey,
+  );
+}
+
+// ── White-label branding ─────────────────────────────────────────
+
+export interface BrandingConfig {
+  agency_name: string;
+  logo_url: string;
+  primary_color: string;
+  secondary_color: string;
+  accent_color: string;
+  text_color: string;
+  background_color: string;
+  cover_title: string;
+  cover_subtitle: string;
+  footer_text: string;
+  website: string;
+  email: string;
+  enabled: boolean;
+}
+
+export interface BrandingResponse {
+  branding: BrandingConfig;
+  validation_warnings: string[];
+}
+
+export async function getProjectBranding(projectId: string, apiKey: string) {
+  return request<BrandingResponse>(
+    `/projects/${projectId}/branding`,
+    { method: "GET" },
+    apiKey,
+  );
+}
+
+export async function updateProjectBranding(
+  projectId: string,
+  updates: Partial<BrandingConfig>,
+  apiKey: string,
+) {
+  return request<{ branding: BrandingConfig }>(
+    `/projects/${projectId}/branding`,
+    { method: "PATCH", body: JSON.stringify(updates) },
+    apiKey,
+  );
+}
+
+export function brandingPreviewUrl(projectId: string) {
+  const base = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
+  return `${base}/projects/${projectId}/branding/preview`;
+}
+
+// ── Programmatic SEO ─────────────────────────────────────────────
+
+export interface ProgrammaticTemplate {
+  name?: string;
+  slug_template: string;
+  title_template: string;
+  meta_description_template: string;
+  h1_template?: string;
+  body_template: string;
+}
+
+export interface ProgrammaticPage {
+  slug: string;
+  title: string;
+  meta_description: string;
+  h1: string;
+  body_markdown: string;
+  variables: Record<string, unknown>;
+  warnings: string[];
+}
+
+export interface ProgrammaticResult {
+  template_name: string;
+  total_rows: number;
+  generated: number;
+  skipped: number;
+  variables_used: string[];
+  warnings: string[];
+  pages: ProgrammaticPage[];
+}
+
+export async function generateProgrammaticPages(
+  payload: {
+    template: ProgrammaticTemplate;
+    rows?: Record<string, unknown>[];
+    csv?: string;
+    dedupe_on?: string;
+    max_pages?: number;
+  },
+  apiKey: string,
+) {
+  return request<ProgrammaticResult>(
+    "/programmatic/generate",
+    { method: "POST", body: JSON.stringify(payload) },
+    apiKey,
+  );
+}
+
+// ── Monthly workflow (Week 1-4 cadence) ──────────────────────────
+
+export interface WorkflowSchedule {
+  project_id: string;
+  week: number;
+  week_label: string;
+  tasks: string[];
+  as_of: string;
+}
+
+export interface WorkflowTaskResult {
+  name: string;
+  status: "completed" | "skipped" | "failed";
+  detail: string;
+  data: Record<string, unknown>;
+}
+
+export interface WorkflowRun {
+  project_id: string;
+  week: number;
+  week_label: string;
+  started_at: string;
+  finished_at: string;
+  completed: number;
+  skipped: number;
+  failed: number;
+  tasks: WorkflowTaskResult[];
+}
+
+export async function getWorkflowSchedule(projectId: string, apiKey: string) {
+  return request<WorkflowSchedule>(
+    `/workflow/schedule/${projectId}`,
+    { method: "GET" },
+    apiKey,
+  );
+}
+
+export async function runWorkflow(
+  projectId: string,
+  apiKey: string,
+  only?: string[],
+) {
+  return request<WorkflowRun>(
+    `/workflow/run/${projectId}`,
+    { method: "POST", body: JSON.stringify({ only, triggered_by: "manual" }) },
+    apiKey,
+  );
+}
+
+export async function listWorkflowRuns(
+  projectId: string,
+  apiKey: string,
+  limit = 20,
+) {
+  return request<{ runs: Array<WorkflowRun & { id: string; created_at: string; triggered_by: string }> }>(
+    `/workflow/runs/${projectId}?limit=${limit}`,
+    { method: "GET" },
     apiKey,
   );
 }

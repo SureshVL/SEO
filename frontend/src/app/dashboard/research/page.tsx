@@ -1,10 +1,12 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Bot, ExternalLink, Loader2, MapPin, Search, Sparkles, TrendingUp } from "lucide-react";
+import { Bot, ExternalLink, Globe2, Languages, Loader2, MapPin, Search, Sparkles, TrendingUp } from "lucide-react";
 import { cn, scoreColor, scoreBg } from "@/lib/utils";
 import { useAppStore } from "@/lib/store";
 import { createResearchJob, getJob } from "@/lib/api";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { Select } from "@/components/ui/Select";
 import { toast } from "sonner";
 
 export default function ResearchPage() {
@@ -83,17 +85,21 @@ export default function ResearchPage() {
 
   return (
     <div className="animate-fade-in">
-      <div className="mb-8">
-        <h1 className="text-2xl font-bold flex items-center gap-2">
-          <Bot className="w-6 h-6 text-brand-400" /> AI Research Agent
-        </h1>
-        {profileContext && (
-          <div className="flex items-center gap-1.5 mt-2 text-xs text-brand-400 bg-brand-500/10 border border-brand-500/20 rounded-lg px-3 py-1.5 w-fit">
+      <PageHeader
+        title="AI Research Agent"
+        subtitle="Deep competitive analysis, content gaps, and AI-driven recommendations for any URL + keyword."
+        icon={Bot}
+        accent="#8B5CF6"
+        chips={profileContext && (
+          <span
+            className="inline-flex items-center gap-1.5 text-xs font-medium rounded-full px-3 py-1"
+            style={{ background: "rgba(139,92,246,0.12)", color: "#A78BFA", border: "1px solid rgba(139,92,246,0.3)" }}
+          >
             <Sparkles className="w-3.5 h-3.5" />
-            Auto-filled from your profile · {profileContext}
-          </div>
+            {profileContext}
+          </span>
         )}
-      </div>
+      />
 
       <div className="card p-6 mb-6">
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -119,20 +125,34 @@ export default function ResearchPage() {
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="label">Target Region</label>
-              <select value={region} onChange={e => setRegion(e.target.value)} className="input-field">
-                <option value="IN">India</option>
-                <option value="US">United States</option>
-                <option value="GB">United Kingdom</option>
-                <option value="SG">Singapore</option>
-              </select>
+              <Select
+                icon={Globe2}
+                accent="#22D3EE"
+                widthClass="w-full"
+                value={region}
+                onChange={(e) => setRegion(e.target.value)}
+                options={[
+                  { value: "IN", label: "India" },
+                  { value: "US", label: "United States" },
+                  { value: "GB", label: "United Kingdom" },
+                  { value: "SG", label: "Singapore" },
+                ]}
+              />
             </div>
             <div>
               <label className="label">Language</label>
-              <select value={locale} onChange={e => setLocale(e.target.value)} className="input-field">
-                <option value="en-US">English (US)</option>
-                <option value="en-IN">English (India)</option>
-                <option value="hi-IN">Hindi</option>
-              </select>
+              <Select
+                icon={Languages}
+                accent="#EC4899"
+                widthClass="w-full"
+                value={locale}
+                onChange={(e) => setLocale(e.target.value)}
+                options={[
+                  { value: "en-US", label: "English (US)" },
+                  { value: "en-IN", label: "English (India)" },
+                  { value: "hi-IN", label: "Hindi" },
+                ]}
+              />
             </div>
           </div>
           <button type="submit" disabled={loading} className="btn-primary flex items-center gap-2 px-6">

@@ -10,10 +10,12 @@ from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
+from app.agents.ai_visibility_agent import AIVisibilityAgent
 from app.agents.aso_agent import AsoAgent
 from app.agents.content_agent import ContentAgent
 from app.agents.deploy_agent import DeployAgent
 from app.agents.research_agent import AlgorithmicReverseEngineerAgent
+from app.agents.schema_agent import SchemaAgent
 from app.agents.technical_agent import TechnicalAgent
 from app.agents.workflow import SEOAutonomousLoop
 from app.api.rate_limit import enforce_rate_limit
@@ -536,6 +538,848 @@ def get_crawl_audit(
     agent = _build_technical_agent()
     result = agent.fetch_site_crawl(task_id, domain=domain, include_samples=True)
     return _serialize_crawl(result)
+
+
+# ── AI Visibility / GEO ────────────────────────────────────────────
+
+from pydantic import BaseModel, Field
+
+
+class GeoCheckRequest(BaseModel):
+    keywords: list[str] = Field(..., min_length=1, max_length=50)
+    domain: str
+    engines: list[str] = Field(default_factory=lambda: ["chat_gpt", "perplexity", "gemini"])
+    location_code: int = 2356
+    language_code: str = "en"
+    include_ai_mode: bool = False
+    prompt_template: str = "What are the best {keyword}? List specific providers with their websites."
+
+
+def _build_ai_visibility_agent() -> AIVisibilityAgent:
+    from app.clients.dataforseo_client import DataForSEOClient
+    if not settings.dataforseo_login or not settings.dataforseo_password:
+        raise HTTPException(
+            status_code=400,
+            detail="DATAFORSEO_LOGIN and DATAFORSEO_PASSWORD required for AI visibility tracking.",
+        )
+    dfs = DataForSEOClient(
+        login=settings.dataforseo_login,
+        password=settings.dataforseo_password,
+    )
+    return AIVisibilityAgent(dataforseo_client=dfs)
+
+
+def _serialize_ai_visibility(report) -> dict:
+    return {
+        "domain": report.domain,
+        "total_keywords": report.total_keywords,
+        "engines": report.engines,
+        "overall_score": report.overall_score,
+        "ai_overview_coverage": report.ai_overview_coverage,
+        "ai_overview_citation_rate": report.ai_overview_citation_rate,
+        "llm_mention_rate": report.llm_mention_rate,
+        "keywords": [
+            {
+                "keyword": k.keyword,
+                "visibility_score": k.visibility_score,
+                "ai_overview_present": k.ai_overview_present,
+                "ai_overview_cited": k.ai_overview_cited,
+                "ai_overview_position": k.ai_overview_position,
+                "ai_overview_snippet": k.ai_overview_snippet,
+                "ai_overview_citations": k.ai_overview_citations,
+                "ai_mode_present": k.ai_mode_present,
+                "ai_mode_cited": k.ai_mode_cited,
+                "ai_mode_snippet": k.ai_mode_snippet,
+                "llm_results": k.llm_results,
+            }
+            for k in report.keywords
+        ],
+    }
+
+
+@app.post("/geo/check")
+def geo_check(
+    body: GeoCheckRequest,
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """Ad-hoc AI visibility check across Google AI Overview + LLM engines."""
+    valid_engines = {"chat_gpt", "perplexity", "gemini"}
+    engines = tuple(e for e in body.engines if e in valid_engines)
+    if not engines:
+        raise HTTPException(status_code=400, detail="At least one valid engine required.")
+
+    agent = _build_ai_visibility_agent()
+    report = agent.run(
+        keywords=body.keywords,
+        domain=body.domain,
+        location_code=body.location_code,
+        language_code=body.language_code,
+        engines=engines,
+        include_ai_mode=body.include_ai_mode,
+        prompt_template=body.prompt_template,
+    )
+    return _serialize_ai_visibility(report)
+
+
+@app.post("/projects/{project_id}/ai-visibility")
+def project_ai_visibility(
+    project_id: str,
+    engines: str = "chat_gpt,perplexity,gemini",
+    include_ai_mode: bool = False,
+    max_keywords: int = 10,
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """Run AI visibility on a project's stored keywords + domain."""
+    project_rows = _supabase_rest("get", "projects", params=f"id=eq.{project_id}")
+    if not project_rows:
+        raise HTTPException(status_code=404, detail="Project not found")
+    project = project_rows[0]
+    domain = project.get("domain") or ""
+    if not domain:
+        raise HTTPException(status_code=400, detail="Project has no domain configured.")
+
+    kw_rows = _supabase_rest(
+        "get", "keywords",
+        params=f"project_id=eq.{project_id}&order=is_primary.desc&limit={max_keywords}",
+    )
+    keywords = [r["keyword"] for r in (kw_rows or []) if r.get("keyword")]
+    if not keywords:
+        raise HTTPException(status_code=400, detail="No keywords tracked for this project.")
+
+    valid = {"chat_gpt", "perplexity", "gemini"}
+    engine_tuple = tuple(e.strip() for e in engines.split(",") if e.strip() in valid)
+    if not engine_tuple:
+        raise HTTPException(status_code=400, detail="No valid engines specified.")
+
+    agent = _build_ai_visibility_agent()
+    report = agent.run(
+        keywords=keywords,
+        domain=domain,
+        engines=engine_tuple,
+        include_ai_mode=include_ai_mode,
+    )
+    return _serialize_ai_visibility(report)
+
+
+# ── Schema markup detection & generation ──────────────────────────
+
+class SchemaDetectRequest(BaseModel):
+    url: str
+    html: str | None = None  # optional pre-fetched HTML
+    business_type: str = "default"
+    business_name: str = ""
+
+
+class SchemaGenerateRequest(BaseModel):
+    schema_types: list[str] = Field(..., min_length=1, max_length=20)
+    url: str = ""
+    business_name: str = ""
+    city: str = ""
+
+
+def _build_schema_agent() -> SchemaAgent:
+    firecrawl = None
+    if settings.firecrawl_api_key:
+        firecrawl = FirecrawlHTTPClient(api_key=settings.firecrawl_api_key)
+    return SchemaAgent(firecrawl_client=firecrawl)
+
+
+def _serialize_schema_detection(result) -> dict:
+    return {
+        "url": result.url,
+        "blocks_found": result.blocks_found,
+        "detected_types": result.detected_types,
+        "detected": [
+            {"type": d.type, "name": d.name, "raw": d.raw} for d in result.detected
+        ],
+        "missing_recommended": result.missing_recommended,
+        "generated": result.generated,
+        "parse_errors": result.parse_errors,
+    }
+
+
+@app.post("/schema/detect")
+def schema_detect(
+    body: SchemaDetectRequest,
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """Detect JSON-LD schema on a URL and return gap-analysis + stubs."""
+    agent = _build_schema_agent()
+    result = agent.detect(
+        url=body.url,
+        html=body.html or "",
+        business_type=body.business_type,
+        business_name=body.business_name,
+    )
+    return _serialize_schema_detection(result)
+
+
+@app.post("/schema/generate")
+def schema_generate(
+    body: SchemaGenerateRequest,
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """Generate JSON-LD stubs for a list of schema types."""
+    agent = _build_schema_agent()
+    context = {
+        "url": body.url,
+        "business_name": body.business_name,
+        "city": body.city,
+    }
+    out = []
+    unknown: list[str] = []
+    for t in body.schema_types:
+        stub = agent.generate(t, context)
+        if stub:
+            out.append({"type": t, "jsonld": stub})
+        else:
+            unknown.append(t)
+    return {"generated": out, "unsupported": unknown}
+
+
+# ── Content briefs + scoring ──────────────────────────────────────
+
+class ContentBriefRequest(BaseModel):
+    keyword: str = Field(..., min_length=1, max_length=200)
+    domain: str = ""
+    location_code: int = 2356
+    language_code: str = "en"
+    scrape_top_n: int = Field(5, ge=1, le=10)
+
+
+class ContentScoreRequest(BaseModel):
+    keyword: str = Field(..., min_length=1, max_length=200)
+    url: str = ""
+    markdown: str = ""
+    brief: dict | None = None  # optional pre-generated brief payload
+    location_code: int = 2356
+    language_code: str = "en"
+
+
+def _build_content_agent() -> ContentAgent:
+    """Build a ContentAgent wired up with whichever clients are configured."""
+    from app.clients.dataforseo_client import DataForSEOClient
+    claude = _get_claude_client()
+    firecrawl = None
+    if settings.firecrawl_api_key:
+        firecrawl = FirecrawlHTTPClient(api_key=settings.firecrawl_api_key)
+    dfs = None
+    if settings.dataforseo_login and settings.dataforseo_password:
+        dfs = DataForSEOClient(
+            login=settings.dataforseo_login,
+            password=settings.dataforseo_password,
+        )
+    return ContentAgent(
+        claude_client=claude,
+        dataforseo_client=dfs,
+        firecrawl_client=firecrawl,
+    )
+
+
+def _serialize_brief(brief) -> dict:
+    return {
+        "keyword": brief.keyword,
+        "target_word_count": brief.target_word_count,
+        "serp_median_words": brief.serp_median_words,
+        "competitors": [
+            {
+                "url": c.url, "title": c.title,
+                "word_count": c.word_count, "headings": c.headings,
+                "position": c.position,
+            }
+            for c in brief.competitors
+        ],
+        "recommended_headings": brief.recommended_headings,
+        "must_cover_entities": brief.must_cover_entities,
+        "questions_to_answer": brief.questions_to_answer,
+        "meta_title_suggestion": brief.meta_title_suggestion,
+        "meta_description_suggestion": brief.meta_description_suggestion,
+        "internal_links": brief.internal_links,
+        "ai_overview_present": brief.ai_overview_present,
+        "ai_overview_snippet": brief.ai_overview_snippet,
+        "ai_generated": brief.ai_generated,
+    }
+
+
+def _serialize_score(score) -> dict:
+    return {
+        "keyword": score.keyword,
+        "total": score.total,
+        "word_count": score.word_count,
+        "serp_median_words": score.serp_median_words,
+        "breakdown": {
+            "length": score.length_score,
+            "headings": score.heading_score,
+            "entities": score.entity_score,
+            "questions": score.question_score,
+            "keyword_usage": score.keyword_usage_score,
+        },
+        "missing_headings": score.missing_headings,
+        "missing_entities": score.missing_entities,
+        "missing_questions": score.missing_questions,
+        "recommendations": score.recommendations,
+    }
+
+
+@app.post("/content/brief")
+def content_brief(
+    body: ContentBriefRequest,
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """Generate a SERP-driven content brief for a keyword."""
+    agent = _build_content_agent()
+    brief = agent.generate_brief(
+        keyword=body.keyword,
+        domain=body.domain,
+        location_code=body.location_code,
+        language_code=body.language_code,
+        scrape_top_n=body.scrape_top_n,
+    )
+    return _serialize_brief(brief)
+
+
+@app.post("/content/score")
+def content_score(
+    body: ContentScoreRequest,
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """Score content against the SERP competitive landscape."""
+    if not body.url and not body.markdown:
+        raise HTTPException(
+            status_code=400,
+            detail="Provide either `url` or `markdown`.",
+        )
+    from app.agents.content_agent import ContentBrief, CompetitorSummary
+    agent = _build_content_agent()
+
+    brief_obj = None
+    if body.brief:
+        b = body.brief
+        brief_obj = ContentBrief(
+            keyword=b.get("keyword", body.keyword),
+            target_word_count=int(b.get("target_word_count", 1500)),
+            serp_median_words=int(b.get("serp_median_words", 1500)),
+            competitors=[
+                CompetitorSummary(
+                    url=c.get("url", ""), title=c.get("title", ""),
+                    word_count=int(c.get("word_count") or 0),
+                    headings=list(c.get("headings", [])),
+                    position=c.get("position"),
+                )
+                for c in b.get("competitors", [])
+            ],
+            recommended_headings=list(b.get("recommended_headings", [])),
+            must_cover_entities=list(b.get("must_cover_entities", [])),
+            questions_to_answer=list(b.get("questions_to_answer", [])),
+            meta_title_suggestion=b.get("meta_title_suggestion", ""),
+            meta_description_suggestion=b.get("meta_description_suggestion", ""),
+            internal_links=list(b.get("internal_links", [])),
+            ai_overview_present=bool(b.get("ai_overview_present", False)),
+            ai_overview_snippet=b.get("ai_overview_snippet", ""),
+            ai_generated=bool(b.get("ai_generated", False)),
+        )
+
+    score = agent.score_content(
+        keyword=body.keyword,
+        url=body.url,
+        markdown=body.markdown,
+        brief=brief_obj,
+    )
+    return _serialize_score(score)
+
+
+# ── Link-building ──────────────────────────────────────────────────
+
+class BacklinkProfileRequest(BaseModel):
+    domain: str = Field(..., min_length=3, max_length=200)
+    anchors_limit: int = Field(20, ge=1, le=100)
+    referring_limit: int = Field(20, ge=1, le=100)
+
+
+class OutreachDraftRequest(BaseModel):
+    prospect: dict
+    campaign: dict | None = None
+    template: str = Field("intro", pattern="^(intro|broken_link|guest_post|resource_page)$")
+
+
+class LinkProspectCreate(BaseModel):
+    project_id: str
+    domain: str = Field(..., min_length=1, max_length=200)
+    url: str = ""
+    contact_name: str = ""
+    contact_email: str = ""
+    domain_rating: float | None = None
+    referring_domains: int | None = None
+    status: str = Field("new", pattern="^(new|researching|contacted|replied|agreed|placed|declined)$")
+    template: str = ""
+    subject: str = ""
+    notes: str = ""
+    already_linking: bool = False
+
+
+class LinkProspectUpdate(BaseModel):
+    domain: str | None = None
+    url: str | None = None
+    contact_name: str | None = None
+    contact_email: str | None = None
+    domain_rating: float | None = None
+    referring_domains: int | None = None
+    status: str | None = Field(None, pattern="^(new|researching|contacted|replied|agreed|placed|declined)$")
+    template: str | None = None
+    subject: str | None = None
+    notes: str | None = None
+    already_linking: bool | None = None
+    outreach_sent_at: str | None = None
+    response_at: str | None = None
+    placed_at: str | None = None
+
+
+def _build_link_agent():
+    from app.agents.link_agent import LinkAgent
+    from app.clients.dataforseo_client import DataForSEOClient
+    dfs = None
+    if settings.dataforseo_login and settings.dataforseo_password:
+        dfs = DataForSEOClient(
+            login=settings.dataforseo_login,
+            password=settings.dataforseo_password,
+        )
+    return LinkAgent(dataforseo_client=dfs, claude_client=_get_claude_client())
+
+
+def _serialize_backlink_report(r) -> dict:
+    return {
+        "domain": r.domain,
+        "total_backlinks": r.total_backlinks,
+        "referring_domains": r.referring_domains,
+        "domain_rank": r.domain_rank,
+        "dofollow_ratio": r.dofollow_ratio,
+        "top_anchors": r.top_anchors,
+        "top_referring": r.top_referring,
+        "warnings": r.warnings,
+    }
+
+
+@app.post("/links/backlinks")
+def link_backlinks(
+    body: BacklinkProfileRequest,
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """Fetch a domain's backlink profile via DataForSEO."""
+    agent = _build_link_agent()
+    report = agent.backlink_profile(
+        domain=body.domain,
+        anchors_limit=body.anchors_limit,
+        referring_limit=body.referring_limit,
+    )
+    return _serialize_backlink_report(report)
+
+
+@app.post("/links/outreach/draft")
+def link_outreach_draft(
+    body: OutreachDraftRequest,
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """Draft an outreach email for a given prospect + campaign."""
+    agent = _build_link_agent()
+    email = agent.draft_outreach_email(
+        prospect=body.prospect,
+        campaign=body.campaign,
+        template=body.template,
+    )
+    return {
+        "subject": email.subject,
+        "body": email.body,
+        "template": email.template,
+        "model_used": email.model_used,
+        "cost_usd": email.cost_usd,
+        "fallback": email.fallback,
+    }
+
+
+@app.get("/projects/{project_id}/link-prospects")
+def list_link_prospects(
+    project_id: str,
+    status: str = "",
+    _auth: None = Depends(require_api_key),
+):
+    params = f"project_id=eq.{project_id}&order=created_at.desc&limit=200"
+    if status:
+        params = f"project_id=eq.{project_id}&status=eq.{status}&order=created_at.desc&limit=200"
+    return _supabase_rest("get", "link_prospects", params=params)
+
+
+@app.post("/projects/{project_id}/link-prospects")
+def create_link_prospect(
+    project_id: str,
+    body: LinkProspectCreate,
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    from app.agents.link_agent import LinkAgent
+    score = LinkAgent.score_prospect({
+        "domain_rating": body.domain_rating,
+        "referring_domains": body.referring_domains,
+        "contact_email": body.contact_email,
+        "already_linking": body.already_linking,
+    })
+    payload = body.model_dump()
+    payload["project_id"] = project_id
+    payload["opportunity_score"] = score
+    data = _supabase_rest("post", "link_prospects", payload)
+    return data[0] if isinstance(data, list) else data
+
+
+@app.patch("/link-prospects/{prospect_id}")
+def update_link_prospect(
+    prospect_id: str,
+    body: LinkProspectUpdate,
+    _auth: None = Depends(require_api_key),
+):
+    updates = {k: v for k, v in body.model_dump().items() if v is not None}
+    if not updates:
+        raise HTTPException(status_code=400, detail="No fields to update.")
+    updates["updated_at"] = "now()"
+    data = _supabase_rest("patch", f"link_prospects?id=eq.{prospect_id}", updates)
+    if not data:
+        raise HTTPException(status_code=404, detail="Link prospect not found")
+    return data[0]
+
+
+@app.delete("/link-prospects/{prospect_id}")
+def delete_link_prospect(
+    prospect_id: str,
+    _auth: None = Depends(require_api_key),
+):
+    _supabase_rest("delete", f"link_prospects?id=eq.{prospect_id}")
+    return {"deleted": True}
+
+
+@app.post("/link-prospects/{prospect_id}/draft-email")
+def draft_prospect_email(
+    prospect_id: str,
+    body: OutreachDraftRequest,
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """Generate an email draft for a persisted prospect and save subject+template."""
+    rows = _supabase_rest("get", "link_prospects", params=f"id=eq.{prospect_id}")
+    if not rows:
+        raise HTTPException(status_code=404, detail="Link prospect not found")
+    prospect_row = rows[0]
+
+    merged_prospect = {
+        "domain": prospect_row.get("domain"),
+        "url": prospect_row.get("url"),
+        "contact_name": prospect_row.get("contact_name"),
+        "contact_email": prospect_row.get("contact_email"),
+        "domain_rating": prospect_row.get("domain_rating"),
+        "notes": prospect_row.get("notes"),
+        **(body.prospect or {}),
+    }
+    agent = _build_link_agent()
+    email = agent.draft_outreach_email(
+        prospect=merged_prospect,
+        campaign=body.campaign,
+        template=body.template,
+    )
+    _supabase_rest(
+        "patch", f"link_prospects?id=eq.{prospect_id}",
+        {"subject": email.subject, "template": email.template, "updated_at": "now()"},
+    )
+    return {
+        "subject": email.subject,
+        "body": email.body,
+        "template": email.template,
+        "model_used": email.model_used,
+        "cost_usd": email.cost_usd,
+        "fallback": email.fallback,
+    }
+
+
+# ── White-label branding ──────────────────────────────────────────
+
+class BrandingUpdate(BaseModel):
+    agency_name: str | None = None
+    logo_url: str | None = None
+    primary_color: str | None = None
+    secondary_color: str | None = None
+    accent_color: str | None = None
+    text_color: str | None = None
+    background_color: str | None = None
+    cover_title: str | None = None
+    cover_subtitle: str | None = None
+    footer_text: str | None = None
+    website: str | None = None
+    email: str | None = None
+    enabled: bool | None = None
+
+
+@app.get("/projects/{project_id}/branding")
+def get_project_branding(
+    project_id: str,
+    _auth: None = Depends(require_api_key),
+):
+    from app.services.branding import BrandingConfig
+    rows = _supabase_rest("get", "projects", params=f"id=eq.{project_id}&select=settings")
+    if not rows:
+        raise HTTPException(status_code=404, detail="Project not found")
+    branding_dict = (rows[0].get("settings") or {}).get("branding") or {}
+    cfg = BrandingConfig.from_dict(branding_dict)
+    return {
+        "branding": cfg.to_dict(),
+        "validation_warnings": cfg.validate(),
+    }
+
+
+@app.patch("/projects/{project_id}/branding")
+def update_project_branding(
+    project_id: str,
+    body: BrandingUpdate,
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    from app.services.branding import BrandingConfig
+    rows = _supabase_rest("get", "projects", params=f"id=eq.{project_id}&select=settings")
+    if not rows:
+        raise HTTPException(status_code=404, detail="Project not found")
+    settings_obj = rows[0].get("settings") or {}
+    existing = settings_obj.get("branding") or {}
+    updates = {k: v for k, v in body.model_dump().items() if v is not None}
+    merged = {**existing, **updates}
+    cfg = BrandingConfig.from_dict(merged)
+    warnings = cfg.validate()
+    if warnings:
+        raise HTTPException(status_code=400, detail={"validation_warnings": warnings})
+    settings_obj["branding"] = cfg.to_dict()
+    _supabase_rest(
+        "patch", f"projects?id=eq.{project_id}",
+        {"settings": settings_obj},
+    )
+    return {"branding": cfg.to_dict()}
+
+
+@app.post("/projects/{project_id}/branding/preview")
+def preview_branded_report(
+    project_id: str,
+    body: BrandingUpdate | None = None,
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """Render a small sample report HTML with the given branding for preview."""
+    from app.services.branding import BrandingConfig
+    from app.services.report_generator import ReportGenerator
+    rows = _supabase_rest("get", "projects", params=f"id=eq.{project_id}")
+    project = rows[0] if rows else {"name": "Preview", "domain": "example.com"}
+
+    if body:
+        overrides = {k: v for k, v in body.model_dump().items() if v is not None}
+        existing = (project.get("settings") or {}).get("branding") or {}
+        branding = BrandingConfig.from_dict({**existing, **overrides, "enabled": True})
+    else:
+        branding = BrandingConfig.from_dict(
+            (project.get("settings") or {}).get("branding") or {},
+        )
+        branding.enabled = True
+
+    gen = ReportGenerator()
+    sample_keywords = [
+        {"keyword": "seo software", "latest_position": 4, "previous_position": 7, "intent": "commercial"},
+        {"keyword": "rank tracker", "latest_position": 12, "previous_position": 15, "intent": "commercial"},
+        {"keyword": "content brief tool", "latest_position": 28, "previous_position": 31, "intent": "informational"},
+    ]
+    report = gen.generate_seo_report(
+        project=project,
+        keywords=sample_keywords,
+        rank_data=sample_keywords,
+        audit_data={"scores": {"performance": 82, "seo": 90, "accessibility": 88, "best_practices": 85}},
+        branding=branding,
+        white_label=True,
+    )
+    from fastapi.responses import HTMLResponse
+    return HTMLResponse(content=report["html"])
+
+
+# ── Programmatic SEO ──────────────────────────────────────────────
+
+class ProgrammaticTemplate(BaseModel):
+    name: str | None = None
+    slug_template: str = "/{{slug}}"
+    title_template: str = "{{title}}"
+    meta_description_template: str = ""
+    h1_template: str | None = None
+    body_template: str = ""
+
+
+class ProgrammaticGenerateRequest(BaseModel):
+    template: ProgrammaticTemplate
+    rows: list[dict] | None = None
+    csv: str | None = None
+    dedupe_on: str = "slug"
+    max_pages: int = Field(500, ge=1, le=5000)
+
+
+def _serialize_programmatic_page(page) -> dict:
+    return {
+        "slug": page.slug,
+        "title": page.title,
+        "meta_description": page.meta_description,
+        "h1": page.h1,
+        "body_markdown": page.body_markdown,
+        "variables": page.variables,
+        "warnings": page.warnings,
+    }
+
+
+@app.post("/programmatic/generate")
+def generate_programmatic_pages(
+    body: ProgrammaticGenerateRequest,
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """Generate bulk SEO pages from a template + CSV/JSON dataset."""
+    from app.agents.programmatic_agent import ProgrammaticAgent
+
+    agent = ProgrammaticAgent()
+    rows = body.rows
+    if not rows and body.csv:
+        rows = agent.parse_csv(body.csv)
+    rows = rows or []
+
+    template_dict = body.template.model_dump()
+    if not template_dict.get("h1_template"):
+        template_dict["h1_template"] = template_dict["title_template"]
+
+    result = agent.generate(
+        template_dict,
+        rows,
+        dedupe_on=body.dedupe_on,
+        max_pages=body.max_pages,
+    )
+    return {
+        "template_name": result.template_name,
+        "total_rows": result.total_rows,
+        "generated": result.generated,
+        "skipped": result.skipped,
+        "variables_used": result.variables_used,
+        "warnings": result.warnings,
+        "pages": [_serialize_programmatic_page(p) for p in result.pages],
+    }
+
+
+# ── Monthly workflow (Week 1-4 cadence) ────────────────────────────
+
+class WorkflowRunRequest(BaseModel):
+    only: list[str] | None = None
+    triggered_by: str = "manual"
+
+
+def _serialize_task_result(task) -> dict:
+    return {
+        "name": task.name,
+        "status": task.status,
+        "detail": task.detail,
+        "data": task.data,
+    }
+
+
+def _serialize_workflow_run(run) -> dict:
+    return {
+        "project_id": run.project_id,
+        "week": run.week,
+        "week_label": run.week_label,
+        "started_at": run.started_at,
+        "finished_at": run.finished_at,
+        "completed": run.completed,
+        "skipped": run.skipped,
+        "failed": run.failed,
+        "tasks": [_serialize_task_result(t) for t in run.tasks],
+    }
+
+
+def _fetch_project(project_id: str) -> dict | None:
+    rows = _supabase_rest("get", "projects", params=f"id=eq.{project_id}")
+    return rows[0] if rows else None
+
+
+@app.get("/workflow/schedule/{project_id}")
+def workflow_schedule(
+    project_id: str,
+    _auth: None = Depends(require_api_key),
+):
+    """Return this week's Week 1-4 task list for the project."""
+    from app.agents.workflow_agent import WorkflowAgent
+
+    project = _fetch_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return WorkflowAgent().schedule_for(project)
+
+
+@app.post("/workflow/run/{project_id}")
+def workflow_run(
+    project_id: str,
+    body: WorkflowRunRequest | None = None,
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """Execute this week's workflow tasks for the project."""
+    from app.agents.workflow_agent import WorkflowAgent
+
+    project = _fetch_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    agent = WorkflowAgent()
+    run = agent.run(project, only=(body.only if body else None))
+
+    # Persist to workflow_runs (best-effort — don't fail the request if
+    # the table/column isn't there yet; surface a warning header instead).
+    try:
+        _supabase_rest(
+            "post", "workflow_runs",
+            {
+                "project_id": project_id,
+                "week": run.week,
+                "week_label": run.week_label,
+                "started_at": run.started_at,
+                "finished_at": run.finished_at,
+                "completed": run.completed,
+                "skipped": run.skipped,
+                "failed": run.failed,
+                "tasks": [_serialize_task_result(t) for t in run.tasks],
+                "triggered_by": (body.triggered_by if body else "manual"),
+            },
+        )
+    except Exception as exc:
+        logger.warning("Could not persist workflow_run: %s", exc)
+
+    return _serialize_workflow_run(run)
+
+
+@app.get("/workflow/runs/{project_id}")
+def workflow_runs(
+    project_id: str,
+    limit: int = 20,
+    _auth: None = Depends(require_api_key),
+):
+    """Most-recent workflow runs for the project."""
+    try:
+        rows = _supabase_rest(
+            "get", "workflow_runs",
+            params=f"project_id=eq.{project_id}&order=started_at.desc&limit={max(1, min(limit, 100))}",
+        ) or []
+    except Exception as exc:
+        logger.warning("workflow_runs fetch failed: %s", exc)
+        rows = []
+    return {"runs": rows}
 
 
 # ── Projects CRUD ──────────────────────────────────────────────────
@@ -1075,6 +1919,16 @@ def get_job_report(job_id: str):
     if not keywords_with_ranks:
         keywords_with_ranks = [{"keyword": primary_kw, "current_rank": None}]
 
+    # Pull project branding if we have a project_id
+    branding = None
+    if project_id:
+        try:
+            proj_rows = _supabase_rest("get", "projects", params=f"id=eq.{project_id}&select=settings")
+            if proj_rows:
+                branding = (proj_rows[0].get("settings") or {}).get("branding")
+        except Exception:
+            branding = None
+
     html = generate_seo_report_html(
         client_url=client_url,
         keyword=primary_kw,
@@ -1087,6 +1941,7 @@ def get_job_report(job_id: str):
         keywords_with_ranks=keywords_with_ranks,
         city=city.title() if city else "",
         business_type=business_type,
+        branding=branding,
     )
     return HTMLResponse(content=html)
 

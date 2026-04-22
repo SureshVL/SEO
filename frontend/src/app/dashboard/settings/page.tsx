@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/lib/store";
+import { PageHeader } from "@/components/ui/PageHeader";
 import { toast } from "sonner";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -50,13 +51,14 @@ function useOAuthCallback() {
     setExchanging(true);
     exchangeCode(code, service, projectId, apiKey)
       .then((data) => {
+        const token = data.access_token || "";
         if (service === "ga4") {
           const firstProp = data.properties?.[0]?.property_id || "";
-          setGa4Connected(true, firstProp);
+          setGa4Connected(true, firstProp, token);
           toast.success(`Google Analytics 4 connected${data.email ? " · " + data.email : ""}`);
         } else {
           const firstSite = data.properties?.[0]?.site_url || "";
-          setGscConnected(true, firstSite);
+          setGscConnected(true, firstSite, token);
           toast.success(`Search Console connected${data.email ? " · " + data.email : ""}`);
         }
         // Clean URL
@@ -136,12 +138,12 @@ export default function SettingsPage() {
 
   return (
     <div className="animate-fade-in">
-      <div className="mb-8">
-        <h1 className="text-2xl font-bold flex items-center gap-2">
-          <Settings className="w-6 h-6 text-zinc-400" /> Settings
-        </h1>
-        <p className="text-sm text-zinc-400 mt-1">Manage your account, API keys, and integrations.</p>
-      </div>
+      <PageHeader
+        title="Settings"
+        subtitle="Manage your account, API keys, and integrations with GA4 and Search Console."
+        icon={Settings}
+        accent="#8B5CF6"
+      />
 
       {exchanging && (
         <div className="card p-4 mb-6 flex items-center gap-3 border-brand-500/30 bg-brand-500/5">

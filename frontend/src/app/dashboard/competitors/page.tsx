@@ -2,12 +2,14 @@
 
 import { useState, useEffect, useCallback } from "react";
 import {
-  AlertTriangle, ArrowUpRight, Eye, ExternalLink,
+  AlertTriangle, ArrowUpRight, Eye, ExternalLink, FolderOpen,
   Loader2, RefreshCw, Sparkles, TrendingUp,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/lib/store";
 import { listProjects, listCompetitors, triggerCompetitorScan } from "@/lib/api";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { Select } from "@/components/ui/Select";
 import { toast } from "sonner";
 
 export default function CompetitorsPage() {
@@ -60,41 +62,36 @@ export default function CompetitorsPage() {
 
   return (
     <div className="animate-fade-in">
-      <div className="flex items-start justify-between mb-8">
-        <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2">
-            <Eye className="w-6 h-6 text-purple-400" /> Competitor Monitor
-          </h1>
-          <p className="text-sm text-zinc-400 mt-1">
-            Track competitor content, entities, and backlink changes.
-          </p>
-        </div>
-        {projectId && (
-          <div className="flex items-center gap-2">
-            <button onClick={loadCompetitors} disabled={loading} className="btn-ghost flex items-center gap-1.5 text-sm">
-              <RefreshCw className={cn("w-3.5 h-3.5", loading && "animate-spin")} />
-            </button>
-            <button onClick={handleScan} disabled={scanning} className="btn-primary flex items-center gap-2 text-sm">
-              {scanning ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
-              {scanning ? "Scanning…" : "Scan Competitors"}
-            </button>
+      <PageHeader
+        title="Competitor Monitor"
+        subtitle="Track competitor content, entities, and backlink changes — know before they outrank you."
+        icon={Eye}
+        accent="#22D3EE"
+        actions={
+          <div className="flex items-center gap-2 flex-wrap">
+            <Select
+              icon={FolderOpen}
+              accent="#22D3EE"
+              placeholder="Select a project…"
+              value={projectId}
+              onChange={(e) => setProjectId(e.target.value)}
+              options={projects.map((p) => ({ value: p.id, label: p.name }))}
+              widthClass="min-w-[220px]"
+            />
+            {projectId && (
+              <>
+                <button onClick={loadCompetitors} disabled={loading} className="btn-ghost flex items-center gap-1.5 text-sm px-3 py-2.5">
+                  <RefreshCw className={cn("w-3.5 h-3.5", loading && "animate-spin")} />
+                </button>
+                <button onClick={handleScan} disabled={scanning} className="btn-primary flex items-center gap-2 text-sm">
+                  {scanning ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+                  {scanning ? "Scanning…" : "Scan Competitors"}
+                </button>
+              </>
+            )}
           </div>
-        )}
-      </div>
-
-      {/* Project selector */}
-      <div className="card p-4 mb-6">
-        <select
-          value={projectId}
-          onChange={e => setProjectId(e.target.value)}
-          className="input-field"
-        >
-          <option value="">Select a project…</option>
-          {projects.map(p => (
-            <option key={p.id} value={p.id}>{p.name}</option>
-          ))}
-        </select>
-      </div>
+        }
+      />
 
       {/* KPI strip */}
       {competitors.length > 0 && (
