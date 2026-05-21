@@ -1,0 +1,118 @@
+@page {
+  size: A4;
+  margin: 20mm 18mm 22mm 18mm;
+  @bottom-right {
+    content: "Page " counter(page) " of " counter(pages);
+    font-family: "Inter", "Helvetica Neue", sans-serif;
+    font-size: 8.5pt; color: #6b7280;
+  }
+  @bottom-left {
+    content: string(doctitle);
+    font-family: "Inter", "Helvetica Neue", sans-serif;
+    font-size: 8.5pt; color: #6b7280;
+  }
+}
+@page :first {
+  @bottom-right { content: none; }
+  @bottom-left { content: none; }
+}
+
+html {
+  font-family: "Inter", "Helvetica Neue", Arial, sans-serif;
+  font-size: 10.5pt; line-height: 1.55; color: #111827;
+}
+body { margin: 0; padding: 0; }
+
+h1 {
+  string-set: doctitle content();
+  font-size: 26pt; font-weight: 800; color: #5b21b6;
+  margin: 0 0 0.4em 0; padding-bottom: 0.25em;
+  border-bottom: 3px solid #8b5cf6;
+  page-break-before: always; page-break-after: avoid;
+}
+h1:first-of-type { page-break-before: avoid; }
+
+h2 {
+  font-size: 17pt; font-weight: 700; color: #1f2937;
+  margin: 1.6em 0 0.4em 0; padding-left: 10pt;
+  border-left: 4px solid #ec4899; page-break-after: avoid;
+}
+h3 { font-size: 13pt; font-weight: 700; color: #374151; margin: 1.2em 0 0.35em 0; page-break-after: avoid; }
+h4 { font-size: 11pt; font-weight: 700; color: #4b5563; margin: 0.9em 0 0.25em 0; text-transform: uppercase; letter-spacing: 0.05em; page-break-after: avoid; }
+
+p { margin: 0.5em 0; }
+a { color: #6d28d9; text-decoration: none; }
+
+code {
+  font-family: "JetBrains Mono", "Consolas", monospace;
+  font-size: 9pt; background: #f3f4f6; color: #6d28d9;
+  padding: 1px 5px; border-radius: 3px;
+}
+pre {
+  font-family: "JetBrains Mono", "Consolas", monospace;
+  font-size: 9pt; background: #0f172a; color: #e2e8f0;
+  padding: 10pt 12pt; border-radius: 6px; line-height: 1.4;
+  page-break-inside: avoid;
+}
+pre code { background: transparent; color: inherit; padding: 0; }
+
+blockquote {
+  margin: 0.8em 0; padding: 0.4em 0.9em;
+  border-left: 3px solid #22d3ee; background: #ecfeff;
+  color: #155e75; border-radius: 0 4px 4px 0;
+}
+
+ul, ol { margin: 0.4em 0 0.8em 1.4em; padding: 0; }
+li { margin: 0.15em 0; }
+hr { border: none; border-top: 1px dashed #d1d5db; margin: 1.4em 0; }
+
+table {
+  border-collapse: collapse; width: 100%;
+  margin: 0.6em 0 1.2em 0; font-size: 9.5pt;
+}
+table th {
+  background: linear-gradient(90deg, #8b5cf6, #ec4899);
+  color: white; text-align: left; padding: 6pt 9pt; font-weight: 600;
+}
+table td { padding: 6pt 9pt; border-bottom: 1px solid #e5e7eb; vertical-align: top; }
+table tr:nth-child(even) td { background: #fafafa; }
+table tr { page-break-inside: avoid; }
+
+img {
+  max-width: 100%; height: auto;
+  border-radius: 6px; border: 1px solid #e5e7eb;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.06);
+  page-break-inside: avoid;
+}
+
+.cover { text-align: center; padding: 60pt 0 40pt 0; page-break-after: always; }
+.cover h1 { font-size: 42pt; border: none; color: #5b21b6; margin-bottom: 0; padding: 0; }
+.cover .subtitle { font-size: 14pt; color: #6b7280; margin-top: 8pt; }
+.cover .accent-rule {
+  width: 120pt; height: 4pt;
+  background: linear-gradient(90deg, #8b5cf6, #ec4899, #22d3ee);
+  margin: 18pt auto; border-radius: 2pt;
+}
+.cover .meta { font-size: 10pt; color: #6b7280; margin-top: 40pt; }
+
+.screenshot-placeholder {
+  display: block; width: 100%; height: 140pt;
+  background: repeating-linear-gradient(45deg, #f9fafb, #f9fafb 10pt, #f3f4f6 10pt, #f3f4f6 20pt);
+  border: 1px dashed #9ca3af; border-radius: 6px;
+  text-align: center; line-height: 140pt;
+  color: #6b7280; font-size: 9pt;
+  margin: 0.6em 0; page-break-inside: avoid;
+}
+
+.note, .tip, .warn {
+  padding: 8pt 12pt; border-radius: 6px;
+  margin: 0.8em 0; font-size: 9.5pt; page-break-inside: avoid;
+}
+.note { background: #eff6ff; border-left: 3px solid #3b82f6; color: #1e3a8a; }
+.tip  { background: #ecfdf5; border-left: 3px solid #10b981; color: #064e3b; }
+.warn { background: #fef3c7; border-left: 3px solid #f59e0b; color: #78350f; }
+
+.p-critical { background:#fee2e2; color:#991b1b; padding:1pt 6pt; border-radius:4pt; font-weight:700; font-size:8.5pt; }
+.p-high     { background:#ffedd5; color:#9a3412; padding:1pt 6pt; border-radius:4pt; font-weight:700; font-size:8.5pt; }
+.p-medium   { background:#fef3c7; color:#92400e; padding:1pt 6pt; border-radius:4pt; font-weight:700; font-size:8.5pt; }
+.p-low      { background:#dcfce7; color:#166534; padding:1pt 6pt; border-radius:4pt; font-weight:700; font-size:8.5pt; }
