@@ -679,6 +679,15 @@ class SchemaGenerateRequest(BaseModel):
     city: str = ""
 
 
+class SchemaInjectBatchRequest(BaseModel):
+    urls: list[str] = Field(..., min_length=1, max_length=1000)
+    schema_types: list[str] = Field(..., min_length=1, max_length=10)
+    business_type: str = "default"
+    business_name: str = ""
+    cms_auto_detect: bool = True
+    cms_platform: str | None = None
+
+
 def _build_schema_agent() -> SchemaAgent:
     firecrawl = None
     if settings.firecrawl_api_key:
@@ -739,6 +748,65 @@ def schema_generate(
         else:
             unknown.append(t)
     return {"generated": out, "unsupported": unknown}
+
+
+@app.post("/schema/inject-batch")
+def schema_inject_batch(
+    body: SchemaInjectBatchRequest,
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """Inject schema markup into multiple URLs with CMS auto-detection."""
+    from app.services.schema_injection_service import SchemaInjectionService, SchemaInjectionRequest
+    from uuid import UUID
+
+    # Extract project_id from the URL path or auth context
+    # For now, assume it's embedded in a custom header or auth
+    # Fallback: use first project for testing
+    projects = _supabase_rest("get", "projects", params="limit=1")
+    if not projects:
+        raise HTTPException(status_code=400, detail="No projects found")
+
+    project_id = projects[0]["id"] if isinstance(projects, list) else projects.get("id")
+
+    svc = SchemaInjectionService()
+    req = SchemaInjectionRequest(
+        project_id=UUID(project_id),
+        urls=body.urls,
+        schema_types=body.schema_types,
+        business_type=body.business_type,
+        business_name=body.business_name,
+        cms_auto_detect=body.cms_auto_detect,
+        cms_platform=body.cms_platform,
+    )
+
+    try:
+        result = svc.inject_batch(req, _supabase_rest)
+        return {
+            "job_id": result.job_id,
+            "status": result.status,
+            "total_urls": result.total_urls,
+            "processed_count": result.processed_count,
+            "success_count": result.success_count,
+            "failure_count": result.failure_count,
+            "injections": result.injections,
+        }
+    except Exception as exc:
+        logger.error("Batch injection failed: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/schema/injection-jobs/{job_id}")
+def get_injection_job_status(
+    job_id: str,
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """Get status of a schema injection job."""
+    from app.services.schema_injection_service import SchemaInjectionService
+
+    svc = SchemaInjectionService()
+    return svc.get_job_status(job_id, _supabase_rest)
 
 
 # ── Content briefs + scoring ──────────────────────────────────────
