@@ -1,12 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Braces, Check, Copy, Loader2, X } from "lucide-react";
+import { Braces, Check, Copy, Loader2, X, Zap } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/lib/store";
 import { detectSchema, type SchemaDetectionResult } from "@/lib/api";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { toast } from "sonner";
+
+const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 const BUSINESS_TYPE_OPTIONS = [
   { value: "default", label: "Default (any business)" },
@@ -18,14 +20,29 @@ const BUSINESS_TYPE_OPTIONS = [
   { value: "agency", label: "Agency / Services" },
 ];
 
+const SCHEMA_TYPES = [
+  "Organization", "LocalBusiness", "Restaurant", "WebSite", "BreadcrumbList",
+  "Article", "BlogPosting", "FAQPage", "Product", "Service",
+  "SoftwareApplication", "Menu",
+];
+
 export default function SchemaPage() {
   const { apiKey, businessProfile } = useAppStore();
+  const [tab, setTab] = useState<"detect" | "inject">("detect");
+
+  // Detect tab state
   const [url, setUrl] = useState("");
   const [businessType, setBusinessType] = useState("default");
   const [businessName, setBusinessName] = useState("");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<SchemaDetectionResult | null>(null);
   const [copied, setCopied] = useState<number | null>(null);
+
+  // Inject tab state
+  const [batchUrls, setBatchUrls] = useState("");
+  const [selectedSchemas, setSelectedSchemas] = useState<string[]>(["FAQPage", "Organization"]);
+  const [batchLoading, setBatchLoading] = useState(false);
+  const [batchResult, setBatchResult] = useState<any>(null);
 
   useEffect(() => {
     if (!businessProfile) return;
@@ -66,15 +83,92 @@ export default function SchemaPage() {
     }
   }
 
+  async function handleBatchInject(e: React.FormEvent) {
+    e.preventDefault();
+    const urls = batchUrls.split("\n").map(u => u.trim()).filter(Boolean);
+    if (!urls.length) {
+      toast.error("Enter at least one URL");
+      return;
+    }
+    if (!selectedSchemas.length) {
+      toast.error("Select at least one schema type");
+      return;
+    }
+
+    setBatchLoading(true);
+    try {
+      const res = await fetch(`${API}/schema/inject-batch`, {
+        method: "POST",
+        headers: {
+          "X-API-KEY": apiKey,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          urls,
+          schema_types: selectedSchemas,
+          business_type: businessType,
+          business_name: businessName,
+          cms_auto_detect: true,
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.detail || "Injection failed");
+      }
+      const data = await res.json();
+      setBatchResult(data);
+      toast.success(`Injected ${data.success_count}/${data.total_urls} pages`);
+    } catch (err: any) {
+      toast.error(err.message || "Batch injection failed");
+    } finally {
+      setBatchLoading(false);
+    }
+  }
+
+  function toggleSchema(schema: string) {
+    setSelectedSchemas(prev =>
+      prev.includes(schema)
+        ? prev.filter(s => s !== schema)
+        : [...prev, schema]
+    );
+  }
+
   return (
     <div className="animate-fade-in">
       <PageHeader
         title="Schema Markup"
-        subtitle="Detect JSON-LD already on the page, flag missing schema types recommended for your business, and generate ready-to-paste markup for the gaps."
+        subtitle="Detect and inject JSON-LD schema across your site with CMS auto-detection (WordPress, Shopify, Webflow)."
         icon={Braces}
         accent="#8B5CF6"
       />
 
+      {/* Tab switcher */}
+      <div className="flex gap-2 mb-6 border-b border-zinc-800">
+        <button
+          onClick={() => setTab("detect")}
+          className={cn(
+            "px-4 py-3 text-sm font-medium border-b-2 transition-colors",
+            tab === "detect"
+              ? "text-violet-300 border-violet-500"
+              : "text-zinc-400 border-transparent hover:text-zinc-300"
+          )}
+        >
+          Single Page
+        </button>
+        <button
+          onClick={() => setTab("inject")}
+          className={cn(
+            "px-4 py-3 text-sm font-medium border-b-2 transition-colors flex items-center gap-2",
+            tab === "inject"
+              ? "text-violet-300 border-violet-500"
+              : "text-zinc-400 border-transparent hover:text-zinc-300"
+          )}
+        >
+          <Zap className="w-4 h-4" /> Batch Inject
+        </button>
+      </div>
+
+      {tab === "detect" && (
       <div className="card p-6 mb-6">
         <form onSubmit={handleSubmit} className="grid md:grid-cols-[2fr_1fr_1fr_auto] gap-3 items-end">
           <div>
@@ -234,6 +328,126 @@ export default function SchemaPage() {
             </div>
           )}
         </div>
+      )}
+      )}
+
+      {tab === "inject" && (
+      <div className="card p-6 mb-6">
+        <form onSubmit={handleBatchInject} className="space-y-4">
+          <div>
+            <label className="block text-xs text-zinc-500 uppercase tracking-wider mb-2">
+              URLs to inject (one per line)
+            </label>
+            <textarea
+              value={batchUrls}
+              onChange={e => setBatchUrls(e.target.value)}
+              className="input-field w-full h-24 font-mono text-sm"
+              placeholder="https://example.com/page-1&#10;https://example.com/page-2&#10;https://example.com/page-3"
+              required
+            />
+            <div className="text-xs text-zinc-500 mt-1">
+              {batchUrls.split("\n").filter(u => u.trim()).length} URLs
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs text-zinc-500 uppercase tracking-wider mb-2">
+              Schema types to inject
+            </label>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+              {SCHEMA_TYPES.map(schema => (
+                <label key={schema} className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={selectedSchemas.includes(schema)}
+                    onChange={() => toggleSchema(schema)}
+                    className="w-4 h-4 rounded"
+                  />
+                  <span className="text-sm text-zinc-300">{schema}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <div className="grid md:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs text-zinc-500 uppercase tracking-wider mb-1">
+                Business type
+              </label>
+              <select
+                value={businessType}
+                onChange={e => setBusinessType(e.target.value)}
+                className="input-field w-full"
+              >
+                {BUSINESS_TYPE_OPTIONS.map(o => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs text-zinc-500 uppercase tracking-wider mb-1">
+                Business name
+              </label>
+              <input
+                type="text"
+                value={businessName}
+                onChange={e => setBusinessName(e.target.value)}
+                className="input-field w-full"
+                placeholder="Optional"
+              />
+            </div>
+          </div>
+
+          <button
+            type="submit"
+            disabled={batchLoading}
+            className="btn-primary flex items-center gap-2 w-full justify-center py-3"
+          >
+            {batchLoading ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <Zap className="w-4 h-4" />
+            )}
+            {batchLoading ? "Injecting…" : "Inject to all URLs"}
+          </button>
+        </form>
+      </div>
+      )}
+
+      {batchResult && tab === "inject" && (
+      <div className="space-y-6">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <Stat label="Total URLs" value={batchResult.total_urls} />
+          <Stat label="Processed" value={batchResult.processed_count} />
+          <Stat label="Successful" value={batchResult.success_count} accent="ok" />
+          <Stat label="Failed" value={batchResult.failure_count} accent={batchResult.failure_count > 0 ? "warn" : "ok"} />
+        </div>
+
+        <div className="card p-6">
+          <h3 className="font-semibold mb-4 text-zinc-200">Injection details</h3>
+          <div className="space-y-2">
+            {batchResult.injections?.slice(0, 10).map((inj: any, i: number) => (
+              <div key={i} className={cn("flex items-center justify-between p-3 rounded-lg border",
+                inj.status === "injected"
+                  ? "bg-emerald-500/5 border-emerald-500/20"
+                  : "bg-red-500/5 border-red-500/20"
+              )}>
+                <div className="text-sm">
+                  <div className="font-medium text-zinc-200 truncate">{inj.url}</div>
+                  <div className="text-xs text-zinc-500">{inj.schema_type} via {inj.cms_platform}</div>
+                </div>
+                <div className={cn("text-xs font-medium",
+                  inj.status === "injected" ? "text-emerald-300" : "text-red-300"
+                )}>
+                  {inj.status === "injected" ? <Check className="w-4 h-4" /> : <X className="w-4 h-4" />}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
       )}
     </div>
   );
