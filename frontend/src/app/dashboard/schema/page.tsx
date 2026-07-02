@@ -188,65 +188,66 @@ export default function SchemaPage() {
       </div>
 
       {tab === "detect" && (
-      <div className="card p-6 mb-6">
-        <form onSubmit={handleSubmit} className="grid md:grid-cols-[2fr_1fr_1fr_auto] gap-3 items-end">
-          <div>
-            <label className="block text-xs text-zinc-500 uppercase tracking-wider mb-1">
-              URL
-            </label>
-            <input
-              type="url"
-              value={url}
-              onChange={e => setUrl(e.target.value)}
-              className="input-field w-full"
-              placeholder="https://example.com/page"
-              required
-            />
-          </div>
-          <div>
-            <label className="block text-xs text-zinc-500 uppercase tracking-wider mb-1">
-              Business type
-            </label>
-            <select
-              value={businessType}
-              onChange={e => setBusinessType(e.target.value)}
-              className="input-field w-full"
+      <>
+        <div className="card p-6 mb-6">
+          <form onSubmit={handleSubmit} className="grid md:grid-cols-[2fr_1fr_1fr_auto] gap-3 items-end">
+            <div>
+              <label className="block text-xs text-zinc-500 uppercase tracking-wider mb-1">
+                URL
+              </label>
+              <input
+                type="url"
+                value={url}
+                onChange={e => setUrl(e.target.value)}
+                className="input-field w-full"
+                placeholder="https://example.com/page"
+                required
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-zinc-500 uppercase tracking-wider mb-1">
+                Business type
+              </label>
+              <select
+                value={businessType}
+                onChange={e => setBusinessType(e.target.value)}
+                className="input-field w-full"
+              >
+                {BUSINESS_TYPE_OPTIONS.map(o => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs text-zinc-500 uppercase tracking-wider mb-1">
+                Business name
+              </label>
+              <input
+                type="text"
+                value={businessName}
+                onChange={e => setBusinessName(e.target.value)}
+                className="input-field w-full"
+                placeholder="Optional"
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={loading}
+              className="btn-primary flex items-center gap-2 px-6 h-[42px]"
             >
-              {BUSINESS_TYPE_OPTIONS.map(o => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="block text-xs text-zinc-500 uppercase tracking-wider mb-1">
-              Business name
-            </label>
-            <input
-              type="text"
-              value={businessName}
-              onChange={e => setBusinessName(e.target.value)}
-              className="input-field w-full"
-              placeholder="Optional"
-            />
-          </div>
-          <button
-            type="submit"
-            disabled={loading}
-            className="btn-primary flex items-center gap-2 px-6 h-[42px]"
-          >
-            {loading ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
-            ) : (
-              <Braces className="w-4 h-4" />
-            )}
-            {loading ? "Scanning..." : "Scan Page"}
-          </button>
-        </form>
-      </div>
+              {loading ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Braces className="w-4 h-4" />
+              )}
+              {loading ? "Scanning..." : "Scan Page"}
+            </button>
+          </form>
+        </div>
 
-      {result && (
+        {result && (
         <div className="space-y-6">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <Stat label="Blocks found" value={result.blocks_found} />
@@ -348,6 +349,7 @@ export default function SchemaPage() {
           )}
         </div>
       )}
+      </>
       )}
 
       {tab === "inject" && (
