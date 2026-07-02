@@ -90,6 +90,7 @@ export default function DashboardPage() {
     { label: "Internal Linking", href: "/dashboard/internal-linking", icon: Link2,     bg: "#06B6D4", text: "#fff" },
     { label: "Keyword Mapping",  href: "/dashboard/keyword-mapping",  icon: Tag,       bg: "#06B6D4", text: "#fff" },
     { label: "Multilingual",     href: "/dashboard/multilingual",     icon: Globe,     bg: "#0EA5E9", text: "#fff" },
+    { label: "Audits",           href: "/dashboard/audit",            icon: Shield,    bg: "#84CC16", text: "#0b1020" },
     { label: "Programmatic",     href: "/dashboard/programmatic",     icon: Grid3x3,   bg: SUN,     text: "#0b1020" },
     { label: "Link Building",    href: "/dashboard/links",            icon: Link2,     bg: "#14B8A6", text: "#fff" },
     { label: "White-label",      href: "/dashboard/branding",         icon: Palette,   bg: "#F43F5E", text: "#fff" },

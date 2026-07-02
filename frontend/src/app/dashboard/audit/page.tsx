@@ -1,483 +1,304 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
-import { Loader2, Shield, Sparkles, Globe, Gauge } from "lucide-react";
-import { cn, scoreColor, scoreBg } from "@/lib/utils";
-import { useAppStore } from "@/lib/store";
+import { useState, useEffect } from "react";
 import {
-  technicalAudit,
-  startSiteCrawl,
-  getSiteCrawl,
-  type SiteCrawlResult,
-} from "@/lib/api";
-import { PageHeader } from "@/components/ui/PageHeader";
+  Play, Loader2, AlertTriangle, CheckCircle, Clock, Zap, Target, Shield,
+} from "lucide-react";
+import { cn } from "@/lib/utils";
+import { useAppStore } from "@/lib/store";
 import { toast } from "sonner";
+import { PageHeader } from "@/components/ui/PageHeader";
 
-type Tab = "single" | "crawl";
+const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
-export default function AuditPage() {
-  const { apiKey, businessProfile } = useAppStore();
-  const [tab, setTab] = useState<Tab>("single");
-
-  // Single-page audit state
-  const [url, setUrl] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState<any>(null);
-
-  // Site crawl state
-  const [domain, setDomain] = useState("");
-  const [maxPages, setMaxPages] = useState(50);
-  const [crawling, setCrawling] = useState(false);
-  const [crawl, setCrawl] = useState<SiteCrawlResult | null>(null);
-  const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  useEffect(() => {
-    if (businessProfile?.websiteUrl) {
-      if (!url) setUrl(businessProfile.websiteUrl);
-      if (!domain) {
-        const d = businessProfile.websiteUrl
-          .replace(/^https?:\/\//, "")
-          .replace(/\/$/, "");
-        setDomain(d);
-      }
-    }
-  }, [businessProfile]);
-
-  useEffect(() => () => {
-    if (pollTimer.current) clearInterval(pollTimer.current);
-  }, []);
-
-  async function handleSingleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setLoading(true);
-    try {
-      const data = await technicalAudit(url, apiKey);
-      setResult(data);
-      toast.success("Audit complete");
-    } catch (err: any) {
-      toast.error(err.message || "Audit failed");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function handleCrawlStart(e: React.FormEvent) {
-    e.preventDefault();
-    if (!domain.trim()) return;
-    setCrawling(true);
-    setCrawl(null);
-    try {
-      const started = await startSiteCrawl(domain, maxPages, apiKey);
-      setCrawl(started);
-      if (started.status === "failed") {
-        toast.error(started.error || "Crawl failed to start");
-        setCrawling(false);
-        return;
-      }
-      toast.success("Crawl started — polling for results");
-      pollTimer.current = setInterval(async () => {
-        try {
-          const latest = await getSiteCrawl(started.task_id, domain, apiKey);
-          setCrawl(latest);
-          if (latest.status === "finished" || latest.status === "failed") {
-            if (pollTimer.current) clearInterval(pollTimer.current);
-            pollTimer.current = null;
-            setCrawling(false);
-            if (latest.status === "finished") toast.success("Crawl complete");
-            else toast.error(latest.error || "Crawl failed");
-          }
-        } catch (err: any) {
-          console.error("poll failed", err);
-        }
-      }, 6000);
-    } catch (err: any) {
-      toast.error(err.message || "Crawl start failed");
-      setCrawling(false);
-    }
-  }
-
-  const scoreLabel = (v: number | null) => (v !== null ? Math.round(v) : "—");
-
-  const impactColor = (impact: string) =>
-    impact === "critical"
-      ? "text-red-400 bg-red-500/10 border-red-500/30"
-      : impact === "high"
-      ? "text-amber-400 bg-amber-500/10 border-amber-500/30"
-      : impact === "medium"
-      ? "text-blue-400 bg-blue-500/10 border-blue-500/30"
-      : "text-zinc-400 bg-zinc-500/10 border-zinc-500/30";
-
-  return (
-    <div className="animate-fade-in">
-      <PageHeader
-        title="Technical SEO Audit"
-        subtitle="PageSpeed single-page diagnostics and full-site crawls — surfaces hidden issues before they hurt rankings."
-        icon={Shield}
-        accent="#A3E635"
-        chips={businessProfile?.websiteUrl && (
-          <span
-            className="inline-flex items-center gap-1.5 text-xs font-medium rounded-full px-3 py-1"
-            style={{ background: "rgba(163,230,53,0.15)", color: "#BEF264", border: "1px solid rgba(163,230,53,0.3)" }}
-          >
-            <Sparkles className="w-3.5 h-3.5" /> Auto-filled
-          </span>
-        )}
-      />
-
-      <div className="flex gap-2 mb-6" style={{ borderBottom: "1px solid var(--border)" }}>
-        <button
-          onClick={() => setTab("single")}
-          className={cn(
-            "px-4 py-2.5 text-sm font-semibold flex items-center gap-2 border-b-2 -mb-px transition",
-            tab === "single" ? "" : "border-transparent"
-          )}
-          style={{
-            color: tab === "single" ? "#A3E635" : "var(--text-muted)",
-            borderColor: tab === "single" ? "#A3E635" : "transparent",
-          }}
-        >
-          <Gauge className="w-4 h-4" /> Single-page (PageSpeed)
-        </button>
-        <button
-          onClick={() => setTab("crawl")}
-          className={cn(
-            "px-4 py-2.5 text-sm font-semibold flex items-center gap-2 border-b-2 -mb-px transition",
-            tab === "crawl" ? "" : "border-transparent"
-          )}
-          style={{
-            color: tab === "crawl" ? "#A3E635" : "var(--text-muted)",
-            borderColor: tab === "crawl" ? "#A3E635" : "transparent",
-          }}
-        >
-          <Globe className="w-4 h-4" /> Full-site crawl (DataForSEO)
-        </button>
-      </div>
-
-      {tab === "single" && (
-        <>
-          <div className="card p-6 mb-6">
-            <form onSubmit={handleSingleSubmit} className="flex gap-4">
-              <input
-                type="url"
-                value={url}
-                onChange={e => setUrl(e.target.value)}
-                className="input-field flex-1"
-                placeholder="https://example.com"
-                required
-              />
-              <button
-                type="submit"
-                disabled={loading}
-                className="btn-primary flex items-center gap-2 px-6"
-              >
-                {loading ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : (
-                  <Shield className="w-4 h-4" />
-                )}
-                {loading ? "Auditing..." : "Run Audit"}
-              </button>
-            </form>
-          </div>
-
-          {result && (
-            <div className="space-y-6">
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                {[
-                  { label: "Performance", key: "performance" },
-                  { label: "Accessibility", key: "accessibility" },
-                  { label: "Best Practices", key: "best_practices" },
-                  { label: "SEO", key: "seo" },
-                ].map(({ label, key }) => {
-                  const val =
-                    result.lighthouse_scores?.[key] ?? result.scores?.[key] ?? null;
-                  return (
-                    <div
-                      key={key}
-                      className={cn(
-                        "card p-4 text-center border",
-                        val !== null ? scoreBg(val) : "",
-                      )}
-                    >
-                      <div className="text-xs text-zinc-500 uppercase tracking-wider mb-2">
-                        {label}
-                      </div>
-                      <div
-                        className={cn(
-                          "text-3xl font-bold font-serif",
-                          val !== null ? scoreColor(val) : "text-zinc-400",
-                        )}
-                      >
-                        {scoreLabel(val)}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-
-              {result.issues?.length > 0 && (
-                <div className="card p-6">
-                  <h3 className="font-semibold mb-4 text-amber-400">Issues Found</h3>
-                  <div className="space-y-2">
-                    {result.issues.slice(0, 10).map((issue: any, i: number) => (
-                      <div
-                        key={i}
-                        className="flex items-start gap-3 p-3 bg-zinc-800/30 rounded-lg text-sm"
-                      >
-                        <span
-                          className={cn(
-                            "text-[10px] font-bold uppercase mt-0.5 shrink-0",
-                            issue.severity === "critical"
-                              ? "text-red-400"
-                              : issue.severity === "high"
-                              ? "text-amber-400"
-                              : "text-blue-400",
-                          )}
-                        >
-                          {issue.severity}
-                        </span>
-                        <span className="text-zinc-300">
-                          {issue.description || issue.message || JSON.stringify(issue)}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-        </>
-      )}
-
-      {tab === "crawl" && (
-        <>
-          <div className="card p-6 mb-6">
-            <form onSubmit={handleCrawlStart} className="grid md:grid-cols-[1fr_140px_auto] gap-3 items-end">
-              <div>
-                <label className="block text-xs text-zinc-500 uppercase tracking-wider mb-1">
-                  Domain
-                </label>
-                <input
-                  type="text"
-                  value={domain}
-                  onChange={e => setDomain(e.target.value)}
-                  className="input-field w-full"
-                  placeholder="example.com"
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-xs text-zinc-500 uppercase tracking-wider mb-1">
-                  Max pages
-                </label>
-                <input
-                  type="number"
-                  value={maxPages}
-                  min={10}
-                  max={1000}
-                  step={10}
-                  onChange={e => setMaxPages(Number(e.target.value))}
-                  className="input-field w-full"
-                />
-              </div>
-              <button
-                type="submit"
-                disabled={crawling}
-                className="btn-primary flex items-center gap-2 px-6 h-[42px]"
-              >
-                {crawling ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : (
-                  <Globe className="w-4 h-4" />
-                )}
-                {crawling ? "Crawling..." : "Start Crawl"}
-              </button>
-            </form>
-            <p className="text-xs text-zinc-500 mt-3">
-              Crawls up to {maxPages} pages via DataForSEO On-Page API. A typical
-              50-page crawl finishes in 60–180 seconds.
-            </p>
-          </div>
-
-          {crawl && (
-            <div className="space-y-6">
-              <div className="card p-6">
-                <div className="flex items-center justify-between mb-4">
-                  <div>
-                    <div className="text-xs text-zinc-500 uppercase tracking-wider">
-                      Crawl status
-                    </div>
-                    <div className="text-lg font-semibold capitalize">
-                      {crawl.status}
-                      {crawl.status === "crawling" && (
-                        <Loader2 className="inline-block w-4 h-4 ml-2 animate-spin text-zinc-400" />
-                      )}
-                    </div>
-                    {crawl.task_id && (
-                      <div className="text-[10px] text-zinc-600 mt-1 font-mono">
-                        task_id: {crawl.task_id}
-                      </div>
-                    )}
-                  </div>
-                  {crawl.onpage_score !== null && crawl.onpage_score !== undefined && (
-                    <div className={cn("px-4 py-2 rounded-lg border", scoreBg(crawl.onpage_score))}>
-                      <div className="text-[10px] text-zinc-500 uppercase tracking-wider">
-                        On-Page Score
-                      </div>
-                      <div className={cn("text-2xl font-bold font-serif", scoreColor(crawl.onpage_score))}>
-                        {Math.round(crawl.onpage_score)}
-                      </div>
-                    </div>
-                  )}
-                </div>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
-                  <Stat label="Pages crawled" value={crawl.pages_crawled} />
-                  <Stat label="In queue" value={crawl.pages_in_queue} />
-                  <Stat
-                    label="Distinct issues"
-                    value={Object.keys(crawl.issues_by_check).length}
-                  />
-                  <Stat label="Actions" value={crawl.actions.length} />
-                </div>
-                {crawl.error && (
-                  <div className="mt-4 text-sm text-red-400 bg-red-500/10 border border-red-500/30 rounded-lg p-3">
-                    {crawl.error}
-                  </div>
-                )}
-              </div>
-
-              {crawl.actions.length > 0 && (
-                <div className="card p-6">
-                  <h3 className="font-semibold mb-4 text-amber-400">
-                    Prioritized Actions ({crawl.actions.length})
-                  </h3>
-                  <div className="space-y-2 max-h-[500px] overflow-y-auto pr-2">
-                    {crawl.actions.map((a, i) => (
-                      <div
-                        key={i}
-                        className="flex items-start gap-3 p-3 bg-zinc-800/30 rounded-lg text-sm"
-                      >
-                        <span
-                          className={cn(
-                            "text-[10px] font-bold uppercase mt-0.5 shrink-0 px-2 py-0.5 rounded border",
-                            impactColor(a.impact),
-                          )}
-                        >
-                          {a.impact}
-                        </span>
-                        <div className="flex-1">
-                          <div className="text-zinc-200">{a.action}</div>
-                          <div className="text-xs text-zinc-500 mt-0.5">
-                            {a.category}
-                            {a.auto_fixable && " · auto-fixable"}
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {crawl.broken_links.length > 0 && (
-                <div className="card p-6">
-                  <h3 className="font-semibold mb-4 text-red-400">
-                    Broken Links ({crawl.broken_links.length})
-                  </h3>
-                  <div className="space-y-1.5 max-h-[300px] overflow-y-auto pr-2 text-xs font-mono">
-                    {crawl.broken_links.slice(0, 50).map((l, i) => (
-                      <div key={i} className="p-2 bg-zinc-800/30 rounded">
-                        <div className="text-red-300 truncate">→ {l.link_to}</div>
-                        <div className="text-zinc-500 truncate">from {l.link_from}</div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {crawl.duplicate_titles.length > 0 && (
-                <div className="card p-6">
-                  <h3 className="font-semibold mb-4 text-amber-400">
-                    Duplicate Titles ({crawl.duplicate_titles.length} groups)
-                  </h3>
-                  <div className="space-y-3 max-h-[300px] overflow-y-auto pr-2 text-sm">
-                    {crawl.duplicate_titles.slice(0, 10).map((g, i) => (
-                      <div key={i} className="p-3 bg-zinc-800/30 rounded">
-                        <div className="text-zinc-200 font-medium truncate">{g.value}</div>
-                        <div className="text-xs text-zinc-500 mt-1">
-                          {g.pages.length} pages
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {crawl.sample_pages.length > 0 && (
-                <div className="card p-6">
-                  <h3 className="font-semibold mb-4 text-zinc-200">
-                    Sample Pages ({crawl.sample_pages.length})
-                  </h3>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead className="text-xs text-zinc-500 uppercase tracking-wider">
-                        <tr className="border-b border-zinc-800">
-                          <th className="text-left py-2 pr-3">URL</th>
-                          <th className="text-right py-2 px-2">Status</th>
-                          <th className="text-right py-2 px-2">Score</th>
-                          <th className="text-right py-2 px-2">Words</th>
-                          <th className="text-right py-2 pl-2">Issues</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {crawl.sample_pages.map((p, i) => (
-                          <tr key={i} className="border-b border-zinc-900">
-                            <td className="py-2 pr-3 font-mono text-xs text-zinc-300 truncate max-w-md">
-                              {p.url}
-                            </td>
-                            <td
-                              className={cn(
-                                "text-right py-2 px-2",
-                                p.status_code && p.status_code >= 400
-                                  ? "text-red-400"
-                                  : "text-zinc-400",
-                              )}
-                            >
-                              {p.status_code ?? "—"}
-                            </td>
-                            <td className="text-right py-2 px-2 text-zinc-400">
-                              {p.onpage_score !== null
-                                ? Math.round(p.onpage_score)
-                                : "—"}
-                            </td>
-                            <td className="text-right py-2 px-2 text-zinc-400">
-                              {p.word_count ?? "—"}
-                            </td>
-                            <td className="text-right py-2 pl-2 text-amber-400">
-                              {p.issues.length}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-        </>
-      )}
-    </div>
-  );
+interface AuditIssue {
+  id: number;
+  issue_type: string;
+  severity: string;
+  affected_url: string;
+  description: string;
+  recommendation: string;
+  status: string;
 }
 
-function Stat({ label, value }: { label: string; value: number | string | null }) {
+interface AuditRun {
+  id: number;
+  audit_type: string;
+  status: string;
+  total_pages_checked: number;
+  issues_found: number;
+  critical_count: number;
+  warning_count: number;
+  completed_at: string;
+}
+
+interface AuditSummary {
+  total_open_issues: number;
+  critical_count: number;
+  warning_count: number;
+  recent_audits: number;
+  health_score: number;
+  last_audit: string | null;
+  issues_by_type: Record<string, number>;
+}
+
+export default function AuditPage() {
+  const { apiKey } = useAppStore();
+  const [tab, setTab] = useState<"summary" | "issues" | "runs" | "schedules">("summary");
+  const [loading, setLoading] = useState(false);
+  const [running, setRunning] = useState<string | null>(null);
+  const [summary, setSummary] = useState<AuditSummary | null>(null);
+  const [issues, setIssues] = useState<AuditIssue[]>([]);
+  const [runs, setRuns] = useState<AuditRun[]>([]);
+
+  const auditTypes = [
+    { id: "crawl_errors", name: "Crawl Errors", icon: AlertTriangle, description: "Check for crawl/indexing errors" },
+    { id: "broken_links", name: "Broken Links", icon: Target, description: "Find 404s and dead links" },
+    { id: "schema_validation", name: "Schema Validation", icon: Shield, description: "Validate structured data" },
+    { id: "performance", name: "Page Performance", icon: Zap, description: "Analyze Core Web Vitals" },
+    { id: "orphan_pages", name: "Orphan Pages", icon: Clock, description: "Identify unlinked pages" },
+  ];
+
+  const fetchSummary = async () => {
+    if (!apiKey) return;
+    try {
+      const res = await fetch(`${API}/audits/summary`, {
+        headers: { "X-API-KEY": apiKey },
+      });
+      if (res.ok) setSummary(await res.json());
+    } catch (err) {
+      console.error("Failed:", err);
+    }
+  };
+
+  const fetchIssues = async () => {
+    if (!apiKey) return;
+    try {
+      const res = await fetch(`${API}/audits/issues`, {
+        headers: { "X-API-KEY": apiKey },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setIssues(data.issues || []);
+      }
+    } catch (err) {
+      console.error("Failed:", err);
+    }
+  };
+
+  const fetchRuns = async () => {
+    if (!apiKey) return;
+    try {
+      const res = await fetch(`${API}/audits/runs`, {
+        headers: { "X-API-KEY": apiKey },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setRuns(data.runs || []);
+      }
+    } catch (err) {
+      console.error("Failed:", err);
+    }
+  };
+
+  useEffect(() => {
+    if (tab === "summary") fetchSummary();
+    else if (tab === "issues") fetchIssues();
+    else if (tab === "runs") fetchRuns();
+  }, [tab, apiKey]);
+
+  const handleRunAudit = async (auditType: string) => {
+    if (!apiKey) return;
+    setRunning(auditType);
+    try {
+      const res = await fetch(`${API}/audits/run`, {
+        method: "POST",
+        headers: { "X-API-KEY": apiKey, "Content-Type": "application/json" },
+        body: JSON.stringify({ audit_type: auditType, audit_data: [] }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        toast.success(`Audit completed: ${data.issues_found} issues found`);
+        fetchRuns();
+        fetchSummary();
+      }
+    } catch (err) {
+      toast.error("Error running audit");
+    } finally {
+      setRunning(null);
+    }
+  };
+
+  const handleUpdateIssueStatus = async (issueId: number, status: string) => {
+    if (!apiKey) return;
+    try {
+      const res = await fetch(`${API}/audits/issues/${issueId}`, {
+        method: "PATCH",
+        headers: { "X-API-KEY": apiKey, "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+      });
+      if (res.ok) {
+        toast.success(`Issue marked as ${status}`);
+        fetchIssues();
+      }
+    } catch (err) {
+      toast.error("Error updating issue");
+    }
+  };
+
+  const getSeverityColor = (severity: string) => {
+    if (severity === "critical") return "bg-red-100 text-red-800";
+    if (severity === "warning") return "bg-orange-100 text-orange-800";
+    return "bg-blue-100 text-blue-800";
+  };
+
+  const tabs = [
+    { id: "summary", label: "Summary", icon: Shield },
+    { id: "issues", label: "Issues", icon: AlertTriangle },
+    { id: "runs", label: "Runs", icon: Clock },
+    { id: "schedules", label: "Schedules", icon: Zap },
+  ];
+
   return (
-    <div className="bg-zinc-800/30 rounded-lg p-3 border border-zinc-800">
-      <div className="text-[10px] text-zinc-500 uppercase tracking-wider">
-        {label}
+    <div className="space-y-6">
+      <PageHeader
+        title="Technical Audits"
+        description="Continuous monitoring for SEO issues"
+      />
+
+      <div className="flex gap-2 border-b overflow-x-auto">
+        {tabs.map((t) => {
+          const Icon = t.icon;
+          return (
+            <button
+              key={t.id}
+              onClick={() => setTab(t.id as any)}
+              className={cn(
+                "px-4 py-2 font-medium text-sm border-b-2 transition-colors flex items-center gap-2 whitespace-nowrap",
+                tab === t.id ? "border-lime-500 text-lime-600" : "border-transparent text-gray-600 hover:text-gray-900",
+              )}
+            >
+              <Icon className="w-4 h-4" />
+              {t.label}
+            </button>
+          );
+        })}
       </div>
-      <div className="text-2xl font-semibold font-serif text-zinc-100">
-        {value ?? "—"}
+
+      <div className="bg-white rounded-lg border p-6">
+        {tab === "summary" && summary && (
+          <div className="space-y-6">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <div className="bg-gradient-to-br from-lime-50 to-green-50 rounded-lg p-4 border border-lime-200">
+                <div className="text-3xl font-bold text-lime-600">{summary.health_score}</div>
+                <p className="text-sm text-gray-600 mt-1">Health Score</p>
+              </div>
+              <div className="bg-gradient-to-br from-red-50 to-orange-50 rounded-lg p-4 border border-red-200">
+                <div className="text-3xl font-bold text-red-600">{summary.critical_count}</div>
+                <p className="text-sm text-gray-600 mt-1">Critical Issues</p>
+              </div>
+              <div className="bg-gradient-to-br from-orange-50 to-yellow-50 rounded-lg p-4 border border-orange-200">
+                <div className="text-3xl font-bold text-orange-600">{summary.warning_count}</div>
+                <p className="text-sm text-gray-600 mt-1">Warnings</p>
+              </div>
+              <div className="bg-gradient-to-br from-blue-50 to-cyan-50 rounded-lg p-4 border border-blue-200">
+                <div className="text-3xl font-bold text-blue-600">{summary.recent_audits}</div>
+                <p className="text-sm text-gray-600 mt-1">Recent Audits</p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {tab === "issues" && (
+          <div className="space-y-4">
+            {issues.length === 0 ? (
+              <div className="text-center py-12">
+                <CheckCircle className="w-12 h-12 text-green-300 mx-auto mb-4" />
+                <p className="text-gray-500">No open issues!</p>
+              </div>
+            ) : (
+              issues.slice(0, 20).map((issue) => (
+                <div key={issue.id} className="border rounded-lg p-4 hover:bg-gray-50 transition">
+                  <div className="flex items-start justify-between mb-2">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className={cn("px-2 py-1 rounded-full text-xs font-medium", getSeverityColor(issue.severity))}>
+                          {issue.severity.toUpperCase()}
+                        </span>
+                        <h4 className="font-semibold text-gray-900">{issue.issue_type.replace(/_/g, " ")}</h4>
+                      </div>
+                      <p className="text-sm text-gray-600">{issue.affected_url}</p>
+                    </div>
+                  </div>
+                  <p className="text-sm text-gray-700 mb-2">{issue.description}</p>
+                  <p className="text-xs text-gray-600 mb-3">Fix: {issue.recommendation}</p>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => handleUpdateIssueStatus(issue.id, "in_progress")}
+                      className="text-xs px-3 py-1 border rounded hover:bg-gray-50"
+                    >
+                      In Progress
+                    </button>
+                    <button
+                      onClick={() => handleUpdateIssueStatus(issue.id, "resolved")}
+                      className="text-xs px-3 py-1 border rounded hover:bg-gray-50"
+                    >
+                      Resolve
+                    </button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        )}
+
+        {tab === "runs" && (
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
+              {auditTypes.map((audit) => {
+                const Icon = audit.icon;
+                return (
+                  <button
+                    key={audit.id}
+                    onClick={() => handleRunAudit(audit.id)}
+                    disabled={running === audit.id}
+                    className="border rounded-lg p-4 hover:bg-gray-50 transition text-left disabled:opacity-50"
+                  >
+                    <div className="flex items-start justify-between mb-2">
+                      <Icon className="w-5 h-5 text-lime-600" />
+                      {running === audit.id && <Loader2 className="w-4 h-4 animate-spin" />}
+                    </div>
+                    <h4 className="font-semibold text-gray-900">{audit.name}</h4>
+                    <p className="text-sm text-gray-600">{audit.description}</p>
+                  </button>
+                );
+              })}
+            </div>
+            <div className="border-t pt-6">
+              <h3 className="font-semibold text-gray-900 mb-4">Recent Runs</h3>
+              {runs.slice(0, 10).map((run) => (
+                <div key={run.id} className="border rounded-lg p-4 mb-3">
+                  <div className="flex justify-between items-center mb-2">
+                    <h4 className="font-semibold text-gray-900">{run.audit_type.replace(/_/g, " ")}</h4>
+                    <span className="text-xs bg-green-100 text-green-800 px-2 py-1 rounded">{run.status}</span>
+                  </div>
+                  <div className="text-sm text-gray-600 flex gap-4">
+                    <span>Pages: {run.total_pages_checked}</span>
+                    <span className="text-red-600">Critical: {run.critical_count}</span>
+                    <span className="text-orange-600">Warnings: {run.warning_count}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {tab === "schedules" && (
+          <div className="text-center py-12">
+            <Clock className="w-12 h-12 text-gray-300 mx-auto mb-4" />
+            <p className="text-gray-500">Audit schedules will be displayed here</p>
+          </div>
+        )}
       </div>
     </div>
   );

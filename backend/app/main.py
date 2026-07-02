@@ -3069,6 +3069,261 @@ def check_competitors(
     return {"status": "competitor_check_queued"}
 
 
+# ── Technical Audits ────────────────────────────────────────────────
+
+class CreateAuditScheduleRequest(BaseModel):
+    audit_type: str = Field(..., description="crawl_errors, broken_links, schema_validation, performance, orphan_pages")
+    frequency: str = Field("weekly", description="daily, weekly, monthly, on_demand")
+    config: dict[str, Any] | None = None
+
+
+class RunAuditRequest(BaseModel):
+    audit_type: str = Field(...)
+    audit_data: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class UpdateIssueRequest(BaseModel):
+    status: str = Field(..., description="open, in_progress, resolved, ignored")
+
+
+class ResolveIssueRequest(BaseModel):
+    resolution_type: str = Field(..., description="auto_fix, manual_fix, ignored, false_positive")
+    resolution_details: str = ""
+
+
+@app.post("/audits/schedule")
+def create_audit_schedule(
+    body: CreateAuditScheduleRequest,
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """Create an audit schedule."""
+    from app.services.audit_service import AuditService
+    from uuid import UUID
+
+    projects = _supabase_rest("get", "projects", params="limit=1")
+    if not projects:
+        raise HTTPException(status_code=400, detail="No projects found")
+
+    project_id = projects[0]["id"] if isinstance(projects, list) else projects.get("id")
+
+    try:
+        svc = AuditService()
+        result = svc.create_audit_schedule(
+            UUID(project_id),
+            body.audit_type,
+            body.frequency,
+            body.config,
+            _supabase_rest,
+        )
+        return result
+
+    except Exception as exc:
+        logger.error("Failed to create audit schedule: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/audits/schedules")
+def get_audit_schedules(
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """Get all audit schedules for a project."""
+    from app.services.audit_service import AuditService
+    from uuid import UUID
+
+    projects = _supabase_rest("get", "projects", params="limit=1")
+    if not projects:
+        raise HTTPException(status_code=400, detail="No projects found")
+
+    project_id = projects[0]["id"] if isinstance(projects, list) else projects.get("id")
+
+    try:
+        svc = AuditService()
+        schedules = svc.get_audit_schedules(UUID(project_id), _supabase_rest)
+        return {"schedules": schedules, "count": len(schedules)}
+
+    except Exception as exc:
+        logger.error("Failed to fetch audit schedules: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/audits/run")
+async def run_audit(
+    body: RunAuditRequest,
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """Run an audit."""
+    from app.services.audit_service import AuditService
+    from uuid import UUID
+
+    projects = _supabase_rest("get", "projects", params="limit=1")
+    if not projects:
+        raise HTTPException(status_code=400, detail="No projects found")
+
+    project_id = projects[0]["id"] if isinstance(projects, list) else projects.get("id")
+
+    try:
+        svc = AuditService()
+        result = await svc.run_audit(
+            UUID(project_id),
+            body.audit_type,
+            body.audit_data,
+            _supabase_rest,
+        )
+        return result
+
+    except Exception as exc:
+        logger.error("Failed to run audit: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/audits/runs")
+def get_audit_runs(
+    audit_type: str = "",
+    status: str = "",
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """Get audit runs."""
+    from app.services.audit_service import AuditService
+    from uuid import UUID
+
+    projects = _supabase_rest("get", "projects", params="limit=1")
+    if not projects:
+        raise HTTPException(status_code=400, detail="No projects found")
+
+    project_id = projects[0]["id"] if isinstance(projects, list) else projects.get("id")
+
+    try:
+        svc = AuditService()
+        runs = svc.get_audit_runs(
+            UUID(project_id),
+            audit_type=audit_type if audit_type else None,
+            status=status,
+            db_fn=_supabase_rest,
+        )
+        return {"runs": runs, "count": len(runs)}
+
+    except Exception as exc:
+        logger.error("Failed to fetch audit runs: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/audits/issues")
+def get_audit_issues(
+    issue_type: str = "",
+    severity: str = "",
+    status: str = "open",
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """Get audit issues."""
+    from app.services.audit_service import AuditService
+    from uuid import UUID
+
+    projects = _supabase_rest("get", "projects", params="limit=1")
+    if not projects:
+        raise HTTPException(status_code=400, detail="No projects found")
+
+    project_id = projects[0]["id"] if isinstance(projects, list) else projects.get("id")
+
+    try:
+        svc = AuditService()
+        issues = svc.get_audit_issues(
+            UUID(project_id),
+            issue_type=issue_type if issue_type else None,
+            severity=severity,
+            status=status,
+            db_fn=_supabase_rest,
+        )
+        return {"issues": issues, "count": len(issues)}
+
+    except Exception as exc:
+        logger.error("Failed to fetch audit issues: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.patch("/audits/issues/{issue_id}")
+def update_issue(
+    issue_id: int,
+    body: UpdateIssueRequest,
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """Update issue status."""
+    from app.services.audit_service import AuditService
+
+    try:
+        svc = AuditService()
+        success = svc.update_issue_status(issue_id, body.status, _supabase_rest)
+
+        if success:
+            return {"status": body.status, "issue_id": issue_id}
+        else:
+            raise HTTPException(status_code=400, detail="Failed to update")
+
+    except Exception as exc:
+        logger.error("Failed to update issue: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/audits/issues/{issue_id}/resolve")
+def resolve_issue(
+    issue_id: int,
+    body: ResolveIssueRequest,
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """Resolve an issue."""
+    from app.services.audit_service import AuditService
+
+    try:
+        svc = AuditService()
+        success = svc.resolve_issue(
+            issue_id,
+            body.resolution_type,
+            body.resolution_details,
+            db_fn=_supabase_rest,
+        )
+
+        if success:
+            return {"status": "resolved", "issue_id": issue_id}
+        else:
+            raise HTTPException(status_code=400, detail="Failed to resolve")
+
+    except Exception as exc:
+        logger.error("Failed to resolve issue: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/audits/summary")
+def get_audit_summary(
+    days: int = 30,
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """Get audit summary for a project."""
+    from app.services.audit_service import AuditService
+    from uuid import UUID
+
+    projects = _supabase_rest("get", "projects", params="limit=1")
+    if not projects:
+        raise HTTPException(status_code=400, detail="No projects found")
+
+    project_id = projects[0]["id"] if isinstance(projects, list) else projects.get("id")
+
+    try:
+        svc = AuditService()
+        summary = svc.get_audit_summary(UUID(project_id), days, _supabase_rest)
+        return summary
+
+    except Exception as exc:
+        logger.error("Failed to fetch audit summary: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
 # ── Reports ────────────────────────────────────────────────────────
 
 @app.get("/projects/{project_id}/reports")
