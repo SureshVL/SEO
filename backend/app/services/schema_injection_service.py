@@ -65,6 +65,9 @@ class SchemaInjectionService:
             "cms_auto_detect": req.cms_auto_detect,
         })
 
+        # Fetch stored CMS credentials for this project
+        stored_creds = self._fetch_cms_credentials(str(req.project_id), db_fn)
+
         injections: list[dict[str, Any]] = []
 
         try:
@@ -91,8 +94,15 @@ class SchemaInjectionService:
                             logger.warning("Could not generate schema type: %s", schema_type)
                             continue
 
-                        # Inject via CMS client
-                        cms_client = get_cms_client(cms_platform or "custom", url)
+                        # Inject via CMS client (use stored credentials if available)
+                        api_key = ""
+                        api_secret = ""
+                        if cms_platform in stored_creds:
+                            cred = stored_creds[cms_platform]
+                            api_key = cred.get("api_key", "")
+                            api_secret = cred.get("api_secret", "")
+
+                        cms_client = get_cms_client(cms_platform or "custom", url, api_key, api_secret)
                         injection_result = cms_client.inject_schema(schema_jsonld, url)
 
                         # Record injection attempt
@@ -171,3 +181,15 @@ class SchemaInjectionService:
             params += f"&batch_id=eq.{batch_id}"
         result = db_fn("get", "schema_injections", params=params)
         return result if isinstance(result, list) else []
+
+    def _fetch_cms_credentials(self, project_id: str, db_fn: Callable) -> dict[str, dict[str, Any]]:
+        """Fetch stored CMS credentials for a project, keyed by platform."""
+        try:
+            result = db_fn("get", "cms_credentials", params=f"project_id=eq.{project_id}")
+            if not result:
+                return {}
+            creds_list = result if isinstance(result, list) else [result]
+            return {c["cms_platform"]: c for c in creds_list}
+        except Exception as exc:
+            logger.warning("Failed to fetch CMS credentials: %s", exc)
+            return {}
