@@ -1,11 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Braces, Check, Copy, Loader2, X, Zap } from "lucide-react";
+import { Braces, Check, Copy, Loader2, Settings2, X, Zap } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/lib/store";
 import { detectSchema, type SchemaDetectionResult } from "@/lib/api";
 import { PageHeader } from "@/components/ui/PageHeader";
+import { CMSCredentialsModal } from "@/components/ui/CMSCredentialsModal";
 import { toast } from "sonner";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -43,6 +44,8 @@ export default function SchemaPage() {
   const [selectedSchemas, setSelectedSchemas] = useState<string[]>(["FAQPage", "Organization"]);
   const [batchLoading, setBatchLoading] = useState(false);
   const [batchResult, setBatchResult] = useState<any>(null);
+  const [wordpressModal, setWordpressModal] = useState(false);
+  const [wordpressStatus, setWordpressStatus] = useState<{ saved: boolean; endpoint: string }>({ saved: false, endpoint: "" });
 
   useEffect(() => {
     if (!businessProfile) return;
@@ -50,6 +53,22 @@ export default function SchemaPage() {
     if (!businessName && businessProfile.projectName)
       setBusinessName(businessProfile.projectName);
   }, [businessProfile]);
+
+  useEffect(() => {
+    // Fetch WordPress connection status
+    async function checkWordPress() {
+      try {
+        const res = await fetch(`${API}/cms/credentials/wordpress`, {
+          headers: { "X-API-KEY": apiKey },
+        });
+        const data = await res.json();
+        setWordpressStatus({ saved: data.saved, endpoint: data.endpoint_url || "" });
+      } catch (err) {
+        console.error("Failed to fetch WordPress status:", err);
+      }
+    }
+    checkWordPress();
+  }, [apiKey, tab]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -332,9 +351,32 @@ export default function SchemaPage() {
       )}
 
       {tab === "inject" && (
-      <div className="card p-6 mb-6">
-        <form onSubmit={handleBatchInject} className="space-y-4">
-          <div>
+      <div className="space-y-6">
+        {/* WordPress Connection Card */}
+        <div className={cn("card p-4 border", wordpressStatus.saved ? "border-emerald-500/30 bg-emerald-500/5" : "border-zinc-700")}>
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="font-medium text-sm text-zinc-200 mb-1">WordPress Auto-Injection</h3>
+              {wordpressStatus.saved ? (
+                <p className="text-xs text-emerald-300">✓ Connected to {wordpressStatus.endpoint}</p>
+              ) : (
+                <p className="text-xs text-zinc-400">Connect your WordPress site for automatic schema injection</p>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => setWordpressModal(true)}
+              className="flex items-center gap-2 text-sm px-3 py-2 bg-violet-500/10 text-violet-300 hover:bg-violet-500/20 rounded-lg transition"
+            >
+              <Settings2 className="w-4 h-4" />
+              {wordpressStatus.saved ? "Update" : "Connect"}
+            </button>
+          </div>
+        </div>
+
+        <div className="card p-6">
+          <form onSubmit={handleBatchInject} className="space-y-4">
+            <div>
             <label className="block text-xs text-zinc-500 uppercase tracking-wider mb-2">
               URLs to inject (one per line)
             </label>
@@ -413,6 +455,7 @@ export default function SchemaPage() {
             {batchLoading ? "Injecting…" : "Inject to all URLs"}
           </button>
         </form>
+        </div>
       </div>
       )}
 
@@ -449,6 +492,27 @@ export default function SchemaPage() {
         </div>
       </div>
       )}
+
+      <CMSCredentialsModal
+        isOpen={wordpressModal}
+        platform="wordpress"
+        onClose={() => setWordpressModal(false)}
+        onSave={() => {
+          // Refresh WordPress status
+          setTimeout(async () => {
+            try {
+              const res = await fetch(`${API}/cms/credentials/wordpress`, {
+                headers: { "X-API-KEY": apiKey },
+              });
+              const data = await res.json();
+              setWordpressStatus({ saved: data.saved, endpoint: data.endpoint_url || "" });
+            } catch (err) {
+              console.error("Failed to refresh WordPress status:", err);
+            }
+          }, 500);
+        }}
+        apiKey={apiKey}
+      />
     </div>
   );
 }

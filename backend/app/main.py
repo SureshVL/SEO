@@ -688,6 +688,13 @@ class SchemaInjectBatchRequest(BaseModel):
     cms_platform: str | None = None
 
 
+class CMSCredentialRequest(BaseModel):
+    cms_platform: str  # wordpress, shopify, webflow, custom
+    endpoint_url: str = ""  # e.g., https://mysite.com for WordPress
+    api_key: str = ""  # REST API username or key
+    api_secret: str = ""  # REST API password or token
+
+
 def _build_schema_agent() -> SchemaAgent:
     firecrawl = None
     if settings.firecrawl_api_key:
@@ -807,6 +814,103 @@ def get_injection_job_status(
 
     svc = SchemaInjectionService()
     return svc.get_job_status(job_id, _supabase_rest)
+
+
+@app.post("/cms/credentials")
+def save_cms_credentials(
+    body: CMSCredentialRequest,
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """Save CMS platform credentials (WordPress REST API, etc.)."""
+    # Get first project for now (in production, use project_id from request)
+    projects = _supabase_rest("get", "projects", params="limit=1")
+    if not projects:
+        raise HTTPException(status_code=400, detail="No projects found")
+
+    project_id = projects[0]["id"] if isinstance(projects, list) else projects.get("id")
+
+    try:
+        # Check if credentials already exist
+        existing = _supabase_rest("get", "cms_credentials", params=f"project_id=eq.{project_id}&cms_platform=eq.{body.cms_platform}")
+
+        if existing and isinstance(existing, list) and len(existing) > 0:
+            # Update
+            result = _supabase_rest("patch", f"cms_credentials?project_id=eq.{project_id}&cms_platform=eq.{body.cms_platform}", {
+                "endpoint_url": body.endpoint_url,
+                "api_key": body.api_key,
+                "api_secret": body.api_secret,
+            })
+        else:
+            # Create
+            result = _supabase_rest("post", "cms_credentials", {
+                "project_id": project_id,
+                "cms_platform": body.cms_platform,
+                "endpoint_url": body.endpoint_url,
+                "api_key": body.api_key,
+                "api_secret": body.api_secret,
+            })
+
+        return {
+            "status": "saved",
+            "platform": body.cms_platform,
+            "endpoint": body.endpoint_url,
+        }
+    except Exception as exc:
+        logger.error("Failed to save CMS credentials: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/cms/credentials/{platform}")
+def get_cms_credentials(
+    platform: str,
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """Get saved CMS credentials for a platform."""
+    projects = _supabase_rest("get", "projects", params="limit=1")
+    if not projects:
+        raise HTTPException(status_code=400, detail="No projects found")
+
+    project_id = projects[0]["id"] if isinstance(projects, list) else projects.get("id")
+
+    try:
+        result = _supabase_rest("get", "cms_credentials", params=f"project_id=eq.{project_id}&cms_platform=eq.{platform}")
+        if not result or (isinstance(result, list) and len(result) == 0):
+            return {"platform": platform, "saved": False}
+
+        cred = result[0] if isinstance(result, list) else result
+        # Don't return secrets, just confirm they're saved
+        return {
+            "platform": platform,
+            "saved": True,
+            "endpoint_url": cred.get("endpoint_url", ""),
+            "has_api_key": bool(cred.get("api_key")),
+        }
+    except Exception as exc:
+        logger.error("Failed to get CMS credentials: %s", exc)
+        return {"platform": platform, "saved": False, "error": str(exc)}
+
+
+@app.delete("/cms/credentials/{platform}")
+def delete_cms_credentials(
+    platform: str,
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """Delete saved CMS credentials for a platform."""
+    projects = _supabase_rest("get", "projects", params="limit=1")
+    if not projects:
+        raise HTTPException(status_code=400, detail="No projects found")
+
+    project_id = projects[0]["id"] if isinstance(projects, list) else projects.get("id")
+
+    try:
+        _supabase_rest("delete", f"cms_credentials?project_id=eq.{project_id}&cms_platform=eq.{platform}", None)
+        return {"status": "deleted", "platform": platform}
+    except Exception as exc:
+        logger.error("Failed to delete CMS credentials: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 # ── Content briefs + scoring ──────────────────────────────────────
