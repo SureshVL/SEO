@@ -703,6 +703,20 @@ class BulkContentJobRequest(BaseModel):
     schedule_publish: str = ""  # ISO date to publish
 
 
+class ScheduleArticleRequest(BaseModel):
+    title: str = Field(..., min_length=1, max_length=500)
+    slug: str = Field(..., min_length=1, max_length=500)
+    body: str = Field(..., min_length=1)
+    meta_description: str = Field(..., max_length=160)
+    scheduled_date: str  # ISO datetime
+    cms_platform: str = "wordpress"
+    auto_publish: bool = True
+    auto_social_share: bool = False
+    social_platforms: list[str] = Field(default_factory=list)
+    featured_image_url: str = ""
+    content_type: str = "article"
+
+
 def _build_schema_agent() -> SchemaAgent:
     firecrawl = None
     if settings.firecrawl_api_key:
@@ -1040,6 +1054,169 @@ def cancel_bulk_job(
             raise HTTPException(status_code=400, detail="Failed to cancel job")
     except Exception as exc:
         logger.error("Failed to cancel bulk job: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+# ── Content calendar + publishing ────────────────────────────────────
+
+@app.post("/calendar/schedule")
+def schedule_article(
+    body: ScheduleArticleRequest,
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """Schedule an article for future publication."""
+    from app.services.content_calendar_service import (
+        ContentCalendarService,
+        ScheduleArticleRequest as CalendarRequest,
+    )
+    from uuid import UUID
+
+    projects = _supabase_rest("get", "projects", params="limit=1")
+    if not projects:
+        raise HTTPException(status_code=400, detail="No projects found")
+
+    project_id = projects[0]["id"] if isinstance(projects, list) else projects.get("id")
+
+    try:
+        svc = ContentCalendarService()
+        req = CalendarRequest(
+            project_id=UUID(project_id),
+            title=body.title,
+            slug=body.slug,
+            body=body.body,
+            meta_description=body.meta_description,
+            scheduled_date=body.scheduled_date,
+            cms_platform=body.cms_platform,
+            auto_publish=body.auto_publish,
+            auto_social_share=body.auto_social_share,
+            social_platforms=body.social_platforms,
+            featured_image_url=body.featured_image_url,
+            content_type=body.content_type,
+        )
+
+        result = svc.schedule_article(req, _supabase_rest)
+        return result
+
+    except Exception as exc:
+        logger.error("Failed to schedule article: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/calendar")
+def get_calendar(
+    start_date: str = "",
+    end_date: str = "",
+    status: str = "",
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """Fetch calendar events for a date range."""
+    from app.services.content_calendar_service import ContentCalendarService
+    from uuid import UUID
+
+    projects = _supabase_rest("get", "projects", params="limit=1")
+    if not projects:
+        raise HTTPException(status_code=400, detail="No projects found")
+
+    project_id = projects[0]["id"] if isinstance(projects, list) else projects.get("id")
+
+    try:
+        svc = ContentCalendarService()
+        events = svc.get_calendar(
+            UUID(project_id),
+            start_date=start_date,
+            end_date=end_date,
+            status=status,
+            db_fn=_supabase_rest,
+        )
+        return {"events": events, "count": len(events)}
+
+    except Exception as exc:
+        logger.error("Failed to fetch calendar: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.patch("/calendar/{calendar_id}")
+def reschedule_article(
+    calendar_id: int,
+    new_date: str,
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """Reschedule a scheduled article."""
+    from app.services.content_calendar_service import ContentCalendarService
+
+    try:
+        svc = ContentCalendarService()
+        success = svc.reschedule_article(calendar_id, new_date, _supabase_rest)
+        if success:
+            return {"status": "rescheduled", "calendar_id": calendar_id, "new_date": new_date}
+        else:
+            raise HTTPException(status_code=400, detail="Failed to reschedule")
+    except Exception as exc:
+        logger.error("Failed to reschedule article: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.delete("/calendar/{calendar_id}")
+def cancel_article(
+    calendar_id: int,
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """Cancel a scheduled article."""
+    from app.services.content_calendar_service import ContentCalendarService
+
+    try:
+        svc = ContentCalendarService()
+        success = svc.cancel_article(calendar_id, _supabase_rest)
+        if success:
+            return {"status": "cancelled", "calendar_id": calendar_id}
+        else:
+            raise HTTPException(status_code=400, detail="Failed to cancel")
+    except Exception as exc:
+        logger.error("Failed to cancel article: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/calendar/{calendar_id}/publish")
+async def publish_article(
+    calendar_id: int,
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """Publish a scheduled article immediately."""
+    from app.services.content_calendar_service import ContentCalendarService
+
+    try:
+        svc = ContentCalendarService()
+        success = await svc.publish_article(calendar_id, _supabase_rest)
+        if success:
+            return {"status": "published", "calendar_id": calendar_id}
+        else:
+            raise HTTPException(status_code=400, detail="Failed to publish")
+    except Exception as exc:
+        logger.error("Failed to publish article: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/calendar/{calendar_id}/logs")
+def get_publishing_logs(
+    calendar_id: int,
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """Get publishing logs for an article."""
+    from app.services.content_calendar_service import ContentCalendarService
+
+    try:
+        svc = ContentCalendarService()
+        logs = svc.get_publishing_logs(calendar_id, db_fn=_supabase_rest)
+        return {"logs": logs, "count": len(logs)}
+
+    except Exception as exc:
+        logger.error("Failed to fetch publishing logs: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
 
 

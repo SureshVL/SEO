@@ -34,6 +34,16 @@ class SchemaInjectionResult:
     response_data: dict[str, Any] | None = None
 
 
+@dataclass
+class PublishResult:
+    success: bool
+    message: str
+    cms_platform: str
+    post_id: str | None = None
+    post_url: str | None = None
+    response_data: dict[str, Any] | None = None
+
+
 class CMSClient(ABC):
     """Abstract base for CMS injection strategies."""
 
@@ -50,6 +60,11 @@ class CMSClient(ABC):
     @abstractmethod
     def inject_schema(self, schema_jsonld: dict[str, Any], page_url: str) -> SchemaInjectionResult:
         """Inject a schema markup block into a page."""
+        pass
+
+    @abstractmethod
+    def publish_post(self, content: dict[str, Any]) -> PublishResult:
+        """Publish or update a post on the CMS."""
         pass
 
     def _headers(self, extra: dict[str, str] | None = None) -> dict[str, str]:
@@ -144,6 +159,56 @@ class WordPressClient(CMSClient):
             cms_platform="wordpress",
         )
 
+    def publish_post(self, content: dict[str, Any]) -> PublishResult:
+        """Create or publish a WordPress post."""
+        if not self.api_key:
+            return PublishResult(
+                success=False,
+                message="WordPress API key required",
+                cms_platform="wordpress",
+            )
+
+        try:
+            with httpx.Client(timeout=15) as client:
+                rest_base = self.url.rstrip("/") + "/wp-json"
+                post_data = {
+                    "title": content.get("title", ""),
+                    "content": content.get("content", ""),
+                    "excerpt": content.get("excerpt", ""),
+                    "slug": content.get("slug", ""),
+                    "status": "publish",
+                }
+
+                # Add featured image if provided
+                if content.get("featured_image"):
+                    post_data["featured_media"] = content["featured_image"]
+
+                resp = client.post(
+                    f"{rest_base}/wp/v2/posts",
+                    json=post_data,
+                    headers=self._headers(),
+                    timeout=15,
+                )
+
+                if resp.status_code in (200, 201):
+                    data = resp.json()
+                    return PublishResult(
+                        success=True,
+                        message=f"Published post {data.get('id')}",
+                        cms_platform="wordpress",
+                        post_id=str(data.get("id")),
+                        post_url=data.get("link"),
+                        response_data=data,
+                    )
+        except Exception as exc:
+            logger.warning("WordPress publish failed: %s", exc)
+
+        return PublishResult(
+            success=False,
+            message=f"WordPress publish error: {exc}",
+            cms_platform="wordpress",
+        )
+
 
 class ShopifyClient(CMSClient):
     """Shopify store with REST API."""
@@ -175,6 +240,62 @@ class ShopifyClient(CMSClient):
             cms_platform="shopify",
         )
 
+    def publish_post(self, content: dict[str, Any]) -> PublishResult:
+        """Create a Shopify product or blog post."""
+        if not self.api_key:
+            return PublishResult(
+                success=False,
+                message="Shopify API key required",
+                cms_platform="shopify",
+            )
+
+        try:
+            with httpx.Client(timeout=15) as client:
+                api_base = self.url.rstrip("/") + "/admin/api/2024-01"
+
+                # Create blog post
+                post_data = {
+                    "blog_post": {
+                        "title": content.get("title", ""),
+                        "body_html": content.get("content", ""),
+                        "metafields": [
+                            {
+                                "namespace": "custom",
+                                "key": "meta_description",
+                                "value": content.get("excerpt", ""),
+                                "type": "single_line_text_field",
+                            }
+                        ],
+                    }
+                }
+
+                resp = client.post(
+                    f"{api_base}/blogs/1/articles.json",
+                    json=post_data,
+                    headers=self._headers({"Content-Type": "application/json"}),
+                    timeout=15,
+                )
+
+                if resp.status_code in (200, 201):
+                    data = resp.json()
+                    article = data.get("article", {})
+                    return PublishResult(
+                        success=True,
+                        message=f"Published article {article.get('id')}",
+                        cms_platform="shopify",
+                        post_id=str(article.get("id")),
+                        post_url=article.get("url"),
+                        response_data=article,
+                    )
+        except Exception as exc:
+            logger.warning("Shopify publish failed: %s", exc)
+
+        return PublishResult(
+            success=False,
+            message=f"Shopify publish error: {exc}",
+            cms_platform="shopify",
+        )
+
 
 class WebflowClient(CMSClient):
     """Webflow site with API."""
@@ -199,6 +320,23 @@ class WebflowClient(CMSClient):
         return SchemaInjectionResult(
             success=False,
             message="Webflow requires custom code block in editor. See integration guide.",
+            cms_platform="webflow",
+        )
+
+    def publish_post(self, content: dict[str, Any]) -> PublishResult:
+        """Publish to Webflow via API (requires custom collection setup)."""
+        if not self.api_key:
+            return PublishResult(
+                success=False,
+                message="Webflow API key required",
+                cms_platform="webflow",
+            )
+
+        # Webflow API requires collection ID and custom field mapping
+        # Simplified for MVP - returns instruction to set up via dashboard
+        return PublishResult(
+            success=False,
+            message="Webflow publishing requires manual collection setup. Use Zapier or custom webhooks.",
             cms_platform="webflow",
         )
 
@@ -240,6 +378,43 @@ class GenericHTTPClient(CMSClient):
         return SchemaInjectionResult(
             success=False,
             message=f"Custom injection error: {exc}",
+            cms_platform="custom",
+        )
+
+    def publish_post(self, content: dict[str, Any]) -> PublishResult:
+        """POST content to a custom webhook endpoint."""
+        if not self.api_key:
+            return PublishResult(
+                success=False,
+                message="Custom endpoint requires webhook URL",
+                cms_platform="custom",
+            )
+
+        try:
+            with httpx.Client(timeout=15) as client:
+                resp = client.post(
+                    self.api_key,  # URL stored in api_key field
+                    json=content,
+                    headers=self._headers({"Content-Type": "application/json"}),
+                    timeout=15,
+                )
+
+                if resp.status_code < 400:
+                    data = resp.json() if resp.text else {}
+                    return PublishResult(
+                        success=True,
+                        message=f"Posted to custom endpoint (HTTP {resp.status_code})",
+                        cms_platform="custom",
+                        post_id=data.get("id"),
+                        post_url=data.get("url"),
+                        response_data=data,
+                    )
+        except Exception as exc:
+            logger.warning("Custom HTTP publish failed: %s", exc)
+
+        return PublishResult(
+            success=False,
+            message=f"Custom publish error: {exc}",
             cms_platform="custom",
         )
 
