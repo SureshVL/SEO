@@ -85,6 +85,7 @@ export default function DashboardPage() {
     { label: "Brief",          href: "/dashboard/brief",        icon: Sparkles,  bg: ORANGE,  text: "#fff" },
     { label: "Content Studio", href: "/dashboard/content",      icon: FileText,  bg: "#6366F1", text: "#fff" },
     { label: "Bulk Content",   href: "/dashboard/bulk-content", icon: Grid3x3,   bg: "#EC4899", text: "#fff" },
+    { label: "Calendar",       href: "/dashboard/calendar",     icon: Calendar,  bg: "#F97316", text: "#fff" },
     { label: "Programmatic",   href: "/dashboard/programmatic", icon: Grid3x3,   bg: SUN,     text: "#0b1020" },
     { label: "Link Building",  href: "/dashboard/links",        icon: Link2,     bg: "#14B8A6", text: "#fff" },
     { label: "White-label",    href: "/dashboard/branding",     icon: Palette,   bg: "#F43F5E", text: "#fff" },
