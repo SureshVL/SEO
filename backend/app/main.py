@@ -695,6 +695,14 @@ class CMSCredentialRequest(BaseModel):
     api_secret: str = ""  # REST API password or token
 
 
+class BulkContentJobRequest(BaseModel):
+    template: dict[str, str] = Field(..., description="Article template with {{variable}} placeholders")
+    csv_data: list[dict[str, str]] = Field(..., description="Parsed CSV rows")
+    enhance_with_ai: bool = True
+    export_format: str = "json"  # json, csv, markdown
+    schedule_publish: str = ""  # ISO date to publish
+
+
 def _build_schema_agent() -> SchemaAgent:
     firecrawl = None
     if settings.firecrawl_api_key:
@@ -910,6 +918,128 @@ def delete_cms_credentials(
         return {"status": "deleted", "platform": platform}
     except Exception as exc:
         logger.error("Failed to delete CMS credentials: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+# ── Bulk content generation ──────────────────────────────────────
+
+@app.post("/bulk/jobs")
+def create_bulk_content_job(
+    body: BulkContentJobRequest,
+    background_tasks: BackgroundTasks,
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """Create and queue a bulk content generation job."""
+    from app.services.bulk_content_service import BulkContentService, BulkContentJobRequest
+    from uuid import UUID
+
+    projects = _supabase_rest("get", "projects", params="limit=1")
+    if not projects:
+        raise HTTPException(status_code=400, detail="No projects found")
+
+    project_id = projects[0]["id"] if isinstance(projects, list) else projects.get("id")
+
+    try:
+        svc = BulkContentService()
+        req = BulkContentJobRequest(
+            project_id=UUID(project_id),
+            template=body.template,
+            csv_data=body.csv_data,
+            enhance_with_ai=body.enhance_with_ai,
+            export_format=body.export_format,
+            schedule_publish=body.schedule_publish,
+        )
+
+        result = svc.create_job(req, _supabase_rest)
+
+        # Queue async processing
+        background_tasks.add_task(
+            svc.process_job,
+            result.job_id,
+            body.template,
+            body.csv_data,
+            body.enhance_with_ai,
+            body.export_format,
+            _supabase_rest,
+        )
+
+        return {
+            "job_id": result.job_id,
+            "status": result.status,
+            "total_articles": result.total_articles,
+            "completed_articles": result.completed_articles,
+            "failed_articles": result.failed_articles,
+        }
+    except Exception as exc:
+        logger.error("Failed to create bulk content job: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/bulk/jobs/{job_id}")
+def get_bulk_job_status(
+    job_id: str,
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """Get status of a bulk content job."""
+    from app.services.bulk_content_service import BulkContentService
+
+    try:
+        svc = BulkContentService()
+        result = svc.get_job_status(job_id, _supabase_rest)
+        return {
+            "job_id": result.job_id,
+            "status": result.status,
+            "total_articles": result.total_articles,
+            "completed_articles": result.completed_articles,
+            "failed_articles": result.failed_articles,
+            "export_url": result.export_url,
+            "error_message": result.error_message,
+        }
+    except Exception as exc:
+        logger.error("Failed to get bulk job status: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/bulk/jobs/{job_id}/articles")
+def get_bulk_job_articles(
+    job_id: str,
+    limit: int = 100,
+    offset: int = 0,
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """Get generated articles for a bulk content job."""
+    from app.services.bulk_content_service import BulkContentService
+
+    try:
+        svc = BulkContentService()
+        articles = svc.get_articles(job_id, limit=limit, offset=offset, db_fn=_supabase_rest)
+        return {"articles": articles, "limit": limit, "offset": offset}
+    except Exception as exc:
+        logger.error("Failed to get bulk articles: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.delete("/bulk/jobs/{job_id}")
+def cancel_bulk_job(
+    job_id: str,
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """Cancel a bulk content job."""
+    from app.services.bulk_content_service import BulkContentService
+
+    try:
+        svc = BulkContentService()
+        success = svc.cancel_job(job_id, _supabase_rest)
+        if success:
+            return {"status": "cancelled", "job_id": job_id}
+        else:
+            raise HTTPException(status_code=400, detail="Failed to cancel job")
+    except Exception as exc:
+        logger.error("Failed to cancel bulk job: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
 
 
