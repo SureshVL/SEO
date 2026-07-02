@@ -741,6 +741,17 @@ class GenerateStrategiesRequest(BaseModel):
     your_rankings: dict[str, int] = Field(default_factory=dict)
 
 
+class AddSitePageRequest(BaseModel):
+    url: str = Field(..., min_length=5, max_length=500)
+    title: str = Field(..., max_length=500)
+    content: str = Field(..., min_length=10)
+    topics: list[str] = Field(default_factory=list)
+
+
+class FindOpportunitiesRequest(BaseModel):
+    source_url: str
+
+
 def _build_schema_agent() -> SchemaAgent:
     firecrawl = None
     if settings.firecrawl_api_key:
@@ -1463,6 +1474,183 @@ def update_strategy(
             raise HTTPException(status_code=400, detail="Failed to update")
     except Exception as exc:
         logger.error("Failed to update strategy: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+# ── Internal linking + site structure ─────────────────────────────
+
+@app.post("/linking/pages")
+def add_site_page(
+    body: AddSitePageRequest,
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """Add a page to the site structure analysis."""
+    from app.services.internal_linking_service import InternalLinkingService
+    from uuid import UUID
+
+    projects = _supabase_rest("get", "projects", params="limit=1")
+    if not projects:
+        raise HTTPException(status_code=400, detail="No projects found")
+
+    project_id = projects[0]["id"] if isinstance(projects, list) else projects.get("id")
+
+    try:
+        svc = InternalLinkingService()
+        result = svc.add_page(
+            UUID(project_id),
+            body.url,
+            body.title,
+            body.content,
+            body.topics,
+            _supabase_rest,
+        )
+        return result
+
+    except Exception as exc:
+        logger.error("Failed to add page: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/linking/analyze")
+async def analyze_site(
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """Analyze overall site structure and linking patterns."""
+    from app.services.internal_linking_service import InternalLinkingService
+    from uuid import UUID
+
+    projects = _supabase_rest("get", "projects", params="limit=1")
+    if not projects:
+        raise HTTPException(status_code=400, detail="No projects found")
+
+    project_id = projects[0]["id"] if isinstance(projects, list) else projects.get("id")
+
+    try:
+        svc = InternalLinkingService()
+        analysis = await svc.analyze_site_structure(UUID(project_id), _supabase_rest)
+        return analysis
+
+    except Exception as exc:
+        logger.error("Failed to analyze site: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/linking/opportunities")
+async def find_opportunities(
+    body: FindOpportunitiesRequest,
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """Find linking opportunities for a page."""
+    from app.services.internal_linking_service import InternalLinkingService
+    from uuid import UUID
+
+    projects = _supabase_rest("get", "projects", params="limit=1")
+    if not projects:
+        raise HTTPException(status_code=400, detail="No projects found")
+
+    project_id = projects[0]["id"] if isinstance(projects, list) else projects.get("id")
+
+    try:
+        svc = InternalLinkingService()
+        opportunities = await svc.find_opportunities(
+            UUID(project_id),
+            body.source_url,
+            _supabase_rest,
+        )
+        return {"opportunities": opportunities, "count": len(opportunities)}
+
+    except Exception as exc:
+        logger.error("Failed to find opportunities: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/linking/opportunities")
+def get_opportunities(
+    source_url: str = "",
+    status: str = "",
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """Get linking opportunities."""
+    from app.services.internal_linking_service import InternalLinkingService
+    from uuid import UUID
+
+    projects = _supabase_rest("get", "projects", params="limit=1")
+    if not projects:
+        raise HTTPException(status_code=400, detail="No projects found")
+
+    project_id = projects[0]["id"] if isinstance(projects, list) else projects.get("id")
+
+    try:
+        svc = InternalLinkingService()
+        opportunities = svc.get_opportunities(
+            UUID(project_id),
+            source_url=source_url if source_url else None,
+            status=status,
+            db_fn=_supabase_rest,
+        )
+        return {"opportunities": opportunities, "count": len(opportunities)}
+
+    except Exception as exc:
+        logger.error("Failed to fetch opportunities: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.patch("/linking/opportunities/{opportunity_id}")
+def approve_opportunity(
+    opportunity_id: int,
+    status: str = "approved",
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """Approve or implement a linking opportunity."""
+    from app.services.internal_linking_service import InternalLinkingService
+
+    try:
+        svc = InternalLinkingService()
+
+        if status == "approved":
+            success = svc.approve_opportunity(opportunity_id, _supabase_rest)
+        elif status == "implemented":
+            success = svc.implement_link(opportunity_id, _supabase_rest)
+        else:
+            success = svc.reject_opportunity(opportunity_id, db_fn=_supabase_rest)
+
+        if success:
+            return {"status": status, "opportunity_id": opportunity_id}
+        else:
+            raise HTTPException(status_code=400, detail="Failed to update")
+
+    except Exception as exc:
+        logger.error("Failed to update opportunity: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/linking/orphans")
+async def identify_orphans(
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """Identify orphan pages in the site."""
+    from app.services.internal_linking_service import InternalLinkingService
+    from uuid import UUID
+
+    projects = _supabase_rest("get", "projects", params="limit=1")
+    if not projects:
+        raise HTTPException(status_code=400, detail="No projects found")
+
+    project_id = projects[0]["id"] if isinstance(projects, list) else projects.get("id")
+
+    try:
+        svc = InternalLinkingService()
+        orphans = await svc.identify_orphans(UUID(project_id), _supabase_rest)
+        return orphans
+
+    except Exception as exc:
+        logger.error("Failed to identify orphans: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
 
 
