@@ -717,6 +717,30 @@ class ScheduleArticleRequest(BaseModel):
     content_type: str = "article"
 
 
+class AddCompetitorRequest(BaseModel):
+    domain: str = Field(..., min_length=3, max_length=255)
+    name: str = ""
+    country_code: str = ""
+    language_code: str = "en"
+
+
+class AnalyzeCompetitorRequest(BaseModel):
+    competitor_id: int
+    keywords: list[dict[str, Any]] = Field(default_factory=list)
+    backlinks: int = 0
+    referring_domains: int = 0
+    top_pages: list[dict[str, Any]] = Field(default_factory=list)
+    technical_score: int | None = None
+    content_pages: int = 0
+    avg_content_length: int = 0
+
+
+class GenerateStrategiesRequest(BaseModel):
+    competitor_id: int
+    your_keywords: list[str] = Field(..., min_items=1)
+    your_rankings: dict[str, int] = Field(default_factory=dict)
+
+
 def _build_schema_agent() -> SchemaAgent:
     firecrawl = None
     if settings.firecrawl_api_key:
@@ -1217,6 +1241,228 @@ def get_publishing_logs(
 
     except Exception as exc:
         logger.error("Failed to fetch publishing logs: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+# ── Competitor analysis + outrank strategies ──────────────────────
+
+@app.post("/competitors/add")
+def add_competitor(
+    body: AddCompetitorRequest,
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """Add a competitor to track."""
+    from app.services.competitor_service import CompetitorService, AddCompetitorRequest as CompReq
+    from uuid import UUID
+
+    projects = _supabase_rest("get", "projects", params="limit=1")
+    if not projects:
+        raise HTTPException(status_code=400, detail="No projects found")
+
+    project_id = projects[0]["id"] if isinstance(projects, list) else projects.get("id")
+
+    try:
+        svc = CompetitorService()
+        req = CompReq(
+            project_id=UUID(project_id),
+            domain=body.domain,
+            name=body.name,
+            country_code=body.country_code,
+            language_code=body.language_code,
+        )
+
+        result = svc.add_competitor(req, _supabase_rest)
+        return result
+
+    except Exception as exc:
+        logger.error("Failed to add competitor: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/competitors")
+def get_competitors(
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """Get all competitors for a project."""
+    from app.services.competitor_service import CompetitorService
+    from uuid import UUID
+
+    projects = _supabase_rest("get", "projects", params="limit=1")
+    if not projects:
+        raise HTTPException(status_code=400, detail="No projects found")
+
+    project_id = projects[0]["id"] if isinstance(projects, list) else projects.get("id")
+
+    try:
+        svc = CompetitorService()
+        competitors = svc.get_competitors(UUID(project_id), db_fn=_supabase_rest)
+        return {"competitors": competitors, "count": len(competitors)}
+
+    except Exception as exc:
+        logger.error("Failed to fetch competitors: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.delete("/competitors/{competitor_id}")
+def remove_competitor(
+    competitor_id: int,
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """Remove a competitor."""
+    from app.services.competitor_service import CompetitorService
+
+    try:
+        svc = CompetitorService()
+        success = svc.remove_competitor(competitor_id, _supabase_rest)
+        if success:
+            return {"status": "removed", "competitor_id": competitor_id}
+        else:
+            raise HTTPException(status_code=400, detail="Failed to remove")
+    except Exception as exc:
+        logger.error("Failed to remove competitor: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/competitors/{competitor_id}/analyze")
+async def analyze_competitor(
+    competitor_id: int,
+    body: AnalyzeCompetitorRequest,
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """Analyze a competitor with Claude."""
+    from app.services.competitor_service import CompetitorService
+
+    try:
+        svc = CompetitorService()
+        result = await svc.analyze_competitor(
+            competitor_id,
+            {
+                "keywords": body.keywords,
+                "backlinks": body.backlinks,
+                "referring_domains": body.referring_domains,
+                "top_pages": body.top_pages,
+                "technical_score": body.technical_score,
+                "content_pages": body.content_pages,
+                "avg_content_length": body.avg_content_length,
+            },
+            _supabase_rest,
+        )
+        return result
+
+    except Exception as exc:
+        logger.error("Failed to analyze competitor: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/competitors/{competitor_id}/analysis")
+def get_competitor_analysis(
+    competitor_id: int,
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """Get latest analysis for a competitor."""
+    from app.services.competitor_service import CompetitorService
+
+    try:
+        svc = CompetitorService()
+        analysis = svc.get_analysis(competitor_id, db_fn=_supabase_rest)
+        if not analysis:
+            raise HTTPException(status_code=404, detail="No analysis found")
+        return analysis
+
+    except Exception as exc:
+        logger.error("Failed to fetch analysis: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/competitors/{competitor_id}/strategies")
+async def generate_strategies(
+    competitor_id: int,
+    body: GenerateStrategiesRequest,
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """Generate outrank strategies for a competitor."""
+    from app.services.competitor_service import CompetitorService
+    from uuid import UUID
+
+    projects = _supabase_rest("get", "projects", params="limit=1")
+    if not projects:
+        raise HTTPException(status_code=400, detail="No projects found")
+
+    project_id = projects[0]["id"] if isinstance(projects, list) else projects.get("id")
+
+    try:
+        svc = CompetitorService()
+        strategies = await svc.generate_strategies(
+            competitor_id,
+            your_domain=projects[0].get("domain", ""),
+            your_keywords=body.your_keywords,
+            your_rankings=body.your_rankings,
+            db_fn=_supabase_rest,
+        )
+        return {"strategies": strategies, "count": len(strategies)}
+
+    except Exception as exc:
+        logger.error("Failed to generate strategies: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/competitors/strategies")
+def get_strategies(
+    competitor_id: int | None = None,
+    status: str = "",
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """Get outrank strategies."""
+    from app.services.competitor_service import CompetitorService
+    from uuid import UUID
+
+    projects = _supabase_rest("get", "projects", params="limit=1")
+    if not projects:
+        raise HTTPException(status_code=400, detail="No projects found")
+
+    project_id = projects[0]["id"] if isinstance(projects, list) else projects.get("id")
+
+    try:
+        svc = CompetitorService()
+        strategies = svc.get_strategies(
+            UUID(project_id),
+            competitor_id=competitor_id,
+            status=status,
+            db_fn=_supabase_rest,
+        )
+        return {"strategies": strategies, "count": len(strategies)}
+
+    except Exception as exc:
+        logger.error("Failed to fetch strategies: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.patch("/competitors/strategies/{strategy_id}")
+def update_strategy(
+    strategy_id: int,
+    status: str,
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """Update strategy implementation status."""
+    from app.services.competitor_service import CompetitorService
+
+    try:
+        svc = CompetitorService()
+        success = svc.update_strategy_status(strategy_id, status, _supabase_rest)
+        if success:
+            return {"status": "updated", "strategy_id": strategy_id, "new_status": status}
+        else:
+            raise HTTPException(status_code=400, detail="Failed to update")
+    except Exception as exc:
+        logger.error("Failed to update strategy: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
 
 
