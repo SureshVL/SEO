@@ -78,18 +78,19 @@ export default function DashboardPage() {
     "Average SEO Score · Strategic KPI";
 
   const actions = [
-    { label: "AI Research",    href: "/dashboard/research",     icon: Bot,       bg: VIOLET,  text: "#fff" },
-    { label: "Keywords",       href: "/dashboard/keywords",     icon: Search,    bg: CYAN,    text: "#0b1020" },
-    { label: "Rank Tracker",   href: "/dashboard/rank-tracker", icon: BarChart3, bg: MAGENTA, text: "#fff" },
-    { label: "Audit",          href: "/dashboard/audit",        icon: Shield,    bg: LIME,    text: "#0b1020" },
-    { label: "Brief",          href: "/dashboard/brief",        icon: Sparkles,  bg: ORANGE,  text: "#fff" },
-    { label: "Content Studio", href: "/dashboard/content",      icon: FileText,  bg: "#6366F1", text: "#fff" },
-    { label: "Bulk Content",   href: "/dashboard/bulk-content", icon: Grid3x3,   bg: "#EC4899", text: "#fff" },
-    { label: "Calendar",       href: "/dashboard/calendar",     icon: Calendar,  bg: "#F97316", text: "#fff" },
-    { label: "Programmatic",   href: "/dashboard/programmatic", icon: Grid3x3,   bg: SUN,     text: "#0b1020" },
-    { label: "Link Building",  href: "/dashboard/links",        icon: Link2,     bg: "#14B8A6", text: "#fff" },
-    { label: "White-label",    href: "/dashboard/branding",     icon: Palette,   bg: "#F43F5E", text: "#fff" },
-    { label: "Workflow",       href: "/dashboard/workflow",     icon: Calendar,  bg: "#0EA5E9", text: "#fff" },
+    { label: "AI Research",    href: "/dashboard/research",      icon: Bot,       bg: VIOLET,  text: "#fff" },
+    { label: "Keywords",       href: "/dashboard/keywords",      icon: Search,    bg: CYAN,    text: "#0b1020" },
+    { label: "Rank Tracker",   href: "/dashboard/rank-tracker",  icon: BarChart3, bg: MAGENTA, text: "#fff" },
+    { label: "Audit",          href: "/dashboard/audit",         icon: Shield,    bg: LIME,    text: "#0b1020" },
+    { label: "Brief",          href: "/dashboard/brief",         icon: Sparkles,  bg: ORANGE,  text: "#fff" },
+    { label: "Content Studio", href: "/dashboard/content",       icon: FileText,  bg: "#6366F1", text: "#fff" },
+    { label: "Bulk Content",   href: "/dashboard/bulk-content",  icon: Grid3x3,   bg: "#EC4899", text: "#fff" },
+    { label: "Calendar",       href: "/dashboard/calendar",      icon: Calendar,  bg: "#F97316", text: "#fff" },
+    { label: "Competitors",    href: "/dashboard/competitors",   icon: Sparkles,  bg: "#A855F7", text: "#fff" },
+    { label: "Programmatic",   href: "/dashboard/programmatic",  icon: Grid3x3,   bg: SUN,     text: "#0b1020" },
+    { label: "Link Building",  href: "/dashboard/links",         icon: Link2,     bg: "#14B8A6", text: "#fff" },
+    { label: "White-label",    href: "/dashboard/branding",      icon: Palette,   bg: "#F43F5E", text: "#fff" },
+    { label: "Workflow",       href: "/dashboard/workflow",      icon: Calendar,  bg: "#0EA5E9", text: "#fff" },
   ];
 
   return (
