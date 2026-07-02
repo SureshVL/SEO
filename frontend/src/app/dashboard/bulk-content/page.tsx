@@ -252,7 +252,7 @@ export default function BulkContentPage() {
     <div className="min-h-screen bg-zinc-950">
       <PageHeader
         title="Bulk Content Generation"
-        description="Generate hundreds of SEO articles from templates and CSV data"
+        subtitle="Generate hundreds of SEO articles from templates and CSV data"
       />
 
       <div className="max-w-6xl mx-auto p-6">
@@ -298,7 +298,7 @@ export default function BulkContentPage() {
                     placeholder="Template JSON..."
                   />
                   <p className="text-xs text-zinc-500">
-                    Use {{"{variable}}"}} for substitution and {{"{"{ai:prompt}"}}} for AI enhancement
+                    Use {`{{variable}}`} for substitution and {`{{ai:prompt}}`} for AI enhancement
                   </p>
                 </div>
 
