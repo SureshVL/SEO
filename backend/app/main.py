@@ -1829,6 +1829,304 @@ async def get_gaps(
         raise HTTPException(status_code=500, detail=str(exc))
 
 
+# ── Multilingual + localization ───────────────────────────────────
+
+class AddLanguageRequest(BaseModel):
+    language_code: str = Field(..., min_length=2, max_length=10)
+    region_code: str | None = None
+    display_name: str = ""
+    is_default: bool = False
+
+
+class LocalizeContentRequest(BaseModel):
+    source_url: str = ""
+    source_content: str = ""
+    source_title: str = ""
+    source_keywords: list[str] = []
+    target_language_id: int
+    target_region: str | None = None
+
+
+class AnalyzeHreflangRequest(BaseModel):
+    source_url: str = ""
+
+
+class IdentifyRegionalRequest(BaseModel):
+    language_id: int
+    competitor_regions: list[str] = []
+
+
+@app.post("/multilingual/languages")
+def add_language(
+    body: AddLanguageRequest,
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """Add a new language/region to the project."""
+    from app.services.multilingual_service import MultilingualService
+    from uuid import UUID
+
+    projects = _supabase_rest("get", "projects", params="limit=1")
+    if not projects:
+        raise HTTPException(status_code=400, detail="No projects found")
+
+    project_id = projects[0]["id"] if isinstance(projects, list) else projects.get("id")
+
+    try:
+        svc = MultilingualService()
+        result = svc.add_language(
+            UUID(project_id),
+            body.language_code,
+            body.region_code,
+            body.display_name or body.language_code,
+            body.is_default,
+            _supabase_rest,
+        )
+        return result
+
+    except Exception as exc:
+        logger.error("Failed to add language: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/multilingual/languages")
+def get_languages(
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """Get all configured languages for a project."""
+    from app.services.multilingual_service import MultilingualService
+    from uuid import UUID
+
+    projects = _supabase_rest("get", "projects", params="limit=1")
+    if not projects:
+        raise HTTPException(status_code=400, detail="No projects found")
+
+    project_id = projects[0]["id"] if isinstance(projects, list) else projects.get("id")
+
+    try:
+        svc = MultilingualService()
+        languages = svc.get_languages(UUID(project_id), _supabase_rest)
+        return {"languages": languages, "count": len(languages)}
+
+    except Exception as exc:
+        logger.error("Failed to fetch languages: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/multilingual/localize")
+async def localize_content(
+    body: LocalizeContentRequest,
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """Translate and localize content for a target language."""
+    from app.services.multilingual_service import MultilingualService
+    from uuid import UUID
+
+    projects = _supabase_rest("get", "projects", params="limit=1")
+    if not projects:
+        raise HTTPException(status_code=400, detail="No projects found")
+
+    project_id = projects[0]["id"] if isinstance(projects, list) else projects.get("id")
+
+    try:
+        svc = MultilingualService()
+        result = await svc.localize_content(
+            UUID(project_id),
+            body.source_url,
+            body.source_content,
+            body.source_title,
+            body.source_keywords,
+            body.target_language_id,
+            body.target_region,
+            _supabase_rest,
+        )
+        return result
+
+    except Exception as exc:
+        logger.error("Failed to localize content: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/multilingual/hreflang")
+async def generate_hreflang(
+    body: AnalyzeHreflangRequest,
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """Generate hreflang strategy for language versions."""
+    from app.services.multilingual_service import MultilingualService
+    from uuid import UUID
+
+    projects = _supabase_rest("get", "projects", params="limit=1")
+    if not projects:
+        raise HTTPException(status_code=400, detail="No projects found")
+
+    project_id = projects[0]["id"] if isinstance(projects, list) else projects.get("id")
+
+    try:
+        svc = MultilingualService()
+        hreflang = await svc.generate_hreflang_strategy(
+            UUID(project_id),
+            body.source_url,
+            _supabase_rest,
+        )
+        return {"hreflang_links": hreflang, "count": len(hreflang)}
+
+    except Exception as exc:
+        logger.error("Failed to generate hreflang: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/multilingual/hreflang")
+def get_hreflang_config(
+    source_url: str = "",
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """Get hreflang configuration."""
+    from app.services.multilingual_service import MultilingualService
+    from uuid import UUID
+
+    projects = _supabase_rest("get", "projects", params="limit=1")
+    if not projects:
+        raise HTTPException(status_code=400, detail="No projects found")
+
+    project_id = projects[0]["id"] if isinstance(projects, list) else projects.get("id")
+
+    try:
+        svc = MultilingualService()
+        config = svc.get_hreflang_config(
+            UUID(project_id),
+            source_url=source_url if source_url else None,
+            db_fn=_supabase_rest,
+        )
+        return {"hreflang_config": config, "count": len(config)}
+
+    except Exception as exc:
+        logger.error("Failed to fetch hreflang config: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/multilingual/regional-opportunities")
+async def identify_regional_opportunities(
+    body: IdentifyRegionalRequest,
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """Identify regional content opportunities."""
+    from app.services.multilingual_service import MultilingualService
+    from uuid import UUID
+
+    projects = _supabase_rest("get", "projects", params="limit=1")
+    if not projects:
+        raise HTTPException(status_code=400, detail="No projects found")
+
+    project_id = projects[0]["id"] if isinstance(projects, list) else projects.get("id")
+
+    try:
+        svc = MultilingualService()
+        opportunities = await svc.identify_regional_opportunities(
+            UUID(project_id),
+            body.language_id,
+            body.competitor_regions,
+            _supabase_rest,
+        )
+        return {"opportunities": opportunities, "count": len(opportunities)}
+
+    except Exception as exc:
+        logger.error("Failed to identify regional opportunities: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/multilingual/regional-targeting")
+def get_regional_targeting(
+    language_id: int | None = None,
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """Get regional targeting configuration."""
+    from app.services.multilingual_service import MultilingualService
+    from uuid import UUID
+
+    projects = _supabase_rest("get", "projects", params="limit=1")
+    if not projects:
+        raise HTTPException(status_code=400, detail="No projects found")
+
+    project_id = projects[0]["id"] if isinstance(projects, list) else projects.get("id")
+
+    try:
+        svc = MultilingualService()
+        targeting = svc.get_regional_targeting(
+            UUID(project_id),
+            language_id=language_id,
+            db_fn=_supabase_rest,
+        )
+        return {"regional_targeting": targeting, "count": len(targeting)}
+
+    except Exception as exc:
+        logger.error("Failed to fetch regional targeting: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/multilingual/content")
+def get_localized_content(
+    language_id: int | None = None,
+    source_url: str = "",
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """Get localized content."""
+    from app.services.multilingual_service import MultilingualService
+    from uuid import UUID
+
+    projects = _supabase_rest("get", "projects", params="limit=1")
+    if not projects:
+        raise HTTPException(status_code=400, detail="No projects found")
+
+    project_id = projects[0]["id"] if isinstance(projects, list) else projects.get("id")
+
+    try:
+        svc = MultilingualService()
+        content = svc.get_localized_content(
+            UUID(project_id),
+            language_id=language_id,
+            source_url=source_url if source_url else None,
+            db_fn=_supabase_rest,
+        )
+        return {"localized_content": content, "count": len(content)}
+
+    except Exception as exc:
+        logger.error("Failed to fetch localized content: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/multilingual/analyze")
+async def analyze_multilingual_seo(
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """Analyze multilingual SEO setup and identify gaps."""
+    from app.services.multilingual_service import MultilingualService
+    from uuid import UUID
+
+    projects = _supabase_rest("get", "projects", params="limit=1")
+    if not projects:
+        raise HTTPException(status_code=400, detail="No projects found")
+
+    project_id = projects[0]["id"] if isinstance(projects, list) else projects.get("id")
+
+    try:
+        svc = MultilingualService()
+        analysis = await svc.analyze_multilingual_setup(UUID(project_id), _supabase_rest)
+        return analysis
+
+    except Exception as exc:
+        logger.error("Failed to analyze multilingual setup: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
 # ── Content briefs + scoring ──────────────────────────────────────
 
 class ContentBriefRequest(BaseModel):
