@@ -1654,6 +1654,181 @@ async def identify_orphans(
         raise HTTPException(status_code=500, detail=str(exc))
 
 
+# ── Keyword mapping + clustering ──────────────────────────────────
+
+class ImportKeywordsRequest(BaseModel):
+    keywords: list[dict[str, Any]] = Field(..., description="List of keywords to import")
+
+
+class ClusterKeywordsRequest(BaseModel):
+    pass
+
+
+@app.post("/keywords/import")
+def import_keywords(
+    body: ImportKeywordsRequest,
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """Import keywords into a project."""
+    from app.services.keyword_mapping_service import KeywordMappingService
+    from uuid import UUID
+
+    projects = _supabase_rest("get", "projects", params="limit=1")
+    if not projects:
+        raise HTTPException(status_code=400, detail="No projects found")
+
+    project_id = projects[0]["id"] if isinstance(projects, list) else projects.get("id")
+
+    try:
+        svc = KeywordMappingService()
+        result = svc.import_keywords(
+            UUID(project_id),
+            body.keywords,
+            _supabase_rest,
+        )
+        return result
+
+    except Exception as exc:
+        logger.error("Failed to import keywords: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/keywords/cluster")
+async def cluster_keywords(
+    body: ClusterKeywordsRequest = None,
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """Cluster keywords by semantic similarity and intent."""
+    from app.services.keyword_mapping_service import KeywordMappingService
+    from uuid import UUID
+
+    projects = _supabase_rest("get", "projects", params="limit=1")
+    if not projects:
+        raise HTTPException(status_code=400, detail="No projects found")
+
+    project_id = projects[0]["id"] if isinstance(projects, list) else projects.get("id")
+
+    try:
+        svc = KeywordMappingService()
+        clusters = await svc.cluster_keywords(UUID(project_id), _supabase_rest)
+        return {"clusters": clusters, "count": len(clusters)}
+
+    except Exception as exc:
+        logger.error("Failed to cluster keywords: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/keywords/assign")
+async def assign_keywords(
+    body: ClusterKeywordsRequest = None,
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """Assign keyword clusters to best-matching URLs."""
+    from app.services.keyword_mapping_service import KeywordMappingService
+    from uuid import UUID
+
+    projects = _supabase_rest("get", "projects", params="limit=1")
+    if not projects:
+        raise HTTPException(status_code=400, detail="No projects found")
+
+    project_id = projects[0]["id"] if isinstance(projects, list) else projects.get("id")
+
+    try:
+        svc = KeywordMappingService()
+        assignments = await svc.assign_keywords_to_urls(UUID(project_id), _supabase_rest)
+        return {"assignments": assignments, "count": len(assignments)}
+
+    except Exception as exc:
+        logger.error("Failed to assign keywords: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/keywords/clusters")
+def get_clusters(
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """Get all keyword clusters for a project."""
+    from app.services.keyword_mapping_service import KeywordMappingService
+    from uuid import UUID
+
+    projects = _supabase_rest("get", "projects", params="limit=1")
+    if not projects:
+        raise HTTPException(status_code=400, detail="No projects found")
+
+    project_id = projects[0]["id"] if isinstance(projects, list) else projects.get("id")
+
+    try:
+        svc = KeywordMappingService()
+        clusters = svc.get_clusters(UUID(project_id), _supabase_rest)
+        return {"clusters": clusters, "count": len(clusters)}
+
+    except Exception as exc:
+        logger.error("Failed to fetch clusters: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/keywords/mappings")
+def get_mappings(
+    url: str = "",
+    status: str = "",
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """Get keyword-URL mappings."""
+    from app.services.keyword_mapping_service import KeywordMappingService
+    from uuid import UUID
+
+    projects = _supabase_rest("get", "projects", params="limit=1")
+    if not projects:
+        raise HTTPException(status_code=400, detail="No projects found")
+
+    project_id = projects[0]["id"] if isinstance(projects, list) else projects.get("id")
+
+    try:
+        svc = KeywordMappingService()
+        mappings = svc.get_mappings(
+            UUID(project_id),
+            url=url if url else None,
+            status=status,
+            db_fn=_supabase_rest,
+        )
+        return {"mappings": mappings, "count": len(mappings)}
+
+    except Exception as exc:
+        logger.error("Failed to fetch mappings: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/keywords/gaps")
+async def get_gaps(
+    gap_type: str = "",
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """Identify keyword gaps and content opportunities."""
+    from app.services.keyword_mapping_service import KeywordMappingService
+    from uuid import UUID
+
+    projects = _supabase_rest("get", "projects", params="limit=1")
+    if not projects:
+        raise HTTPException(status_code=400, detail="No projects found")
+
+    project_id = projects[0]["id"] if isinstance(projects, list) else projects.get("id")
+
+    try:
+        svc = KeywordMappingService()
+        gaps = await svc.identify_gaps(UUID(project_id), _supabase_rest)
+        return gaps
+
+    except Exception as exc:
+        logger.error("Failed to identify gaps: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
 # ── Content briefs + scoring ──────────────────────────────────────
 
 class ContentBriefRequest(BaseModel):
