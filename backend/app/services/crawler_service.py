@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from html.parser import HTMLParser
 from typing import Any
 from urllib.parse import urljoin, urlparse
+from urllib.robotparser import RobotFileParser
 from xml.etree import ElementTree
 
 import httpx
@@ -21,6 +22,7 @@ import httpx
 logger = logging.getLogger("omnirank.crawler")
 
 USER_AGENT = "OmniRankBot/1.0 (+https://omnirank.ai/bot)"
+MAX_CRAWL_DELAY = 2.0  # seconds; we honor robots crawl-delay up to this cap
 
 
 @dataclass
@@ -49,6 +51,35 @@ class CrawlResult:
     sitemap_found: bool = False
     robots_found: bool = False
     crawl_seconds: float = 0.0
+    inventory_size: int = 0  # total URLs known from sitemaps (may exceed pages crawled)
+    templates: list[dict[str, Any]] = field(default_factory=list)  # url-pattern groups
+    skipped_by_robots: int = 0
+
+
+def url_template(path: str) -> str:
+    """Collapse a URL path into its page-template pattern.
+
+    /product/red-shoes-42     -> /product/{slug}
+    /category/12/electronics  -> /category/{n}/{slug}
+    /blog/2026/07/my-post     -> /blog/{n}/{n}/{slug}
+    """
+    path = path.split("?")[0]
+    segments = [s for s in path.split("/") if s]
+    if not segments:
+        return "/"
+    normalized = []
+    for seg in segments[:4]:
+        if re.fullmatch(r"\d+", seg):
+            normalized.append("{n}")
+        elif re.fullmatch(r"[0-9a-fA-F-]{16,}", seg):
+            normalized.append("{id}")
+        elif "-" in seg or "_" in seg or len(seg) > 24:
+            normalized.append("{slug}")
+        else:
+            normalized.append(seg)
+    if len(segments) > 4:
+        normalized.append("…")
+    return "/" + "/".join(normalized)
 
 
 class _SEOPageParser(HTMLParser):
@@ -125,6 +156,8 @@ class CrawlerService:
         self.max_pages = max_pages
         self.timeout = timeout
         self.concurrency = concurrency
+        self._robots: RobotFileParser | None = None
+        self._crawl_delay: float = 0.0
 
     @staticmethod
     def normalize_domain(domain: str) -> str:
@@ -132,8 +165,41 @@ class CrawlerService:
         domain = re.sub(r"^https?://", "", domain).split("/")[0]
         return domain
 
-    async def crawl_site(self, domain: str) -> CrawlResult:
-        """Crawl up to max_pages same-host pages starting from the homepage + sitemap."""
+    async def _load_robots(self, client, base_url: str) -> tuple[bool, RobotFileParser | None, float, list[str]]:
+        """Fetch robots.txt. Returns (found, parser, crawl_delay, sitemap_urls)."""
+        sitemaps: list[str] = []
+        try:
+            r = await client.get(f"{base_url}/robots.txt")
+            if r.status_code != 200:
+                return False, None, 0.0, sitemaps
+            rp = RobotFileParser()
+            rp.parse(r.text.splitlines())
+            for line in r.text.splitlines():
+                if line.lower().startswith("sitemap:"):
+                    sitemaps.append(line.split(":", 1)[1].strip())
+            delay = 0.0
+            try:
+                delay = float(rp.crawl_delay(USER_AGENT) or rp.crawl_delay("*") or 0)
+            except (TypeError, ValueError):
+                delay = 0.0
+            return True, rp, min(delay, MAX_CRAWL_DELAY), sitemaps
+        except httpx.HTTPError:
+            return False, None, 0.0, sitemaps
+
+    def _allowed(self, robots: RobotFileParser | None, url: str) -> bool:
+        if robots is None:
+            return True
+        try:
+            return robots.can_fetch(USER_AGENT, url)
+        except Exception:
+            return True
+
+    async def crawl_site(self, domain: str, seed_urls: list[str] | None = None) -> CrawlResult:
+        """Crawl up to max_pages same-host pages starting from the homepage + sitemap.
+
+        Respects robots.txt disallow rules and crawl-delay (capped at 2s).
+        Pass seed_urls to crawl a specific set (used by template sampling).
+        """
         started = time.time()
         host = self.normalize_domain(domain)
         base_url = f"https://{host}"
@@ -144,31 +210,37 @@ class CrawlerService:
         async with httpx.AsyncClient(
             timeout=self.timeout, limits=limits, headers=headers, follow_redirects=True
         ) as client:
-            # robots.txt + sitemap.xml
-            seeds = [base_url]
-            try:
-                r = await client.get(f"{base_url}/robots.txt")
-                if r.status_code == 200:
-                    result.robots_found = True
-                    for line in r.text.splitlines():
-                        if line.lower().startswith("sitemap:"):
-                            seeds.append(line.split(":", 1)[1].strip())
-            except httpx.HTTPError:
-                pass
+            # robots.txt: disallow rules + crawl-delay + sitemap discovery
+            result.robots_found, robots, crawl_delay, robot_sitemaps = await self._load_robots(client, base_url)
+            self._robots = robots
+            self._crawl_delay = crawl_delay
+            if crawl_delay > 0:
+                # be polite: single-file crawling when the site asks for a delay
+                self.concurrency = 1
 
-            sitemap_urls = await self._fetch_sitemap_urls(client, base_url, seeds)
-            if sitemap_urls:
+            seeds = [base_url] + robot_sitemaps
+            if seed_urls:
+                sitemap_urls = list(seed_urls)
                 result.sitemap_found = True
+            else:
+                sitemap_urls = await self._fetch_sitemap_urls(client, base_url, seeds)
+                if sitemap_urls:
+                    result.sitemap_found = True
+            result.inventory_size = len(sitemap_urls)
             seeds = [base_url] + sitemap_urls[: self.max_pages]
 
-            # BFS crawl, same host only
+            # BFS crawl, same host only, robots-compliant
             seen: set[str] = set()
             queue: list[str] = []
             for u in seeds:
                 cu = self._clean_url(u, base_url, host)
-                if cu and cu not in seen:
-                    seen.add(cu)
-                    queue.append(cu)
+                if not cu or cu in seen:
+                    continue
+                seen.add(cu)
+                if not self._allowed(robots, cu):
+                    result.skipped_by_robots += 1
+                    continue
+                queue.append(cu)
 
             sem = asyncio.Semaphore(self.concurrency)
             while queue and len(result.pages) < self.max_pages:
@@ -180,9 +252,13 @@ class CrawlerService:
                 for page in pages:
                     result.pages.append(page)
                     for link in page.internal_links:
-                        if link not in seen and len(seen) < self.max_pages * 4:
-                            seen.add(link)
-                            queue.append(link)
+                        if link in seen or len(seen) >= self.max_pages * 4:
+                            continue
+                        seen.add(link)
+                        if not self._allowed(robots, link):
+                            result.skipped_by_robots += 1
+                            continue
+                        queue.append(link)
 
             # Check links found on pages but not crawled (broken-link detection)
             crawled = {p.url for p in result.pages}
@@ -228,32 +304,38 @@ class CrawlerService:
         )
         return result
 
-    async def _fetch_sitemap_urls(self, client, base_url: str, seeds: list[str]) -> list[str]:
+    async def _fetch_sitemap_urls(
+        self, client, base_url: str, seeds: list[str], max_urls: int = 20000
+    ) -> list[str]:
+        """Collect the site's URL inventory from sitemap(s), including nested indexes."""
         candidates = [s for s in seeds if "sitemap" in s] or [f"{base_url}/sitemap.xml"]
         urls: list[str] = []
-        for sitemap_url in candidates[:3]:
+        ns = {"sm": "http://www.sitemaps.org/schemas/sitemap/0.9"}
+
+        async def read_map(sitemap_url: str, depth: int = 0) -> None:
+            if len(urls) >= max_urls or depth > 1:
+                return
             try:
                 r = await client.get(sitemap_url)
                 if r.status_code != 200:
-                    continue
+                    return
                 root = ElementTree.fromstring(r.content)
-                ns = {"sm": "http://www.sitemaps.org/schemas/sitemap/0.9"}
-                # urlset entries
-                urls += [el.text.strip() for el in root.findall(".//sm:url/sm:loc", ns) if el.text]
-                # nested sitemap index: fetch first child sitemap
-                child_maps = [el.text.strip() for el in root.findall(".//sm:sitemap/sm:loc", ns) if el.text]
-                for child in child_maps[:2]:
-                    try:
-                        cr = await client.get(child)
-                        if cr.status_code == 200:
-                            croot = ElementTree.fromstring(cr.content)
-                            urls += [el.text.strip() for el in croot.findall(".//sm:url/sm:loc", ns) if el.text]
-                    except (httpx.HTTPError, ElementTree.ParseError):
-                        continue
-                if urls:
-                    break
             except (httpx.HTTPError, ElementTree.ParseError):
-                continue
+                return
+            urls.extend(
+                el.text.strip() for el in root.findall(".//sm:url/sm:loc", ns)
+                if el.text and len(urls) < max_urls
+            )
+            child_maps = [el.text.strip() for el in root.findall(".//sm:sitemap/sm:loc", ns) if el.text]
+            for child in child_maps[:20]:
+                if len(urls) >= max_urls:
+                    break
+                await read_map(child, depth + 1)
+
+        for sitemap_url in candidates[:3]:
+            await read_map(sitemap_url)
+            if urls:
+                break
         return urls
 
     def _clean_url(self, url: str, base_url: str, host: str) -> str | None:
@@ -278,6 +360,8 @@ class CrawlerService:
     async def _fetch_page(self, client, sem, url: str, host: str) -> PageData:
         page = PageData(url=url)
         async with sem:
+            if self._crawl_delay > 0:
+                await asyncio.sleep(self._crawl_delay)
             start = time.time()
             try:
                 r = await client.get(url)
@@ -324,6 +408,75 @@ class CrawlerService:
                 return r.status_code
             except httpx.HTTPError:
                 return 0
+
+    async def crawl_site_smart(self, domain: str, sample_per_template: int = 5) -> CrawlResult:
+        """Template-aware crawl for large sites (e-commerce, marketplaces).
+
+        Instead of crawling the first N pages, this:
+        1. Reads the full sitemap inventory (up to 20k URLs)
+        2. Groups URLs by page template (/product/{slug}, /category/{n}, ...)
+        3. Samples a few pages from EVERY template within the page budget
+        So a 100k-page store gets checked template-by-template, which is where
+        systemic SEO issues actually live.
+        """
+        host = self.normalize_domain(domain)
+        base_url = f"https://{host}"
+
+        # Phase 1: inventory
+        headers = {"User-Agent": USER_AGENT}
+        async with httpx.AsyncClient(timeout=self.timeout, headers=headers, follow_redirects=True) as client:
+            _found, _robots, _delay, robot_sitemaps = await self._load_robots(client, base_url)
+            inventory = await self._fetch_sitemap_urls(client, base_url, [base_url] + robot_sitemaps)
+
+        if len(inventory) <= self.max_pages:
+            # small site: plain crawl covers everything
+            result = await self.crawl_site(domain)
+            result.templates = self._template_groups(result.pages and [p.url for p in result.pages] or inventory, host)
+            return result
+
+        # Phase 2: group by template and sample fairly within budget
+        groups: dict[str, list[str]] = {}
+        for url in inventory:
+            path = urlparse(url).path or "/"
+            groups.setdefault(url_template(path), []).append(url)
+
+        # round-robin sampling: every template gets coverage before any gets depth
+        budget = max(self.max_pages - 1, 1)  # leave room for the homepage
+        samples: list[str] = []
+        by_size = sorted(groups.items(), key=lambda kv: len(kv[1]), reverse=True)
+        rank = 0
+        while len(samples) < budget and rank < sample_per_template:
+            progressed = False
+            for _pattern, urls in by_size:
+                if rank < len(urls) and len(samples) < budget:
+                    samples.append(urls[rank])
+                    progressed = True
+            if not progressed:
+                break
+            rank += 1
+
+        result = await self.crawl_site(domain, seed_urls=samples)
+        result.inventory_size = len(inventory)
+        result.templates = [
+            {
+                "pattern": pattern,
+                "url_count": len(urls),
+                "sampled": sum(1 for p in result.pages if url_template(urlparse(p.url).path or "/") == pattern),
+            }
+            for pattern, urls in by_size[:30]
+        ]
+        return result
+
+    def _template_groups(self, urls: list[str], host: str) -> list[dict[str, Any]]:
+        groups: dict[str, int] = {}
+        for url in urls:
+            path = urlparse(url).path or "/"
+            pattern = url_template(path)
+            groups[pattern] = groups.get(pattern, 0) + 1
+        return [
+            {"pattern": p, "url_count": c, "sampled": c}
+            for p, c in sorted(groups.items(), key=lambda kv: kv[1], reverse=True)[:30]
+        ]
 
 
 def analyze_crawl(result: CrawlResult) -> dict[str, Any]:
@@ -444,6 +597,37 @@ def analyze_crawl(result: CrawlResult) -> dict[str, Any]:
 
     avg_load = int(sum(p.load_time_ms for p in ok_pages) / len(ok_pages)) if ok_pages else 0
 
+    # Template rollup: an issue on >=50% of a template's sampled pages is a
+    # systemic template bug - estimate impact across ALL URLs of that template.
+    template_findings: list[dict[str, Any]] = []
+    if result.templates:
+        tmpl_by_pattern = {t["pattern"]: t for t in result.templates}
+        counts: dict[str, dict[str, int]] = {}
+        for issue in issues:
+            path = urlparse(issue["affected_url"]).path or "/"
+            pattern = url_template(path)
+            if pattern in tmpl_by_pattern:
+                counts.setdefault(pattern, {})
+                counts[pattern][issue["issue_type"]] = counts[pattern].get(issue["issue_type"], 0) + 1
+        for pattern, type_counts in counts.items():
+            t = tmpl_by_pattern[pattern]
+            sampled = max(t.get("sampled", 1), 1)
+            for issue_type, count in type_counts.items():
+                if count / sampled >= 0.5 and t["url_count"] > sampled:
+                    template_findings.append({
+                        "template": pattern,
+                        "issue_type": issue_type,
+                        "sampled": sampled,
+                        "affected_samples": count,
+                        "estimated_affected_pages": t["url_count"],
+                        "note": (
+                            f"{count}/{sampled} sampled pages of template {pattern} have "
+                            f"{issue_type.replace('_', ' ')} - likely affects all "
+                            f"~{t['url_count']:,} pages using this template."
+                        ),
+                    })
+        template_findings.sort(key=lambda f: f["estimated_affected_pages"], reverse=True)
+
     return {
         "domain": result.domain,
         "score": score,
@@ -456,6 +640,10 @@ def analyze_crawl(result: CrawlResult) -> dict[str, Any]:
         "avg_load_time_ms": avg_load,
         "sitemap_found": result.sitemap_found,
         "robots_found": result.robots_found,
+        "inventory_size": result.inventory_size,
+        "skipped_by_robots": result.skipped_by_robots,
+        "templates": result.templates[:30],
+        "template_findings": template_findings[:30],
         "issues": issues[:100],
     }
 

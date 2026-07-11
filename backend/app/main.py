@@ -3181,6 +3181,27 @@ def get_audit_schedules(
         raise HTTPException(status_code=500, detail=str(exc))
 
 
+def _org_crawl_budget(project: dict) -> tuple[int, str]:
+    """Plan-gated crawl budget for the project's org. Trials get the trial cap."""
+    from app.services.billing import crawl_budget_for
+
+    plan, status = None, None
+    org_id = project.get("org_id")
+    if org_id:
+        try:
+            orgs = _supabase_rest(
+                "get", "organizations", params=f"id=eq.{org_id}&select=plan,plan_status"
+            )
+            orgs = orgs if isinstance(orgs, list) else [orgs] if orgs else []
+            if orgs:
+                plan, status = orgs[0].get("plan"), orgs[0].get("plan_status")
+        except Exception:
+            pass
+    budget = crawl_budget_for(plan, status)
+    label = plan if status == "active" else "trial"
+    return budget, label or "trial"
+
+
 @app.post("/audits/run")
 async def run_audit(
     body: RunAuditRequest,
@@ -3188,7 +3209,7 @@ async def run_audit(
     _rate: None = Depends(enforce_rate_limit),
 ):
     """Run an audit. When no audit_data is supplied, the project's domain is
-    crawled live so the audit runs on real data."""
+    crawled live (template-aware for large sites) within the org's plan budget."""
     from app.services.audit_service import AuditService
     from app.services.crawler_service import CrawlerService, crawl_to_audit_data
     from uuid import UUID
@@ -3202,15 +3223,30 @@ async def run_audit(
 
     try:
         audit_data = body.audit_data
+        crawl_info = None
         if not audit_data:
             domain = project.get("domain") or str(project.get("client_url", ""))
             if not domain:
                 raise HTTPException(status_code=400, detail="Project has no domain to crawl")
-            crawler = CrawlerService(max_pages=20)
-            crawl_result = await crawler.crawl_site(domain)
+            budget, plan_label = _org_crawl_budget(project)
+            # interactive requests stay snappy; scheduled audits use the full budget
+            crawler = CrawlerService(max_pages=min(budget, 200))
+            crawl_result = await crawler.crawl_site_smart(domain)
             if not crawl_result.pages:
                 raise HTTPException(status_code=400, detail=f"Could not crawl {domain}")
             audit_data = crawl_to_audit_data(crawl_result, body.audit_type)
+            crawl_info = {
+                "pages_crawled": len(crawl_result.pages),
+                "inventory_size": crawl_result.inventory_size,
+                "skipped_by_robots": crawl_result.skipped_by_robots,
+                "templates": crawl_result.templates[:15],
+                "crawl_budget": budget,
+                "plan": plan_label,
+                "upgrade_hint": (
+                    f"Crawled {len(crawl_result.pages)} of {crawl_result.inventory_size:,} known pages "
+                    f"(plan budget: {budget}). Upgrade for deeper crawls."
+                ) if crawl_result.inventory_size > budget else None,
+            }
 
         svc = AuditService()
         result = await svc.run_audit(
@@ -3219,6 +3255,8 @@ async def run_audit(
             audit_data,
             _supabase_rest,
         )
+        if crawl_info:
+            result["crawl"] = crawl_info
         return result
 
     except HTTPException:

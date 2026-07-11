@@ -107,11 +107,28 @@ class AutopilotScheduler:
         if not projects:
             logger.warning("Schedule %s has no project", schedule.get("id"))
             return
-        domain = projects[0].get("domain") or str(projects[0].get("client_url", ""))
+        project = projects[0]
+        domain = project.get("domain") or str(project.get("client_url", ""))
         if not domain:
             return
 
-        logger.info("Autopilot: running %s audit for %s", audit_type, domain)
+        # plan-gated crawl budget: trials stay shallow, paid plans go deep
+        from app.services.billing import crawl_budget_for
+        plan, status = None, None
+        org_id = project.get("org_id")
+        if org_id:
+            try:
+                orgs = await self._db(
+                    "get", "organizations", params=f"id=eq.{org_id}&select=plan,plan_status"
+                )
+                orgs = orgs if isinstance(orgs, list) else [orgs] if orgs else []
+                if orgs:
+                    plan, status = orgs[0].get("plan"), orgs[0].get("plan_status")
+            except Exception:
+                pass
+        budget = min(crawl_budget_for(plan, status), 500)  # bound one tick's work
+
+        logger.info("Autopilot: running %s audit for %s (budget %d pages)", audit_type, domain, budget)
 
         run_rows = await self._db("post", "audit_runs", {
             "project_id": project_id,
@@ -122,8 +139,8 @@ class AutopilotScheduler:
         run_id = run_rows[0]["id"] if isinstance(run_rows, list) and run_rows else None
 
         try:
-            crawler = CrawlerService(max_pages=20)
-            crawl_result = await crawler.crawl_site(domain)
+            crawler = CrawlerService(max_pages=budget)
+            crawl_result = await crawler.crawl_site_smart(domain)
             report = analyze_crawl(crawl_result)
 
             wanted = ISSUE_FILTER.get(audit_type)
@@ -173,10 +190,19 @@ class AutopilotScheduler:
                     "issues_found": len(issues),
                     "critical_count": critical,
                     "warning_count": warnings,
-                    "summary": f"Autopilot {audit_type}: {len(issues)} issues "
-                               f"({critical} critical) across {report['pages_crawled']} pages. "
-                               f"Site score: {report['score']}/100.",
-                    "result": json.dumps({"score": report["score"], "new_issues": stored}),
+                    "summary": (
+                        f"Autopilot {audit_type}: {len(issues)} issues ({critical} critical) "
+                        f"across {report['pages_crawled']} sampled pages"
+                        + (f" of {report['inventory_size']:,} known URLs" if report.get("inventory_size", 0) > report["pages_crawled"] else "")
+                        + f". Site score: {report['score']}/100."
+                        + (f" {len(report.get('template_findings', []))} systemic template issues found." if report.get("template_findings") else "")
+                    ),
+                    "result": json.dumps({
+                        "score": report["score"],
+                        "new_issues": stored,
+                        "inventory_size": report.get("inventory_size", 0),
+                        "template_findings": report.get("template_findings", [])[:20],
+                    }),
                 })
         except Exception:
             if run_id:

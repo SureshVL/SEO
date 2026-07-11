@@ -148,6 +148,24 @@ class RazorpayClient:
         return hmac.compare_digest(expected, signature)
 
 
+# Deep-crawl page budgets. Free trials get a hard cap; paid plans unlock
+# template-aware crawling of large sites.
+CRAWL_BUDGETS = {
+    "trial": 25,
+    "starter": 100,
+    "growth": 1000,
+    "agency": 5000,
+    "enterprise": 10000,
+}
+
+
+def crawl_budget_for(plan: str | None, plan_status: str | None) -> int:
+    """Max pages per crawl for an org. Anything not actively paying = trial cap."""
+    if plan_status != "active":
+        return CRAWL_BUDGETS["trial"]
+    return CRAWL_BUDGETS.get(plan or "", CRAWL_BUDGETS["trial"])
+
+
 def stripe_price_id_for(plan: str) -> str:
     """Stripe recurring Price ID for a plan, configured via env."""
     return {
