@@ -6,6 +6,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/lib/store";
+import { apiFetch } from "@/lib/api";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/ui/PageHeader";
 
@@ -64,7 +65,7 @@ export default function KeywordMappingPage() {
     if (!apiKey) return;
     setLoading(true);
     try {
-      const res = await fetch(`${API}/keywords/clusters`, {
+      const res = await apiFetch(`/keywords/clusters`, {
         headers: { "X-API-KEY": apiKey },
       });
       if (res.ok) {
@@ -82,7 +83,7 @@ export default function KeywordMappingPage() {
     if (!apiKey) return;
     setLoading(true);
     try {
-      const res = await fetch(`${API}/keywords/mappings`, {
+      const res = await apiFetch(`/keywords/mappings`, {
         headers: { "X-API-KEY": apiKey },
       });
       if (res.ok) {
@@ -100,7 +101,7 @@ export default function KeywordMappingPage() {
     if (!apiKey) return;
     setLoading(true);
     try {
-      const res = await fetch(`${API}/keywords/gaps`, {
+      const res = await apiFetch(`/keywords/gaps`, {
         headers: { "X-API-KEY": apiKey },
       });
       if (res.ok) {
@@ -144,7 +145,7 @@ export default function KeywordMappingPage() {
         };
       }).filter((kw) => kw.keyword);
 
-      const res = await fetch(`${API}/keywords/import`, {
+      const res = await apiFetch(`/keywords/import`, {
         method: "POST",
         headers: {
           "X-API-KEY": apiKey,
@@ -173,7 +174,7 @@ export default function KeywordMappingPage() {
     if (!apiKey) return;
     setClustering(true);
     try {
-      const res = await fetch(`${API}/keywords/cluster`, {
+      const res = await apiFetch(`/keywords/cluster`, {
         method: "POST",
         headers: { "X-API-KEY": apiKey },
       });
@@ -196,7 +197,7 @@ export default function KeywordMappingPage() {
     if (!apiKey) return;
     setAssigning(true);
     try {
-      const res = await fetch(`${API}/keywords/assign`, {
+      const res = await apiFetch(`/keywords/assign`, {
         method: "POST",
         headers: { "X-API-KEY": apiKey },
       });

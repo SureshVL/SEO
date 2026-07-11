@@ -102,11 +102,21 @@ export default function BillingPage() {
   async function handleUpgrade(planId: string) {
     if (planId === currentPlan) return;
     setUpgrading(planId);
+    const email = encodeURIComponent(businessProfile?.websiteUrl || "user@example.com");
     try {
-      const res = await fetch(
-        `${API}/billing/subscribe?plan=${planId}&email=${encodeURIComponent(businessProfile?.websiteUrl || "user@example.com")}`,
+      // Try Razorpay (India) first, fall back to Stripe (international)
+      let res = await fetch(
+        `${API}/billing/subscribe?plan=${planId}&email=${email}`,
         { method: "POST", headers: { "X-API-KEY": apiKey } },
       );
+      let provider = "Razorpay";
+      if (!res.ok) {
+        res = await fetch(
+          `${API}/billing/stripe/checkout?plan=${planId}&email=${email}`,
+          { method: "POST", headers: { "X-API-KEY": apiKey } },
+        );
+        provider = "Stripe";
+      }
       if (!res.ok) {
         const err = await res.json();
         throw new Error(err.detail || "Failed to start checkout");
@@ -114,9 +124,9 @@ export default function BillingPage() {
       const data = await res.json();
       if (data.checkout_url) {
         window.open(data.checkout_url, "_blank");
-        toast.success("Redirecting to Razorpay…");
+        toast.success(`Redirecting to ${provider}…`);
       } else {
-        toast.info("Subscription created. Complete payment in your Razorpay dashboard.");
+        toast.info("Subscription created. Complete payment to activate.");
       }
     } catch (err: any) {
       toast.error(err.message);

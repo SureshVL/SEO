@@ -3,6 +3,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { BarChart3, Bot, Braces, Calendar, ClipboardList, Coins, Eye, FileText, Grid3x3, Home, LayoutDashboard, Lightbulb, Link2, LogOut, Palette, Search, Settings, Shield, Sparkles, Zap } from "lucide-react";
 import { ThemeToggle } from "../ui/ThemeToggle";
+import { ProjectPicker } from "./ProjectPicker";
 
 const navSections = [
   { label: "Command", items: [
@@ -53,6 +54,8 @@ export function Sidebar() {
           </div>
         </Link>
       </div>
+
+      <ProjectPicker />
 
       <nav className="flex-1 px-3 py-4 overflow-y-auto space-y-5">
         {navSections.map((section) => (

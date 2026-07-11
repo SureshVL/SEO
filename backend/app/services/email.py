@@ -15,6 +15,21 @@ from app.core.config import settings
 logger = logging.getLogger("omnirank.email")
 
 TEMPLATES = {
+    "weekly_wins": {
+        "subject": "Your week with OMNI-RANK: {total_actions} SEO actions, ₹{value_inr} of agency work",
+        "body": """Hi,
+
+Here's what OMNI-RANK did for {project_name} this week:
+
+{wins_lines}
+
+Agency-equivalent value delivered: ₹{value_inr} (~${value_usd})
+
+See the full breakdown: {app_url}/dashboard
+
+Keep ranking,
+— OMNI-RANK Autopilot""",
+    },
     "welcome": {
         "subject": "Welcome to OMNI-RANK — Let's get you ranking #1",
         "body": """Hi {name},
@@ -151,6 +166,32 @@ class EmailService:
             "name": name, "keyword": keyword, "direction": direction,
             "change": str(change), "previous": str(previous),
             "current": str(current), "domain": domain, "region": region,
+        })
+
+    def send_weekly_wins(self, to: str, project_name: str, wins: dict[str, Any]) -> bool:
+        labels = {
+            "audits_run": "technical audits run",
+            "issues_found": "SEO issues diagnosed",
+            "issues_resolved": "issues fixed",
+            "articles_generated": "articles generated",
+            "posts_published": "posts published",
+            "link_opportunities": "internal link opportunities found",
+            "links_implemented": "internal links implemented",
+            "keywords_clustered": "keywords mapped",
+            "competitor_analyses": "competitor deep-dives",
+            "outrank_strategies": "outrank strategies created",
+            "content_localized": "pages localized",
+        }
+        lines = [
+            f"  • {count} {labels.get(key, key)}"
+            for key, count in wins.get("stats", {}).items() if count
+        ]
+        return self.send(to, "weekly_wins", {
+            "project_name": project_name,
+            "total_actions": wins.get("total_actions", 0),
+            "value_inr": f"{wins.get('value_inr', 0):,}",
+            "value_usd": f"{wins.get('value_usd', 0):,}",
+            "wins_lines": "\n".join(lines) or "  • Autopilot monitoring active",
         })
 
     def send_report_ready(self, to: str, name: str, project_name: str, report_type: str, summary: str, report_url: str) -> bool:

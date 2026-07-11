@@ -10,6 +10,7 @@ import { cn, scoreColor } from "@/lib/utils";
 import { useAppStore } from "@/lib/store";
 import {
   healthCheck, listJobs, listProjects, listProjectKeywords, getJobReportUrl,
+  getWinsSummary, WinsSummary,
 } from "@/lib/api";
 
 type KpiTab = "projects" | "keywords" | "score";
@@ -32,6 +33,7 @@ export default function DashboardPage() {
   const [keywordCount, setKeywordCount] = useState<number | null>(null);
   const [avgScore, setAvgScore] = useState<number | null>(null);
   const [kpiTab, setKpiTab] = useState<KpiTab>("projects");
+  const [wins, setWins] = useState<WinsSummary | null>(null);
 
   useEffect(() => {
     healthCheck().then(d => setAiStatus(d.ai)).catch(() => setAiStatus("offline"));
@@ -47,6 +49,7 @@ export default function DashboardPage() {
       const targetId = businessProfile?.projectId || ps[0]?.id;
       if (targetId) listProjectKeywords(targetId, apiKey).then(kw => setKeywordCount(kw.length)).catch(() => {});
     }).catch(() => {});
+    getWinsSummary(30).then(setWins).catch(() => {});
   }, [apiKey, businessProfile]);
 
   const completedJobs = jobs.filter(j => j.status === "completed");
@@ -90,7 +93,6 @@ export default function DashboardPage() {
     { label: "Internal Linking", href: "/dashboard/internal-linking", icon: Link2,     bg: "#06B6D4", text: "#fff" },
     { label: "Keyword Mapping",  href: "/dashboard/keyword-mapping",  icon: Tag,       bg: "#06B6D4", text: "#fff" },
     { label: "Multilingual",     href: "/dashboard/multilingual",     icon: Globe,     bg: "#0EA5E9", text: "#fff" },
-    { label: "Audits",           href: "/dashboard/audit",            icon: Shield,    bg: "#84CC16", text: "#0b1020" },
     { label: "Programmatic",     href: "/dashboard/programmatic",     icon: Grid3x3,   bg: SUN,     text: "#0b1020" },
     { label: "Link Building",    href: "/dashboard/links",            icon: Link2,     bg: "#14B8A6", text: "#fff" },
     { label: "White-label",      href: "/dashboard/branding",         icon: Palette,   bg: "#F43F5E", text: "#fff" },
@@ -155,6 +157,26 @@ export default function DashboardPage() {
       )}
 
       {/* ── Bento row 1: KPI hero · jobs stat · workflow week ── */}
+      {/* ROI counter — value delivered this month */}
+      {wins && wins.total_actions > 0 && (
+        <div
+          className="rounded-2xl px-6 py-4 mb-4 flex items-center justify-between gap-4 flex-wrap"
+          style={{ background: "linear-gradient(90deg, #8B5CF622, #EC489922)", border: "1px solid #8B5CF640" }}
+        >
+          <div>
+            <div className="text-xs font-bold uppercase tracking-[0.2em]" style={{ color: VIOLET }}>
+              Value delivered — last 30 days
+            </div>
+            <div className="text-2xl font-bold mt-1">
+              ₹{wins.value_inr.toLocaleString()} <span className="text-sm font-normal opacity-60">(~${wins.value_usd.toLocaleString()}) of agency-equivalent work</span>
+            </div>
+          </div>
+          <div className="text-sm opacity-70">
+            {wins.total_actions} SEO actions completed by autopilot
+          </div>
+        </div>
+      )}
+
       <div className="grid grid-cols-12 gap-4 mb-4">
         {/* Strategic KPIs — tabbed hero */}
         <div className="col-span-12 lg:col-span-7 rounded-3xl overflow-hidden shadow-2xl" style={{ background: INK }}>

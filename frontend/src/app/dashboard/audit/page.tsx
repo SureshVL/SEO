@@ -6,6 +6,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/lib/store";
+import { apiFetch } from "@/lib/api";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/ui/PageHeader";
 
@@ -62,7 +63,7 @@ export default function AuditPage() {
   const fetchSummary = async () => {
     if (!apiKey) return;
     try {
-      const res = await fetch(`${API}/audits/summary`, {
+      const res = await apiFetch(`/audits/summary`, {
         headers: { "X-API-KEY": apiKey },
       });
       if (res.ok) setSummary(await res.json());
@@ -74,7 +75,7 @@ export default function AuditPage() {
   const fetchIssues = async () => {
     if (!apiKey) return;
     try {
-      const res = await fetch(`${API}/audits/issues`, {
+      const res = await apiFetch(`/audits/issues`, {
         headers: { "X-API-KEY": apiKey },
       });
       if (res.ok) {
@@ -89,7 +90,7 @@ export default function AuditPage() {
   const fetchRuns = async () => {
     if (!apiKey) return;
     try {
-      const res = await fetch(`${API}/audits/runs`, {
+      const res = await apiFetch(`/audits/runs`, {
         headers: { "X-API-KEY": apiKey },
       });
       if (res.ok) {
@@ -111,7 +112,7 @@ export default function AuditPage() {
     if (!apiKey) return;
     setRunning(auditType);
     try {
-      const res = await fetch(`${API}/audits/run`, {
+      const res = await apiFetch(`/audits/run`, {
         method: "POST",
         headers: { "X-API-KEY": apiKey, "Content-Type": "application/json" },
         body: JSON.stringify({ audit_type: auditType, audit_data: [] }),
@@ -132,7 +133,7 @@ export default function AuditPage() {
   const handleUpdateIssueStatus = async (issueId: number, status: string) => {
     if (!apiKey) return;
     try {
-      const res = await fetch(`${API}/audits/issues/${issueId}`, {
+      const res = await apiFetch(`/audits/issues/${issueId}`, {
         method: "PATCH",
         headers: { "X-API-KEY": apiKey, "Content-Type": "application/json" },
         body: JSON.stringify({ status }),

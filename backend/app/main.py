@@ -64,6 +64,39 @@ app.add_middleware(
 
 job_store = SQLiteJobStore(settings.job_store_path)
 
+# ── Project scoping ─────────────────────────────────────────────────
+# Clients select a project via the X-Project-ID header (or ?project_id=).
+# Endpoints that resolve "the project" use _get_scoped_projects(), which
+# honors that selection and falls back to the first project.
+import contextvars
+
+_scoped_project_id: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "scoped_project_id", default=""
+)
+
+
+@app.middleware("http")
+async def _project_scope_middleware(request: Request, call_next):
+    pid = request.headers.get("X-Project-ID", "") or request.query_params.get("project_id", "")
+    token = _scoped_project_id.set(pid.strip())
+    try:
+        return await call_next(request)
+    finally:
+        _scoped_project_id.reset(token)
+
+
+def _get_scoped_projects():
+    """Rows for the client-selected project, else the first project."""
+    pid = _scoped_project_id.get()
+    if pid:
+        try:
+            rows = _supabase_rest("get", "projects", params=f"id=eq.{pid}")
+            if rows:
+                return rows
+        except Exception:
+            logger.warning("Scoped project %s not found; falling back to first", pid)
+    return _supabase_rest("get", "projects", params="limit=1")
+
 # Register AI router
 app.include_router(ai_router, prefix="/api/ai")
 app.include_router(analytics_router)
@@ -827,7 +860,7 @@ def schema_inject_batch(
     # Extract project_id from the URL path or auth context
     # For now, assume it's embedded in a custom header or auth
     # Fallback: use first project for testing
-    projects = _supabase_rest("get", "projects", params="limit=1")
+    projects = _get_scoped_projects()
     if not projects:
         raise HTTPException(status_code=400, detail="No projects found")
 
@@ -881,7 +914,7 @@ def save_cms_credentials(
 ):
     """Save CMS platform credentials (WordPress REST API, etc.)."""
     # Get first project for now (in production, use project_id from request)
-    projects = _supabase_rest("get", "projects", params="limit=1")
+    projects = _get_scoped_projects()
     if not projects:
         raise HTTPException(status_code=400, detail="No projects found")
 
@@ -925,7 +958,7 @@ def get_cms_credentials(
     _rate: None = Depends(enforce_rate_limit),
 ):
     """Get saved CMS credentials for a platform."""
-    projects = _supabase_rest("get", "projects", params="limit=1")
+    projects = _get_scoped_projects()
     if not projects:
         raise HTTPException(status_code=400, detail="No projects found")
 
@@ -956,7 +989,7 @@ def delete_cms_credentials(
     _rate: None = Depends(enforce_rate_limit),
 ):
     """Delete saved CMS credentials for a platform."""
-    projects = _supabase_rest("get", "projects", params="limit=1")
+    projects = _get_scoped_projects()
     if not projects:
         raise HTTPException(status_code=400, detail="No projects found")
 
@@ -983,7 +1016,7 @@ def create_bulk_content_job(
     from app.services.bulk_content_service import BulkContentService, BulkContentJobRequest
     from uuid import UUID
 
-    projects = _supabase_rest("get", "projects", params="limit=1")
+    projects = _get_scoped_projects()
     if not projects:
         raise HTTPException(status_code=400, detail="No projects found")
 
@@ -1107,7 +1140,7 @@ def schedule_article(
     )
     from uuid import UUID
 
-    projects = _supabase_rest("get", "projects", params="limit=1")
+    projects = _get_scoped_projects()
     if not projects:
         raise HTTPException(status_code=400, detail="No projects found")
 
@@ -1150,7 +1183,7 @@ def get_calendar(
     from app.services.content_calendar_service import ContentCalendarService
     from uuid import UUID
 
-    projects = _supabase_rest("get", "projects", params="limit=1")
+    projects = _get_scoped_projects()
     if not projects:
         raise HTTPException(status_code=400, detail="No projects found")
 
@@ -1267,7 +1300,7 @@ def add_competitor(
     from app.services.competitor_service import CompetitorService, AddCompetitorRequest as CompReq
     from uuid import UUID
 
-    projects = _supabase_rest("get", "projects", params="limit=1")
+    projects = _get_scoped_projects()
     if not projects:
         raise HTTPException(status_code=400, detail="No projects found")
 
@@ -1300,7 +1333,7 @@ def get_competitors(
     from app.services.competitor_service import CompetitorService
     from uuid import UUID
 
-    projects = _supabase_rest("get", "projects", params="limit=1")
+    projects = _get_scoped_projects()
     if not projects:
         raise HTTPException(status_code=400, detail="No projects found")
 
@@ -1401,7 +1434,7 @@ async def generate_strategies(
     from app.services.competitor_service import CompetitorService
     from uuid import UUID
 
-    projects = _supabase_rest("get", "projects", params="limit=1")
+    projects = _get_scoped_projects()
     if not projects:
         raise HTTPException(status_code=400, detail="No projects found")
 
@@ -1434,7 +1467,7 @@ def get_strategies(
     from app.services.competitor_service import CompetitorService
     from uuid import UUID
 
-    projects = _supabase_rest("get", "projects", params="limit=1")
+    projects = _get_scoped_projects()
     if not projects:
         raise HTTPException(status_code=400, detail="No projects found")
 
@@ -1489,7 +1522,7 @@ def add_site_page(
     from app.services.internal_linking_service import InternalLinkingService
     from uuid import UUID
 
-    projects = _supabase_rest("get", "projects", params="limit=1")
+    projects = _get_scoped_projects()
     if not projects:
         raise HTTPException(status_code=400, detail="No projects found")
 
@@ -1521,7 +1554,7 @@ async def analyze_site(
     from app.services.internal_linking_service import InternalLinkingService
     from uuid import UUID
 
-    projects = _supabase_rest("get", "projects", params="limit=1")
+    projects = _get_scoped_projects()
     if not projects:
         raise HTTPException(status_code=400, detail="No projects found")
 
@@ -1547,7 +1580,7 @@ async def find_opportunities(
     from app.services.internal_linking_service import InternalLinkingService
     from uuid import UUID
 
-    projects = _supabase_rest("get", "projects", params="limit=1")
+    projects = _get_scoped_projects()
     if not projects:
         raise HTTPException(status_code=400, detail="No projects found")
 
@@ -1578,7 +1611,7 @@ def get_opportunities(
     from app.services.internal_linking_service import InternalLinkingService
     from uuid import UUID
 
-    projects = _supabase_rest("get", "projects", params="limit=1")
+    projects = _get_scoped_projects()
     if not projects:
         raise HTTPException(status_code=400, detail="No projects found")
 
@@ -1638,7 +1671,7 @@ async def identify_orphans(
     from app.services.internal_linking_service import InternalLinkingService
     from uuid import UUID
 
-    projects = _supabase_rest("get", "projects", params="limit=1")
+    projects = _get_scoped_projects()
     if not projects:
         raise HTTPException(status_code=400, detail="No projects found")
 
@@ -1674,7 +1707,7 @@ def import_keywords(
     from app.services.keyword_mapping_service import KeywordMappingService
     from uuid import UUID
 
-    projects = _supabase_rest("get", "projects", params="limit=1")
+    projects = _get_scoped_projects()
     if not projects:
         raise HTTPException(status_code=400, detail="No projects found")
 
@@ -1704,7 +1737,7 @@ async def cluster_keywords(
     from app.services.keyword_mapping_service import KeywordMappingService
     from uuid import UUID
 
-    projects = _supabase_rest("get", "projects", params="limit=1")
+    projects = _get_scoped_projects()
     if not projects:
         raise HTTPException(status_code=400, detail="No projects found")
 
@@ -1730,7 +1763,7 @@ async def assign_keywords(
     from app.services.keyword_mapping_service import KeywordMappingService
     from uuid import UUID
 
-    projects = _supabase_rest("get", "projects", params="limit=1")
+    projects = _get_scoped_projects()
     if not projects:
         raise HTTPException(status_code=400, detail="No projects found")
 
@@ -1755,7 +1788,7 @@ def get_clusters(
     from app.services.keyword_mapping_service import KeywordMappingService
     from uuid import UUID
 
-    projects = _supabase_rest("get", "projects", params="limit=1")
+    projects = _get_scoped_projects()
     if not projects:
         raise HTTPException(status_code=400, detail="No projects found")
 
@@ -1782,7 +1815,7 @@ def get_mappings(
     from app.services.keyword_mapping_service import KeywordMappingService
     from uuid import UUID
 
-    projects = _supabase_rest("get", "projects", params="limit=1")
+    projects = _get_scoped_projects()
     if not projects:
         raise HTTPException(status_code=400, detail="No projects found")
 
@@ -1813,7 +1846,7 @@ async def get_gaps(
     from app.services.keyword_mapping_service import KeywordMappingService
     from uuid import UUID
 
-    projects = _supabase_rest("get", "projects", params="limit=1")
+    projects = _get_scoped_projects()
     if not projects:
         raise HTTPException(status_code=400, detail="No projects found")
 
@@ -1866,7 +1899,7 @@ def add_language(
     from app.services.multilingual_service import MultilingualService
     from uuid import UUID
 
-    projects = _supabase_rest("get", "projects", params="limit=1")
+    projects = _get_scoped_projects()
     if not projects:
         raise HTTPException(status_code=400, detail="No projects found")
 
@@ -1898,7 +1931,7 @@ def get_languages(
     from app.services.multilingual_service import MultilingualService
     from uuid import UUID
 
-    projects = _supabase_rest("get", "projects", params="limit=1")
+    projects = _get_scoped_projects()
     if not projects:
         raise HTTPException(status_code=400, detail="No projects found")
 
@@ -1924,7 +1957,7 @@ async def localize_content(
     from app.services.multilingual_service import MultilingualService
     from uuid import UUID
 
-    projects = _supabase_rest("get", "projects", params="limit=1")
+    projects = _get_scoped_projects()
     if not projects:
         raise HTTPException(status_code=400, detail="No projects found")
 
@@ -1959,7 +1992,7 @@ async def generate_hreflang(
     from app.services.multilingual_service import MultilingualService
     from uuid import UUID
 
-    projects = _supabase_rest("get", "projects", params="limit=1")
+    projects = _get_scoped_projects()
     if not projects:
         raise HTTPException(status_code=400, detail="No projects found")
 
@@ -1989,7 +2022,7 @@ def get_hreflang_config(
     from app.services.multilingual_service import MultilingualService
     from uuid import UUID
 
-    projects = _supabase_rest("get", "projects", params="limit=1")
+    projects = _get_scoped_projects()
     if not projects:
         raise HTTPException(status_code=400, detail="No projects found")
 
@@ -2019,7 +2052,7 @@ async def identify_regional_opportunities(
     from app.services.multilingual_service import MultilingualService
     from uuid import UUID
 
-    projects = _supabase_rest("get", "projects", params="limit=1")
+    projects = _get_scoped_projects()
     if not projects:
         raise HTTPException(status_code=400, detail="No projects found")
 
@@ -2050,7 +2083,7 @@ def get_regional_targeting(
     from app.services.multilingual_service import MultilingualService
     from uuid import UUID
 
-    projects = _supabase_rest("get", "projects", params="limit=1")
+    projects = _get_scoped_projects()
     if not projects:
         raise HTTPException(status_code=400, detail="No projects found")
 
@@ -2081,7 +2114,7 @@ def get_localized_content(
     from app.services.multilingual_service import MultilingualService
     from uuid import UUID
 
-    projects = _supabase_rest("get", "projects", params="limit=1")
+    projects = _get_scoped_projects()
     if not projects:
         raise HTTPException(status_code=400, detail="No projects found")
 
@@ -2111,7 +2144,7 @@ async def analyze_multilingual_seo(
     from app.services.multilingual_service import MultilingualService
     from uuid import UUID
 
-    projects = _supabase_rest("get", "projects", params="limit=1")
+    projects = _get_scoped_projects()
     if not projects:
         raise HTTPException(status_code=400, detail="No projects found")
 
@@ -3101,7 +3134,7 @@ def create_audit_schedule(
     from app.services.audit_service import AuditService
     from uuid import UUID
 
-    projects = _supabase_rest("get", "projects", params="limit=1")
+    projects = _get_scoped_projects()
     if not projects:
         raise HTTPException(status_code=400, detail="No projects found")
 
@@ -3132,7 +3165,7 @@ def get_audit_schedules(
     from app.services.audit_service import AuditService
     from uuid import UUID
 
-    projects = _supabase_rest("get", "projects", params="limit=1")
+    projects = _get_scoped_projects()
     if not projects:
         raise HTTPException(status_code=400, detail="No projects found")
 
@@ -3160,7 +3193,7 @@ async def run_audit(
     from app.services.crawler_service import CrawlerService, crawl_to_audit_data
     from uuid import UUID
 
-    projects = _supabase_rest("get", "projects", params="limit=1")
+    projects = _get_scoped_projects()
     if not projects:
         raise HTTPException(status_code=400, detail="No projects found")
 
@@ -3297,7 +3330,7 @@ def get_audit_runs(
     from app.services.audit_service import AuditService
     from uuid import UUID
 
-    projects = _supabase_rest("get", "projects", params="limit=1")
+    projects = _get_scoped_projects()
     if not projects:
         raise HTTPException(status_code=400, detail="No projects found")
 
@@ -3330,7 +3363,7 @@ def get_audit_issues(
     from app.services.audit_service import AuditService
     from uuid import UUID
 
-    projects = _supabase_rest("get", "projects", params="limit=1")
+    projects = _get_scoped_projects()
     if not projects:
         raise HTTPException(status_code=400, detail="No projects found")
 
@@ -3415,7 +3448,7 @@ def get_audit_summary(
     from app.services.audit_service import AuditService
     from uuid import UUID
 
-    projects = _supabase_rest("get", "projects", params="limit=1")
+    projects = _get_scoped_projects()
     if not projects:
         raise HTTPException(status_code=400, detail="No projects found")
 
@@ -3588,6 +3621,172 @@ async def razorpay_webhook(request: Request):
             _supabase_rest("patch", f"organizations?id=eq.{org_id}", {"plan_status": status})
 
     return {"received": True}
+
+
+@app.get("/billing/plans")
+def list_plans():
+    """Public plan catalog with INR + USD pricing for the pricing page."""
+    from app.services.billing import PLANS, stripe_price_id_for
+    from app.services.billing import RazorpayClient, StripeClient
+
+    return {
+        "plans": [
+            {
+                "id": key,
+                "name": p["name"],
+                "price_inr": p["price_inr"],
+                "price_usd": p.get("price_usd"),
+                "max_projects": p["max_projects"],
+                "max_keywords": p["max_keywords"],
+            }
+            for key, p in PLANS.items()
+        ],
+        "rails": {
+            "razorpay": RazorpayClient().enabled,
+            "stripe": StripeClient().enabled,
+        },
+    }
+
+
+@app.post("/billing/stripe/checkout")
+def create_stripe_checkout(
+    plan: str,
+    email: str = "",
+    org_id: str = "",
+    _auth: None = Depends(require_api_key),
+):
+    """Create a Stripe Checkout session (international payments)."""
+    from app.services.billing import PLANS, StripeClient
+
+    if plan not in PLANS:
+        raise HTTPException(status_code=400, detail=f"Invalid plan. Choose: {', '.join(PLANS.keys())}")
+
+    client = StripeClient()
+    if not client.enabled:
+        raise HTTPException(status_code=400, detail="Stripe not configured.")
+
+    if not org_id:
+        orgs = _supabase_rest("get", "organizations", params="limit=1")
+        orgs = orgs if isinstance(orgs, list) else [orgs] if orgs else []
+        org_id = orgs[0]["id"] if orgs else ""
+
+    try:
+        result = client.create_checkout_session(plan, org_id, customer_email=email)
+        return result
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        logger.error("Stripe checkout failed: %s", exc)
+        raise HTTPException(status_code=502, detail="Could not create Stripe checkout session")
+
+
+@app.post("/webhooks/stripe")
+async def stripe_webhook(request: Request):
+    """Handle Stripe subscription webhooks."""
+    from app.services.billing import StripeClient
+
+    body = await request.body()
+    signature = request.headers.get("Stripe-Signature", "")
+
+    if not StripeClient.verify_webhook_signature(body, signature):
+        raise HTTPException(status_code=400, detail="Invalid webhook signature")
+
+    data = json.loads(body)
+    event_type = data.get("type", "")
+    obj = data.get("data", {}).get("object", {})
+    logger.info("Stripe webhook: %s", event_type)
+
+    def _org_id_of(o: dict) -> str:
+        return (o.get("metadata") or {}).get("org_id", "")
+
+    if event_type == "checkout.session.completed":
+        org_id = _org_id_of(obj)
+        plan = (obj.get("metadata") or {}).get("plan", "")
+        if org_id:
+            _supabase_rest("patch", f"organizations?id=eq.{org_id}", {
+                "plan_status": "active",
+                **({"plan": plan} if plan else {}),
+                "stripe_customer_id": obj.get("customer") or "",
+                "stripe_subscription_id": obj.get("subscription") or "",
+            })
+
+    elif event_type == "invoice.paid":
+        org_id = _org_id_of(obj) or (obj.get("subscription_details", {}).get("metadata", {}) or {}).get("org_id", "")
+        try:
+            _supabase_rest("post", "billing_events", {
+                "org_id": org_id,
+                "event_type": "payment_success",
+                "amount_inr": None,
+                "metadata": {
+                    "provider": "stripe",
+                    "amount": obj.get("amount_paid"),
+                    "currency": obj.get("currency"),
+                    "invoice_id": obj.get("id"),
+                },
+            })
+        except Exception as exc:
+            logger.warning("Could not log stripe billing event: %s", exc)
+
+    elif event_type == "invoice.payment_failed":
+        org_id = _org_id_of(obj) or (obj.get("subscription_details", {}).get("metadata", {}) or {}).get("org_id", "")
+        if org_id:
+            _supabase_rest("patch", f"organizations?id=eq.{org_id}", {"plan_status": "past_due"})
+
+    elif event_type == "customer.subscription.deleted":
+        org_id = _org_id_of(obj)
+        if org_id:
+            _supabase_rest("patch", f"organizations?id=eq.{org_id}", {"plan_status": "cancelled"})
+
+    return {"received": True}
+
+
+# ── Wins / ROI counter ──────────────────────────────────────────────
+
+@app.get("/wins/summary")
+def get_wins_summary(
+    days: int = 30,
+    project_id: str = "",
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """Value delivered to the client in the window - powers the dashboard ROI counter."""
+    from app.services.wins_service import WinsService
+
+    if not project_id:
+        projects = _get_scoped_projects()
+        projects = projects if isinstance(projects, list) else [projects] if projects else []
+        if not projects:
+            raise HTTPException(status_code=400, detail="No projects found")
+        project_id = projects[0]["id"]
+
+    svc = WinsService()
+    wins = svc.compute_wins(project_id, days=max(1, min(days, 365)), db_fn=_supabase_rest)
+    return wins
+
+
+# ── Autopilot scheduler lifecycle ───────────────────────────────────
+
+@app.on_event("startup")
+async def _start_autopilot_scheduler():
+    import asyncio as _asyncio
+
+    if not (settings.supabase_url and settings.supabase_service_role_key):
+        logger.info("Autopilot scheduler not started (Supabase not configured)")
+        return
+    from app.services.scheduler import AutopilotScheduler
+    scheduler = AutopilotScheduler(_supabase_rest, interval_seconds=300)
+    app.state.autopilot = scheduler
+    app.state.autopilot_task = _asyncio.create_task(scheduler.run_forever())
+
+
+@app.on_event("shutdown")
+async def _stop_autopilot_scheduler():
+    scheduler = getattr(app.state, "autopilot", None)
+    task = getattr(app.state, "autopilot_task", None)
+    if scheduler:
+        scheduler.stop()
+    if task:
+        task.cancel()
 
 
 # ── PDF Report Download ────────────────────────────────────────────

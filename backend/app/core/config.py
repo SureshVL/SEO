@@ -38,6 +38,12 @@ class Settings(BaseSettings):
     razorpay_key_id: str = ""
     razorpay_key_secret: str = ""
     razorpay_webhook_secret: str = ""
+    stripe_secret_key: str = ""
+    stripe_webhook_secret: str = ""
+    stripe_price_starter: str = ""   # Stripe recurring Price IDs (price_...)
+    stripe_price_growth: str = ""
+    stripe_price_agency: str = ""
+    app_base_url: str = "http://localhost:3000"  # for checkout redirects
     wordpress_deploy_webhook: str = ""
     shopify_deploy_webhook: str = ""
     appstore_deploy_webhook: str = ""

@@ -6,6 +6,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/lib/store";
+import { apiFetch } from "@/lib/api";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/ui/PageHeader";
 
@@ -47,7 +48,7 @@ export default function InternalLinkingPage() {
     if (!apiKey) return;
     setAnalyzing(true);
     try {
-      const res = await fetch(`${API}/linking/analyze`, {
+      const res = await apiFetch(`/linking/analyze`, {
         method: "POST",
         headers: { "X-API-KEY": apiKey },
       });
@@ -66,7 +67,7 @@ export default function InternalLinkingPage() {
     if (!apiKey) return;
     setLoading(true);
     try {
-      const res = await fetch(`${API}/linking/opportunities`, {
+      const res = await apiFetch(`/linking/opportunities`, {
         headers: { "X-API-KEY": apiKey },
       });
       if (res.ok) {
@@ -97,7 +98,7 @@ export default function InternalLinkingPage() {
 
     setLoading(true);
     try {
-      const res = await fetch(`${API}/linking/pages`, {
+      const res = await apiFetch(`/linking/pages`, {
         method: "POST",
         headers: {
           "X-API-KEY": apiKey,
@@ -125,7 +126,7 @@ export default function InternalLinkingPage() {
   const handleApproveOpportunity = async (opportunityId: number) => {
     if (!apiKey) return;
     try {
-      const res = await fetch(`${API}/linking/opportunities/${opportunityId}?status=approved`, {
+      const res = await apiFetch(`/linking/opportunities/${opportunityId}?status=approved`, {
         method: "PATCH",
         headers: { "X-API-KEY": apiKey },
       });

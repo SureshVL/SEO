@@ -6,6 +6,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/lib/store";
+import { apiFetch } from "@/lib/api";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/ui/PageHeader";
 
@@ -111,7 +112,7 @@ export default function MultilingualPage() {
     if (!apiKey) return;
     setLoading(true);
     try {
-      const res = await fetch(`${API}/multilingual/languages`, {
+      const res = await apiFetch(`/multilingual/languages`, {
         headers: { "X-API-KEY": apiKey },
       });
       if (res.ok) {
@@ -129,7 +130,7 @@ export default function MultilingualPage() {
     if (!apiKey) return;
     setLoading(true);
     try {
-      const res = await fetch(`${API}/multilingual/content`, {
+      const res = await apiFetch(`/multilingual/content`, {
         headers: { "X-API-KEY": apiKey },
       });
       if (res.ok) {
@@ -147,7 +148,7 @@ export default function MultilingualPage() {
     if (!apiKey) return;
     setLoading(true);
     try {
-      const res = await fetch(`${API}/multilingual/hreflang`, {
+      const res = await apiFetch(`/multilingual/hreflang`, {
         headers: { "X-API-KEY": apiKey },
       });
       if (res.ok) {
@@ -165,7 +166,7 @@ export default function MultilingualPage() {
     if (!apiKey) return;
     setLoading(true);
     try {
-      const res = await fetch(`${API}/multilingual/regional-targeting`, {
+      const res = await apiFetch(`/multilingual/regional-targeting`, {
         headers: { "X-API-KEY": apiKey },
       });
       if (res.ok) {
@@ -183,7 +184,7 @@ export default function MultilingualPage() {
     if (!apiKey) return;
     setAnalyzing(true);
     try {
-      const res = await fetch(`${API}/multilingual/analyze`, {
+      const res = await apiFetch(`/multilingual/analyze`, {
         method: "POST",
         headers: { "X-API-KEY": apiKey },
       });
@@ -221,7 +222,7 @@ export default function MultilingualPage() {
 
     setLoading(true);
     try {
-      const res = await fetch(`${API}/multilingual/languages`, {
+      const res = await apiFetch(`/multilingual/languages`, {
         method: "POST",
         headers: {
           "X-API-KEY": apiKey,
@@ -260,7 +261,7 @@ export default function MultilingualPage() {
 
     setLoading(true);
     try {
-      const res = await fetch(`${API}/multilingual/localize`, {
+      const res = await apiFetch(`/multilingual/localize`, {
         method: "POST",
         headers: {
           "X-API-KEY": apiKey,

@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/lib/store";
+import { apiFetch } from "@/lib/api";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/ui/PageHeader";
 
@@ -59,7 +60,7 @@ export default function CompetitorsPage() {
     if (!apiKey) return;
     setLoading(true);
     try {
-      const res = await fetch(`${API}/competitors`, {
+      const res = await apiFetch(`/competitors`, {
         headers: { "X-API-KEY": apiKey },
       });
       if (res.ok) {
@@ -76,7 +77,7 @@ export default function CompetitorsPage() {
   const fetchAnalysis = async (competitorId: number) => {
     if (!apiKey) return;
     try {
-      const res = await fetch(`${API}/competitors/${competitorId}/analysis`, {
+      const res = await apiFetch(`/competitors/${competitorId}/analysis`, {
         headers: { "X-API-KEY": apiKey },
       });
       if (res.ok) {
@@ -91,7 +92,7 @@ export default function CompetitorsPage() {
   const fetchStrategies = async (competitorId: number) => {
     if (!apiKey) return;
     try {
-      const res = await fetch(`${API}/competitors/strategies?competitor_id=${competitorId}`, {
+      const res = await apiFetch(`/competitors/strategies?competitor_id=${competitorId}`, {
         headers: { "X-API-KEY": apiKey },
       });
       if (res.ok) {
@@ -123,7 +124,7 @@ export default function CompetitorsPage() {
 
     setLoading(true);
     try {
-      const res = await fetch(`${API}/competitors/add`, {
+      const res = await apiFetch(`/competitors/add`, {
         method: "POST",
         headers: {
           "X-API-KEY": apiKey,
@@ -149,7 +150,7 @@ export default function CompetitorsPage() {
 
     setAnalyzing(true);
     try {
-      const res = await fetch(`${API}/competitors/${selectedCompetitor.id}/analyze`, {
+      const res = await apiFetch(`/competitors/${selectedCompetitor.id}/analyze`, {
         method: "POST",
         headers: {
           "X-API-KEY": apiKey,
@@ -181,7 +182,7 @@ export default function CompetitorsPage() {
 
     setGeneratingStrategies(true);
     try {
-      const res = await fetch(`${API}/competitors/${selectedCompetitor.id}/strategies`, {
+      const res = await apiFetch(`/competitors/${selectedCompetitor.id}/strategies`, {
         method: "POST",
         headers: {
           "X-API-KEY": apiKey,

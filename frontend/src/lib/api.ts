@@ -1,9 +1,43 @@
+import { useAppStore } from "./store";
+
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 class ApiError extends Error {
   constructor(public status: number, message: string) {
     super(message);
   }
+}
+
+/**
+ * fetch() wrapper that attaches the API key and the currently selected
+ * project (X-Project-ID header) so every feature operates on the project
+ * chosen in the sidebar picker.
+ */
+export function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {
+  const { apiKey, currentProject } = useAppStore.getState();
+  const headers: Record<string, string> = {
+    "X-API-KEY": apiKey,
+    ...(currentProject?.id ? { "X-Project-ID": String(currentProject.id) } : {}),
+    ...((init.headers as Record<string, string>) || {}),
+  };
+  const url = path.startsWith("http") ? path : `${API_BASE}${path}`;
+  return fetch(url, { ...init, headers });
+}
+
+// ── Wins / ROI counter ──
+export interface WinsSummary {
+  project_id: string;
+  period_days: number;
+  stats: Record<string, number>;
+  total_actions: number;
+  value_inr: number;
+  value_usd: number;
+}
+
+export async function getWinsSummary(days = 30): Promise<WinsSummary> {
+  const res = await apiFetch(`/wins/summary?days=${days}`);
+  if (!res.ok) throw new ApiError(res.status, await res.text());
+  return res.json();
 }
 
 async function request<T>(
@@ -65,7 +99,7 @@ export async function getJob(jobId: string, apiKey: string) {
 }
 
 export async function listJobs(apiKey: string) {
-  return request<Array<{ job_id: string; status: string; created_at: string; updated_at: string }>>(
+  return request<Array<{ job_id: string; status: string; created_at: string; updated_at: string; result?: any }>>(
     "/jobs",
     {},
     apiKey
