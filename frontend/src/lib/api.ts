@@ -9,17 +9,33 @@ class ApiError extends Error {
 }
 
 /**
- * fetch() wrapper that attaches the API key and the currently selected
- * project (X-Project-ID header) so every feature operates on the project
- * chosen in the sidebar picker.
+ * fetch() wrapper that authenticates as the logged-in user (Supabase JWT as
+ * a Bearer token) and scopes the request to the selected project. The backend
+ * confines JWT callers to their own org, so this is the real tenant boundary.
+ * Falls back to the API key only if there is no user session (service/CLI use).
  */
-export function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {
+export async function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {
   const { apiKey, currentProject } = useAppStore.getState();
   const headers: Record<string, string> = {
-    "X-API-KEY": apiKey,
     ...(currentProject?.id ? { "X-Project-ID": String(currentProject.id) } : {}),
     ...((init.headers as Record<string, string>) || {}),
   };
+
+  let token: string | null = null;
+  try {
+    const { createClient } = await import("./supabase");
+    const { data } = await createClient().auth.getSession();
+    token = data.session?.access_token ?? null;
+  } catch {
+    /* no session available */
+  }
+
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  } else if (apiKey) {
+    headers["X-API-KEY"] = apiKey;
+  }
+
   const url = path.startsWith("http") ? path : `${API_BASE}${path}`;
   return fetch(url, { ...init, headers });
 }
@@ -49,7 +65,19 @@ async function request<T>(
     "Content-Type": "application/json",
     ...(options.headers as Record<string, string>),
   };
-  if (apiKey) headers["X-API-KEY"] = apiKey;
+
+  // Prefer the logged-in user's Supabase JWT (org-scoped on the backend);
+  // fall back to an explicit API key for service/CLI callers.
+  let token: string | null = null;
+  try {
+    const { createClient } = await import("./supabase");
+    const { data } = await createClient().auth.getSession();
+    token = data.session?.access_token ?? null;
+  } catch {
+    /* no session */
+  }
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  else if (apiKey) headers["X-API-KEY"] = apiKey;
 
   const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
   if (!res.ok) {

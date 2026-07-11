@@ -40,7 +40,7 @@ export const useAppStore = create<AppState>()(
       user: null,
       org: null,
       currentProject: null,
-      apiKey: process.env.NEXT_PUBLIC_API_KEY || "dev-orchestrator-key",
+      apiKey: process.env.NEXT_PUBLIC_API_KEY || "",
       businessProfile: null,
       ga4Connected: false,
       gscConnected: false,

@@ -150,15 +150,21 @@ class EdgeService:
         """Fetch the site's homepage and check the snippet is installed."""
         import httpx
 
+        from app.core.ssrf import guarded_async_client, validate_public_url, SSRFError, read_capped
+
         domain = site["domain"]
         token = site["site_token"]
         found = False
         error = ""
         try:
-            async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
-                resp = await client.get(f"https://{domain}")
-                html = resp.text[:800_000]
-                found = ("omnirank.js" in html) and (token in html)
+            url = f"https://{domain}"
+            validate_public_url(url)
+            async with guarded_async_client(timeout=15, follow_redirects=True) as client:
+                async with client.stream("GET", url) as resp:
+                    html = (await read_capped(resp, 2_000_000)).decode("utf-8", "replace")
+            found = ("omnirank.js" in html) and (token in html)
+        except SSRFError as exc:
+            error = f"blocked: {exc}"
         except Exception as exc:
             error = str(exc)[:200]
 

@@ -19,6 +19,10 @@ from xml.etree import ElementTree
 
 import httpx
 
+from app.core.ssrf import (
+    validate_public_url, SSRFError, _GuardedAsyncTransport, safe_parse_xml,
+)
+
 logger = logging.getLogger("omnirank.crawler")
 
 USER_AGENT = "OmniRankBot/1.0 (+https://omnirank.ai/bot)"
@@ -230,10 +234,18 @@ class CrawlerService:
         base_url = f"https://{host}"
         result = CrawlResult(domain=host, base_url=base_url)
 
+        try:
+            validate_public_url(base_url)
+        except SSRFError as exc:
+            logger.warning("Refusing to crawl %s: %s", host, exc)
+            result.crawl_seconds = round(time.time() - started, 1)
+            return result
+
         limits = httpx.Limits(max_connections=self.concurrency)
         headers = {"User-Agent": USER_AGENT}
         async with httpx.AsyncClient(
-            timeout=self.timeout, limits=limits, headers=headers, follow_redirects=True
+            timeout=self.timeout, limits=limits, headers=headers,
+            follow_redirects=True, transport=_GuardedAsyncTransport(),
         ) as client:
             # robots.txt: disallow rules + crawl-delay + sitemap discovery
             result.robots_found, robots, crawl_delay, robot_sitemaps = await self._load_robots(client, base_url)
@@ -348,7 +360,7 @@ class CrawlerService:
                 r = await client.get(sitemap_url)
                 if r.status_code != 200:
                     return
-                root = ElementTree.fromstring(r.content)
+                root = safe_parse_xml(r.content)
             except (httpx.HTTPError, ElementTree.ParseError):
                 return
             urls.extend(
@@ -470,6 +482,7 @@ class CrawlerService:
                 context = await browser.new_context(user_agent=USER_AGENT)
                 for page_data in candidates:
                     try:
+                        validate_public_url(page_data.url)
                         tab = await context.new_page()
                         await tab.goto(page_data.url, wait_until="networkidle", timeout=20_000)
                         html = await tab.content()
@@ -509,7 +522,14 @@ class CrawlerService:
 
         # Phase 1: inventory
         headers = {"User-Agent": USER_AGENT}
-        async with httpx.AsyncClient(timeout=self.timeout, headers=headers, follow_redirects=True) as client:
+        try:
+            validate_public_url(base_url)
+        except SSRFError:
+            return CrawlResult(domain=host, base_url=base_url)
+        async with httpx.AsyncClient(
+            timeout=self.timeout, headers=headers, follow_redirects=True,
+            transport=_GuardedAsyncTransport(),
+        ) as client:
             _found, _robots, _delay, robot_sitemaps = await self._load_robots(client, base_url)
             inventory = await self._fetch_sitemap_urls(client, base_url, [base_url] + robot_sitemaps)
 

@@ -84,9 +84,10 @@ def parse_csv_feed(text: str) -> list[dict[str, str]]:
     return products, truncated
 
 
-def parse_xml_feed(content: bytes) -> list[dict[str, str]]:
+def parse_xml_feed(content: bytes):
     """Parse a Google Merchant RSS/Atom XML feed."""
-    root = ElementTree.fromstring(content)
+    from app.core.ssrf import safe_parse_xml
+    root = safe_parse_xml(content)
     g = "{http://base.google.com/ns/1.0}"
     atom = "{http://www.w3.org/2005/Atom}"
 
@@ -200,10 +201,12 @@ class FeedService:
     ) -> dict[str, Any]:
         """Import from a feed URL (XML/CSV) or pasted CSV text, then analyze."""
         if source_url:
-            async with httpx.AsyncClient(timeout=60, follow_redirects=True) as client:
-                resp = await client.get(source_url)
-                resp.raise_for_status()
-                body = resp.content
+            from app.core.ssrf import guarded_async_client, validate_public_url, read_capped
+            validate_public_url(source_url)  # raises SSRFError on private/internal hosts
+            async with guarded_async_client(timeout=60, follow_redirects=True) as client:
+                async with client.stream("GET", source_url) as resp:
+                    resp.raise_for_status()
+                    body = await read_capped(resp)
             stripped = body.lstrip()[:200]
             if stripped.startswith(b"<"):
                 products, truncated = parse_xml_feed(body)

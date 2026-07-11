@@ -19,7 +19,8 @@ from app.agents.schema_agent import SchemaAgent
 from app.agents.technical_agent import TechnicalAgent
 from app.agents.workflow import SEOAutonomousLoop
 from app.api.rate_limit import enforce_rate_limit
-from app.api.security import require_api_key, require_project_access
+from app.api.security import require_api_key as _require_api_key_header, require_project_access
+from app.api.auth import resolve_user_org
 from app.api.auth import get_current_user, get_optional_user
 from app.api.ai import router as ai_router
 from app.api.analytics import router as analytics_router
@@ -53,14 +54,42 @@ app = FastAPI(
     description="AI-powered SEO Agent Platform",
 )
 
-# CORS for frontend
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# CORS for frontend. A wildcard origin cannot be combined with credentials,
+# and echoing every origin with credentials is a vulnerability - so we use the
+# explicit allowlist from config (comma-separated CORS_ORIGINS). The dashboard
+# authenticates with bearer tokens/headers rather than cookies, so credentials
+# are not required for it.
+_cors_origins = [o.strip() for o in (settings.cors_origins or "").split(",") if o.strip()]
+if _cors_origins == ["*"] or not _cors_origins:
+    # dev default: allow any origin but WITHOUT credentials (safe combination)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=False,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+else:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=_cors_origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+
+@app.middleware("http")
+async def _security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    if settings.environment.lower() == "prod":
+        response.headers.setdefault(
+            "Strict-Transport-Security", "max-age=31536000; includeSubDomains"
+        )
+    return response
 
 job_store = SQLiteJobStore(settings.job_store_path)
 
@@ -73,42 +102,117 @@ import contextvars
 _scoped_project_id: contextvars.ContextVar[str] = contextvars.ContextVar(
     "scoped_project_id", default=""
 )
+# The org the current request is confined to. Empty = service/API-key caller
+# (the platform operator) with cross-org access. Set = a logged-in end user,
+# who may only touch their own org's data.
+_scoped_org_id: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "scoped_org_id", default=""
+)
+_scoped_user_id: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "scoped_user_id", default=""
+)
 
 
 @app.middleware("http")
 async def _project_scope_middleware(request: Request, call_next):
     pid = request.headers.get("X-Project-ID", "") or request.query_params.get("project_id", "")
-    token = _scoped_project_id.set(pid.strip())
+    p_tok = _scoped_project_id.set(pid.strip())
+    o_tok = _scoped_org_id.set("")
+    u_tok = _scoped_user_id.set("")
+    # If a valid user JWT is present, confine the request to that user's org.
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        try:
+            from app.api.auth import _verify_token
+            claims = _verify_token(auth_header[7:].strip())
+            uid = claims.get("sub", "")
+            if uid:
+                _scoped_user_id.set(uid)
+                org = await asyncio.to_thread(resolve_user_org, uid, _supabase_rest)
+                _scoped_org_id.set(org or "__none__")  # sentinel: user with no org sees nothing
+        except Exception:
+            pass  # invalid token -> endpoint auth dependency will reject
     try:
         return await call_next(request)
     finally:
-        _scoped_project_id.reset(token)
+        _scoped_project_id.reset(p_tok)
+        _scoped_org_id.reset(o_tok)
+        _scoped_user_id.reset(u_tok)
+
+
+async def require_api_key(request: Request) -> str:
+    """Auth dependency accepting EITHER a verified Supabase user JWT OR the
+    service API key. JWT callers are org-scoped; API-key callers are not."""
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        from app.api.auth import get_current_user
+        await get_current_user(request)  # raises 401 if the JWT is invalid
+        return "jwt"
+    return _require_api_key_header(request.headers.get("X-API-KEY"))
 
 
 def _get_scoped_projects():
-    """Rows for the client-selected project, else the first project.
+    """Rows for the client-selected project, else the caller's first project.
 
-    A project id that is explicitly supplied but unknown is an error -
-    silently falling back to another tenant's project would read/write
-    the wrong data.
+    - JWT users are confined to their org: a project must belong to their org
+      or it 404s, and the fallback only returns their org's projects.
+    - Service/API-key callers (the operator) are unconstrained.
+    An explicitly supplied but unknown/foreign project id is an error - never
+    silently fall back to another tenant's project.
     """
     pid = _scoped_project_id.get()
+    org_id = _scoped_org_id.get()
+
+    if org_id == "__none__":
+        raise HTTPException(status_code=403, detail="User is not attached to an organization")
+
+    org_filter = f"&org_id=eq.{org_id}" if org_id else ""
+
     if pid:
         import re as _re
         if not _re.fullmatch(r"[0-9a-fA-F-]{32,36}", pid):
             raise HTTPException(status_code=400, detail="Invalid X-Project-ID")
-        rows = _supabase_rest("get", "projects", params=f"id=eq.{pid}")
+        rows = _supabase_rest("get", "projects", params=f"id=eq.{pid}{org_filter}")
         if not rows:
             raise HTTPException(status_code=404, detail="Project not found")
         return rows
-    return _supabase_rest("get", "projects", params="limit=1")
+
+    return _supabase_rest("get", "projects", params=f"limit=1{org_filter}")
+
+
+def _org_filter() -> str:
+    """PostgREST filter fragment confining a query to the JWT user's org.
+    Empty for service/API-key callers (the operator). Raises if the user has
+    no org."""
+    org_id = _scoped_org_id.get()
+    if org_id == "__none__":
+        raise HTTPException(status_code=403, detail="User is not attached to an organization")
+    return f"&org_id=eq.{org_id}" if org_id else ""
+
+
+def _require_owned_project(project_id: str) -> None:
+    """404 unless the project belongs to the caller's org (no-op for operator)."""
+    import re as _re
+    if not _re.fullmatch(r"[0-9a-fA-F-]{32,36}", project_id):
+        raise HTTPException(status_code=400, detail="Invalid project id")
+    rows = _supabase_rest("get", "projects", params=f"id=eq.{project_id}{_org_filter()}&select=id")
+    rows = rows if isinstance(rows, list) else [rows] if rows else []
+    if not rows:
+        raise HTTPException(status_code=404, detail="Project not found")
 
 # Register AI router
 app.include_router(ai_router, prefix="/api/ai")
 app.include_router(analytics_router)
 
-if settings.environment.lower() == "prod" and settings.orchestrator_api_key == "dev-orchestrator-key":
-    raise RuntimeError("Refusing to start in prod with default orchestrator_api_key")
+# Fail closed: never run with the committed default key or without one.
+# (Set ENVIRONMENT=dev + ALLOW_DEFAULT_KEY=1 only for local throwaway testing.)
+import os as _os
+if settings.orchestrator_api_key in ("", "dev-orchestrator-key") and not settings.orchestrator_keys_json:
+    if not (settings.environment.lower() == "dev" and _os.environ.get("ALLOW_DEFAULT_KEY") == "1"):
+        raise RuntimeError(
+            "Refusing to start with the default/empty orchestrator_api_key. "
+            "Set a strong ORCHESTRATOR_API_KEY (or ORCHESTRATOR_KEYS_JSON)."
+        )
 
 
 async def require_auth(request: Request) -> dict:
@@ -126,7 +230,7 @@ async def require_auth(request: Request) -> dict:
     # Fall back to API key
     api_key = request.headers.get("X-API-KEY")
     if api_key:
-        require_api_key(api_key)
+        _require_api_key_header(api_key)
         return {"user_id": "api_key_user", "api_key": api_key, "role": "service"}
 
     raise HTTPException(status_code=401, detail="Authentication required. Send Bearer token or X-API-KEY.")
@@ -898,7 +1002,7 @@ def schema_inject_batch(
         raise
     except Exception as exc:
         logger.error("Batch injection failed: %s", exc)
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 @app.get("/schema/injection-jobs/{job_id}")
@@ -958,7 +1062,7 @@ def save_cms_credentials(
         raise
     except Exception as exc:
         logger.error("Failed to save CMS credentials: %s", exc)
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 @app.get("/cms/credentials/{platform}")
@@ -1014,7 +1118,7 @@ def delete_cms_credentials(
         raise
     except Exception as exc:
         logger.error("Failed to delete CMS credentials: %s", exc)
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 # ── Bulk content generation ──────────────────────────────────────
@@ -1071,7 +1175,7 @@ def create_bulk_content_job(
         raise
     except Exception as exc:
         logger.error("Failed to create bulk content job: %s", exc)
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 @app.get("/bulk/jobs/{job_id}")
@@ -1099,7 +1203,7 @@ def get_bulk_job_status(
         raise
     except Exception as exc:
         logger.error("Failed to get bulk job status: %s", exc)
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 @app.get("/bulk/jobs/{job_id}/articles")
@@ -1121,7 +1225,7 @@ def get_bulk_job_articles(
         raise
     except Exception as exc:
         logger.error("Failed to get bulk articles: %s", exc)
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 @app.delete("/bulk/jobs/{job_id}")
@@ -1144,7 +1248,7 @@ def cancel_bulk_job(
         raise
     except Exception as exc:
         logger.error("Failed to cancel bulk job: %s", exc)
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 # ── Content calendar + publishing ────────────────────────────────────
@@ -1192,7 +1296,7 @@ def schedule_article(
         raise
     except Exception as exc:
         logger.error("Failed to schedule article: %s", exc)
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 @app.get("/calendar")
@@ -1228,7 +1332,7 @@ def get_calendar(
         raise
     except Exception as exc:
         logger.error("Failed to fetch calendar: %s", exc)
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 @app.patch("/calendar/{calendar_id}")
@@ -1252,7 +1356,7 @@ def reschedule_article(
         raise
     except Exception as exc:
         logger.error("Failed to reschedule article: %s", exc)
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 @app.delete("/calendar/{calendar_id}")
@@ -1275,7 +1379,7 @@ def cancel_article(
         raise
     except Exception as exc:
         logger.error("Failed to cancel article: %s", exc)
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 @app.post("/calendar/{calendar_id}/publish")
@@ -1298,7 +1402,7 @@ async def publish_article(
         raise
     except Exception as exc:
         logger.error("Failed to publish article: %s", exc)
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 @app.get("/calendar/{calendar_id}/logs")
@@ -1319,7 +1423,7 @@ def get_publishing_logs(
         raise
     except Exception as exc:
         logger.error("Failed to fetch publishing logs: %s", exc)
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 # ── Competitor analysis + outrank strategies ──────────────────────
@@ -1357,7 +1461,7 @@ def add_competitor(
         raise
     except Exception as exc:
         logger.error("Failed to add competitor: %s", exc)
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 @app.get("/competitors")
@@ -1384,7 +1488,7 @@ def get_competitors(
         raise
     except Exception as exc:
         logger.error("Failed to fetch competitors: %s", exc)
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 @app.delete("/competitors/{competitor_id}")
@@ -1407,7 +1511,7 @@ def remove_competitor(
         raise
     except Exception as exc:
         logger.error("Failed to remove competitor: %s", exc)
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 @app.post("/competitors/{competitor_id}/analyze")
@@ -1441,7 +1545,7 @@ async def analyze_competitor(
         raise
     except Exception as exc:
         logger.error("Failed to analyze competitor: %s", exc)
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 @app.get("/competitors/{competitor_id}/analysis")
@@ -1464,7 +1568,7 @@ def get_competitor_analysis(
         raise
     except Exception as exc:
         logger.error("Failed to fetch analysis: %s", exc)
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 @app.post("/competitors/{competitor_id}/strategies")
@@ -1499,7 +1603,7 @@ async def generate_strategies(
         raise
     except Exception as exc:
         logger.error("Failed to generate strategies: %s", exc)
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 @app.get("/competitors/strategies")
@@ -1533,7 +1637,7 @@ def get_strategies(
         raise
     except Exception as exc:
         logger.error("Failed to fetch strategies: %s", exc)
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 @app.patch("/competitors/strategies/{strategy_id}")
@@ -1557,7 +1661,7 @@ def update_strategy(
         raise
     except Exception as exc:
         logger.error("Failed to update strategy: %s", exc)
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 # ── Internal linking + site structure ─────────────────────────────
@@ -1594,7 +1698,7 @@ def add_site_page(
         raise
     except Exception as exc:
         logger.error("Failed to add page: %s", exc)
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 @app.post("/linking/analyze")
@@ -1621,7 +1725,7 @@ async def analyze_site(
         raise
     except Exception as exc:
         logger.error("Failed to analyze site: %s", exc)
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 @app.post("/linking/opportunities")
@@ -1653,7 +1757,7 @@ async def find_opportunities(
         raise
     except Exception as exc:
         logger.error("Failed to find opportunities: %s", exc)
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 @app.get("/linking/opportunities")
@@ -1687,7 +1791,7 @@ def get_opportunities(
         raise
     except Exception as exc:
         logger.error("Failed to fetch opportunities: %s", exc)
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 @app.patch("/linking/opportunities/{opportunity_id}")
@@ -1719,7 +1823,7 @@ def approve_opportunity(
         raise
     except Exception as exc:
         logger.error("Failed to update opportunity: %s", exc)
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 @app.get("/linking/orphans")
@@ -1746,7 +1850,7 @@ async def identify_orphans(
         raise
     except Exception as exc:
         logger.error("Failed to identify orphans: %s", exc)
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 # ── Keyword mapping + clustering ──────────────────────────────────
@@ -1788,7 +1892,7 @@ def import_keywords(
         raise
     except Exception as exc:
         logger.error("Failed to import keywords: %s", exc)
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 @app.post("/keywords/cluster")
@@ -1816,7 +1920,7 @@ async def cluster_keywords(
         raise
     except Exception as exc:
         logger.error("Failed to cluster keywords: %s", exc)
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 @app.post("/keywords/assign")
@@ -1844,7 +1948,7 @@ async def assign_keywords(
         raise
     except Exception as exc:
         logger.error("Failed to assign keywords: %s", exc)
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 @app.get("/keywords/clusters")
@@ -1871,7 +1975,7 @@ def get_clusters(
         raise
     except Exception as exc:
         logger.error("Failed to fetch clusters: %s", exc)
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 @app.get("/keywords/mappings")
@@ -1905,7 +2009,7 @@ def get_mappings(
         raise
     except Exception as exc:
         logger.error("Failed to fetch mappings: %s", exc)
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 @app.get("/keywords/gaps")
@@ -1933,7 +2037,7 @@ def get_gaps(
         raise
     except Exception as exc:
         logger.error("Failed to fetch gaps: %s", exc)
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 @app.post("/keywords/gaps/identify")
@@ -1960,7 +2064,7 @@ async def identify_gaps(
         raise
     except Exception as exc:
         logger.error("Failed to identify gaps: %s", exc)
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 # ── Multilingual + localization ───────────────────────────────────
@@ -2022,7 +2126,7 @@ def add_language(
         raise
     except Exception as exc:
         logger.error("Failed to add language: %s", exc)
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 @app.get("/multilingual/languages")
@@ -2049,7 +2153,7 @@ def get_languages(
         raise
     except Exception as exc:
         logger.error("Failed to fetch languages: %s", exc)
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 @app.post("/multilingual/localize")
@@ -2086,7 +2190,7 @@ async def localize_content(
         raise
     except Exception as exc:
         logger.error("Failed to localize content: %s", exc)
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 @app.post("/multilingual/hreflang")
@@ -2118,7 +2222,7 @@ async def generate_hreflang(
         raise
     except Exception as exc:
         logger.error("Failed to generate hreflang: %s", exc)
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 @app.get("/multilingual/hreflang")
@@ -2150,7 +2254,7 @@ def get_hreflang_config(
         raise
     except Exception as exc:
         logger.error("Failed to fetch hreflang config: %s", exc)
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 @app.post("/multilingual/regional-opportunities")
@@ -2183,7 +2287,7 @@ async def identify_regional_opportunities(
         raise
     except Exception as exc:
         logger.error("Failed to identify regional opportunities: %s", exc)
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 @app.get("/multilingual/regional-targeting")
@@ -2215,7 +2319,7 @@ def get_regional_targeting(
         raise
     except Exception as exc:
         logger.error("Failed to fetch regional targeting: %s", exc)
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 @app.get("/multilingual/content")
@@ -2249,7 +2353,7 @@ def get_localized_content(
         raise
     except Exception as exc:
         logger.error("Failed to fetch localized content: %s", exc)
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 @app.post("/multilingual/analyze")
@@ -2276,7 +2380,7 @@ async def analyze_multilingual_seo(
         raise
     except Exception as exc:
         logger.error("Failed to analyze multilingual setup: %s", exc)
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 # ── Content briefs + scoring ──────────────────────────────────────
@@ -2972,7 +3076,9 @@ def list_projects(
     _auth: None = Depends(require_api_key),
     _rate: None = Depends(enforce_rate_limit),
 ):
-    return _supabase_rest("get", "projects", params="order=created_at.desc&limit=50")
+    return _supabase_rest(
+        "get", "projects", params=f"order=created_at.desc&limit=50{_org_filter()}"
+    )
 
 
 @app.get("/projects/{project_id}", response_model=ProjectResponse)
@@ -2980,7 +3086,7 @@ def get_project(
     project_id: str,
     _auth: None = Depends(require_api_key),
 ):
-    data = _supabase_rest("get", "projects", params=f"id=eq.{project_id}")
+    data = _supabase_rest("get", "projects", params=f"id=eq.{project_id}{_org_filter()}")
     if not data:
         raise HTTPException(status_code=404, detail="Project not found")
     return data[0]
@@ -2992,6 +3098,7 @@ def update_project(
     body: ProjectUpdate,
     _auth: None = Depends(require_api_key),
 ):
+    _require_owned_project(project_id)
     updates = {k: v for k, v in body.model_dump().items() if v is not None}
     if "client_url" in updates:
         updates["client_url"] = str(updates["client_url"])
@@ -3006,6 +3113,7 @@ def delete_project(
     project_id: str,
     _auth: None = Depends(require_api_key),
 ):
+    _require_owned_project(project_id)
     _supabase_rest("delete", f"projects?id=eq.{project_id}")
     return {"deleted": True}
 
@@ -3278,7 +3386,7 @@ def create_audit_schedule(
         raise
     except Exception as exc:
         logger.error("Failed to create audit schedule: %s", exc)
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 @app.get("/audits/schedules")
@@ -3305,7 +3413,7 @@ def get_audit_schedules(
         raise
     except Exception as exc:
         logger.error("Failed to fetch audit schedules: %s", exc)
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 def _org_crawl_budget(project: dict) -> tuple[int, str]:
@@ -3392,7 +3500,7 @@ async def run_audit(
         raise
     except Exception as exc:
         logger.error("Failed to run audit: %s", exc)
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 # ── Free Instant Audit (public lead-gen funnel) ─────────────────────
@@ -3530,7 +3638,8 @@ def edge_config(token: str, url: str = "/"):
     """Directives for a page. Called by the snippet on every pageview - public."""
     from app.services.edge_service import EdgeService
 
-    if not token or len(token) > 80:
+    import re as _re
+    if not token or not _re.fullmatch(r"or_[A-Za-z0-9_-]{1,80}", token):
         raise HTTPException(status_code=400, detail="Invalid token")
     try:
         result = EdgeService().resolve_directives(token, url, _supabase_rest)
@@ -3588,7 +3697,7 @@ def create_edge_site(
         raise
     except Exception as exc:
         logger.error("Failed to create edge site: %s", exc)
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 @app.get("/edge/sites")
@@ -3660,7 +3769,7 @@ def create_edge_rule(
         raise
     except Exception as exc:
         logger.error("Failed to create edge rule: %s", exc)
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 @app.get("/edge/rules")
@@ -3979,7 +4088,7 @@ async def optimize_feed_products(
         raise
     except Exception as exc:
         logger.error("Feed optimization failed: %s", exc)
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 @app.get("/feeds/{feed_id}/export")
@@ -4031,7 +4140,7 @@ def get_audit_runs(
         raise
     except Exception as exc:
         logger.error("Failed to fetch audit runs: %s", exc)
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 @app.get("/audits/issues")
@@ -4067,7 +4176,7 @@ def get_audit_issues(
         raise
     except Exception as exc:
         logger.error("Failed to fetch audit issues: %s", exc)
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 @app.patch("/audits/issues/{issue_id}")
@@ -4098,7 +4207,7 @@ def update_issue(
         raise
     except Exception as exc:
         logger.error("Failed to update issue: %s", exc)
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 @app.post("/audits/issues/{issue_id}/resolve")
@@ -4135,7 +4244,7 @@ def resolve_issue(
         raise
     except Exception as exc:
         logger.error("Failed to resolve issue: %s", exc)
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 @app.get("/audits/summary")
@@ -4163,7 +4272,7 @@ def get_audit_summary(
         raise
     except Exception as exc:
         logger.error("Failed to fetch audit summary: %s", exc)
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 # ── Reports ────────────────────────────────────────────────────────

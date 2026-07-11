@@ -1,28 +1,35 @@
 """Tests for auth, rate limiting, and deploy agent."""
 
 import base64
+import hashlib
+import hmac
 import json
 import time
 
-from app.api.auth import _decode_jwt_payload
+from app.api.auth import _verify_hs256
 from app.api.rate_limit import InMemoryRateLimiter
 from app.agents.deploy_agent import DeployAgent
 from app.schemas.deploy import DeployRequest
 
 
-# ── JWT decoding ──
+# ── JWT verification (now signature-checked) ──
 
-def _make_jwt(payload: dict) -> str:
-    """Create a fake JWT for testing (no signature verification)."""
+_SECRET = "test-secret"
+
+
+def _make_jwt(payload: dict, secret: str = _SECRET) -> str:
+    """Create a correctly-signed HS256 JWT for testing."""
     header = base64.urlsafe_b64encode(json.dumps({"alg": "HS256"}).encode()).rstrip(b"=").decode()
     body = base64.urlsafe_b64encode(json.dumps(payload).encode()).rstrip(b"=").decode()
-    sig = base64.urlsafe_b64encode(b"fakesig").rstrip(b"=").decode()
+    sig = base64.urlsafe_b64encode(
+        hmac.new(secret.encode(), f"{header}.{body}".encode(), hashlib.sha256).digest()
+    ).rstrip(b"=").decode()
     return f"{header}.{body}.{sig}"
 
 
 def test_decode_jwt_valid():
     token = _make_jwt({"sub": "user-123", "email": "dev@test.com", "exp": time.time() + 3600})
-    payload = _decode_jwt_payload(token)
+    payload = _verify_hs256(token, _SECRET)
     assert payload["sub"] == "user-123"
     assert payload["email"] == "dev@test.com"
 
@@ -30,7 +37,7 @@ def test_decode_jwt_valid():
 def test_decode_jwt_expired():
     token = _make_jwt({"sub": "user-123", "exp": time.time() - 100})
     try:
-        _decode_jwt_payload(token)
+        _verify_hs256(token, _SECRET)
         assert False, "Expected ValueError for expired token"
     except ValueError as exc:
         assert "expired" in str(exc).lower()
@@ -38,8 +45,17 @@ def test_decode_jwt_expired():
 
 def test_decode_jwt_invalid_format():
     try:
-        _decode_jwt_payload("not.a.valid.jwt.token")
+        _verify_hs256("not.a.valid.jwt.token", _SECRET)
         assert False, "Expected ValueError"
+    except ValueError:
+        pass
+
+
+def test_decode_jwt_bad_signature():
+    token = _make_jwt({"sub": "user-123", "exp": time.time() + 3600})
+    try:
+        _verify_hs256(token, "wrong-secret")
+        assert False, "Expected ValueError for bad signature"
     except ValueError:
         pass
 

@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     supabase_url: str = ""
     supabase_service_role_key: str = ""
     supabase_anon_key: str = ""
+    supabase_jwt_secret: str = ""  # HS256 secret for verifying Supabase user JWTs
     redis_url: str = ""
     orchestrator_api_key: str = "dev-orchestrator-key"
     orchestrator_keys_json: str = ""
