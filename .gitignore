@@ -1,3 +1,17 @@
 exports/
 .omnirank_jobs.db
 backend/.venv/
+node_modules/
+SEO-latest.zip
+.env
+.env.local
+.env.backup
+backend/.env
+backend/.env.backup
+frontend/.env.local
+__pycache__/
+*.pyc
+*.db
+.next/
+frontend/.next/
+*.tsbuildinfo

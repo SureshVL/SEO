@@ -66,7 +66,7 @@ class SQLiteJobStore:
         with self._conn() as conn:
             conn.execute(
                 "insert into jobs(job_id,status,created_at,updated_at,payload) values(?,?,?,?,?)",
-                (job_id, "pending", now.isoformat(), now.isoformat(), json.dumps(payload)),
+                (job_id, "pending", now.isoformat(), now.isoformat(), json.dumps(payload, default=str)),
             )
         return self.get_job(job_id)  # type: ignore[return-value]
 

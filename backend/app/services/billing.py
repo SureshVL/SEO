@@ -22,15 +22,21 @@ logger = logging.getLogger("omnirank.billing")
 PLANS = {
     "starter": {
         "name": "Starter",
-        "price_inr": 199900,  # paise
+        "price_inr": 1999,          # rupees (display + test)
+        "price_paise": 199900,      # paise (Razorpay API)
+        "price_usd": 29,            # international pricing (Stripe)
+        "currency": "INR",
         "max_projects": 1,
         "max_keywords": 50,
         "max_reports_per_month": 5,
-        "razorpay_plan_id": "",  # set via env or DB
+        "razorpay_plan_id": "",     # set via env
     },
     "growth": {
         "name": "Growth",
-        "price_inr": 499900,
+        "price_inr": 4999,
+        "price_paise": 499900,
+        "price_usd": 79,
+        "currency": "INR",
         "max_projects": 5,
         "max_keywords": 300,
         "max_reports_per_month": 999,
@@ -38,7 +44,10 @@ PLANS = {
     },
     "agency": {
         "name": "Agency",
-        "price_inr": 1499900,
+        "price_inr": 14999,
+        "price_paise": 1499900,
+        "price_usd": 199,
+        "currency": "INR",
         "max_projects": 25,
         "max_keywords": 2000,
         "max_reports_per_month": 999,
@@ -79,6 +88,8 @@ class RazorpayClient:
         customer_email: str,
         customer_name: str = "",
         total_count: int = 12,  # 12 months
+        org_id: str = "",
+        plan_name: str = "",
     ) -> SubscriptionResult:
         """Create a new subscription and return checkout link."""
         if not self.enabled:
@@ -92,6 +103,9 @@ class RazorpayClient:
             "notes": {
                 "email": customer_email,
                 "name": customer_name,
+                # webhooks activate the org via these - they are required
+                "org_id": org_id,
+                "plan": plan_name,
             },
         }
 
@@ -137,6 +151,136 @@ class RazorpayClient:
             return False
         expected = hmac.new(webhook_secret.encode(), body, hashlib.sha256).hexdigest()
         return hmac.compare_digest(expected, signature)
+
+
+# Deep-crawl page budgets. Free trials get a hard cap; paid plans unlock
+# template-aware crawling of large sites.
+CRAWL_BUDGETS = {
+    "trial": 25,
+    "starter": 100,
+    "growth": 1000,
+    "agency": 5000,
+    "enterprise": 10000,
+}
+
+
+def crawl_budget_for(plan: str | None, plan_status: str | None) -> int:
+    """Max pages per crawl for an org. Anything not actively paying = trial cap."""
+    if plan_status != "active":
+        return CRAWL_BUDGETS["trial"]
+    return CRAWL_BUDGETS.get(plan or "", CRAWL_BUDGETS["trial"])
+
+
+def stripe_price_id_for(plan: str) -> str:
+    """Stripe recurring Price ID for a plan, configured via env."""
+    return {
+        "starter": settings.stripe_price_starter,
+        "growth": settings.stripe_price_growth,
+        "agency": settings.stripe_price_agency,
+    }.get(plan, "")
+
+
+class StripeClient:
+    """Stripe API client (REST, no SDK) for international subscriptions."""
+
+    def __init__(self, secret_key: str | None = None):
+        self.secret_key = secret_key or settings.stripe_secret_key
+        self.base_url = "https://api.stripe.com/v1"
+        if not self.secret_key:
+            logger.warning("Stripe credentials not set — international billing disabled")
+
+    @property
+    def enabled(self) -> bool:
+        return bool(self.secret_key)
+
+    def create_checkout_session(
+        self,
+        plan: str,
+        org_id: str,
+        customer_email: str = "",
+    ) -> dict:
+        """Create a Stripe Checkout session for a subscription plan."""
+        if not self.enabled:
+            raise RuntimeError("Stripe not configured")
+
+        price_id = stripe_price_id_for(plan)
+        if not price_id:
+            raise ValueError(f"Stripe price ID not configured for plan '{plan}'")
+
+        base = settings.app_base_url.rstrip("/")
+        form: dict[str, str] = {
+            "mode": "subscription",
+            "line_items[0][price]": price_id,
+            "line_items[0][quantity]": "1",
+            "success_url": f"{base}/dashboard/billing?status=success",
+            "cancel_url": f"{base}/dashboard/billing?status=cancelled",
+            "metadata[org_id]": org_id,
+            "metadata[plan]": plan,
+            "subscription_data[metadata][org_id]": org_id,
+            "subscription_data[metadata][plan]": plan,
+            "allow_promotion_codes": "true",
+        }
+        if customer_email:
+            form["customer_email"] = customer_email
+
+        with httpx.Client(auth=(self.secret_key, ""), timeout=30) as client:
+            resp = client.post(f"{self.base_url}/checkout/sessions", data=form)
+            resp.raise_for_status()
+            data = resp.json()
+        return {"checkout_url": data.get("url"), "session_id": data.get("id")}
+
+    def cancel_subscription(self, subscription_id: str, at_period_end: bool = True) -> dict:
+        if not self.enabled:
+            return {}
+        with httpx.Client(auth=(self.secret_key, ""), timeout=30) as client:
+            if at_period_end:
+                resp = client.post(
+                    f"{self.base_url}/subscriptions/{subscription_id}",
+                    data={"cancel_at_period_end": "true"},
+                )
+            else:
+                resp = client.delete(f"{self.base_url}/subscriptions/{subscription_id}")
+            resp.raise_for_status()
+            return resp.json()
+
+    @staticmethod
+    def verify_webhook_signature(
+        body: bytes,
+        sig_header: str,
+        secret: str | None = None,
+        tolerance_seconds: int = 300,
+    ) -> bool:
+        """Verify a Stripe webhook signature (t=...,v1=... scheme)."""
+        import time as _time
+
+        webhook_secret = secret or settings.stripe_webhook_secret
+        if not webhook_secret or not sig_header:
+            return False
+
+        parts = dict(
+            item.split("=", 1) for item in sig_header.split(",") if "=" in item
+        )
+        timestamp = parts.get("t", "")
+        candidates = [v for k, v in parts.items() if k == "v1"]
+        # multiple v1 signatures can be present; dict keeps only the last,
+        # so also scan manually
+        candidates = [
+            item.split("=", 1)[1]
+            for item in sig_header.split(",")
+            if item.startswith("v1=")
+        ] or candidates
+        if not timestamp or not candidates:
+            return False
+
+        try:
+            if abs(_time.time() - int(timestamp)) > tolerance_seconds:
+                return False
+        except ValueError:
+            return False
+
+        signed_payload = f"{timestamp}.".encode() + body
+        expected = hmac.new(webhook_secret.encode(), signed_payload, hashlib.sha256).hexdigest()
+        return any(hmac.compare_digest(expected, c) for c in candidates)
 
 
 class UsageLimiter:

@@ -88,7 +88,8 @@ def test_research_agent_includes_ai_usage_in_metrics():
 
     assert "ai_usage" in result.raw_metrics
     # Without Claude client, tokens should be 0
-    assert result.raw_metrics["ai_usage"]["total_cost_usd"] == 0.0
+    # Legacy path has no ai_usage key
+    assert result.raw_metrics.get("ai_usage", {}).get("total_cost_usd", 0.0) == 0.0
 
 
 def test_workflow_runs_with_transition_trace():

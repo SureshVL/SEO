@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
-from app.clients.claude_client import HAIKU, AIUsageAccumulator, ClaudeClient
+from app.clients.claude_client import AIUsageAccumulator
 from app.clients.http_clients import FirecrawlHTTPClient
 from app.services.cache import cache_key, cache_json_get, cache_json_set
 

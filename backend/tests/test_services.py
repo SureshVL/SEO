@@ -81,7 +81,8 @@ def test_report_generator_fallback_narrative():
     gen = ReportGenerator()
     project = {"domain": "example.com"}
     keywords = [{"keyword": "seo"}, {"keyword": "ranking"}]
-    html = gen.generate_seo_report(project=project, keywords=keywords)
+    result = gen.generate_seo_report(project=project, keywords=keywords)
+    html = result["html"] if isinstance(result, dict) else result
     assert "example.com" in html
     assert "<!DOCTYPE html>" in html
     assert "Keywords Tracked" in html
@@ -89,10 +90,11 @@ def test_report_generator_fallback_narrative():
 
 def test_report_generator_white_label():
     gen = ReportGenerator()
-    html = gen.generate_seo_report(
+    result = gen.generate_seo_report(
         project={"domain": "client.com", "name": "Client SEO"},
         keywords=[],
         white_label=True,
     )
+    html = result["html"] if isinstance(result, dict) else result
     assert "OMNI-RANK" not in html
     assert "Client SEO" in html
