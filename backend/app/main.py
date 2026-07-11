@@ -3548,6 +3548,133 @@ def delete_edge_rule(
     return {"deleted": True, "rule_id": rule_id}
 
 
+# ── Git write-back (PRs with SEO fixes for headless/JAMstack sites) ─
+
+class ConnectRepoRequest(BaseModel):
+    repo_owner: str = Field(..., min_length=1, max_length=255)
+    repo_name: str = Field(..., min_length=1, max_length=255)
+    base_branch: str = ""
+    access_token: str = Field(..., min_length=10)
+
+
+class FixFile(BaseModel):
+    path: str = Field(..., min_length=1, max_length=500)
+    content: str
+
+
+class OpenFixPRRequest(BaseModel):
+    connection_id: str
+    title: str = Field(..., min_length=3, max_length=300)
+    description: str = ""
+    fix_type: str = "other"  # content, schema, meta, redirects, hreflang, other
+    files: list[FixFile]
+
+
+@app.post("/git/connect")
+def connect_git_repo(
+    body: ConnectRepoRequest,
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """Connect a GitHub repository for PR-based SEO fixes."""
+    from app.services.git_writeback_service import GitWritebackService
+
+    projects = _get_scoped_projects()
+    if not projects:
+        raise HTTPException(status_code=400, detail="No projects found")
+    project_id = projects[0]["id"] if isinstance(projects, list) else projects["id"]
+
+    try:
+        svc = GitWritebackService()
+        conn = svc.connect_repo(
+            project_id, body.repo_owner, body.repo_name,
+            body.base_branch, body.access_token, _supabase_rest,
+        )
+        return conn
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        logger.error("Failed to connect repo: %s", exc)
+        raise HTTPException(status_code=502, detail="Could not reach GitHub")
+
+
+@app.get("/git/connections")
+def list_git_connections(
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    from app.services.git_writeback_service import GitWritebackService
+
+    projects = _get_scoped_projects()
+    if not projects:
+        raise HTTPException(status_code=400, detail="No projects found")
+    project_id = projects[0]["id"] if isinstance(projects, list) else projects["id"]
+
+    conns = GitWritebackService().get_connections(project_id, _supabase_rest)
+    return {"connections": conns, "count": len(conns)}
+
+
+@app.delete("/git/connections/{connection_id}")
+def delete_git_connection(
+    connection_id: str,
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    from app.services.git_writeback_service import GitWritebackService
+
+    GitWritebackService().delete_connection(connection_id, _supabase_rest)
+    return {"deleted": True}
+
+
+@app.post("/git/pr")
+def open_fix_pr(
+    body: OpenFixPRRequest,
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """Open a pull request on the connected repo with SEO fix files."""
+    from app.services.git_writeback_service import GitWritebackService
+
+    projects = _get_scoped_projects()
+    if not projects:
+        raise HTTPException(status_code=400, detail="No projects found")
+    project_id = projects[0]["id"] if isinstance(projects, list) else projects["id"]
+
+    try:
+        svc = GitWritebackService()
+        result = svc.open_fix_pr(
+            project_id,
+            body.connection_id,
+            body.title,
+            body.description,
+            body.fix_type,
+            [f.model_dump() for f in body.files],
+            _supabase_rest,
+        )
+        return result
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        logger.error("Failed to open PR: %s", exc)
+        raise HTTPException(status_code=502, detail="Could not open the pull request on GitHub")
+
+
+@app.get("/git/prs")
+def list_fix_prs(
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    from app.services.git_writeback_service import GitWritebackService
+
+    projects = _get_scoped_projects()
+    if not projects:
+        raise HTTPException(status_code=400, detail="No projects found")
+    project_id = projects[0]["id"] if isinstance(projects, list) else projects["id"]
+
+    prs = GitWritebackService().list_prs(project_id, _supabase_rest)
+    return {"pull_requests": prs, "count": len(prs)}
+
+
 @app.get("/audits/runs")
 def get_audit_runs(
     audit_type: str = "",
