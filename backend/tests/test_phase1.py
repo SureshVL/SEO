@@ -5,6 +5,24 @@ from unittest.mock import patch, MagicMock
 from datetime import datetime
 
 
+def _all_route_paths(routes):
+    """Flatten route paths, including routers mounted via include_router."""
+    out = []
+    for r in routes:
+        p = getattr(r, "path", None)
+        if p:
+            out.append(p)
+        sub = getattr(r, "routes", None)
+        if sub:
+            out.extend(_all_route_paths(sub))
+        orig = getattr(r, "original_router", None)  # FastAPI _IncludedRouter
+        if orig is not None:
+            prefix = getattr(getattr(r, "include_context", None), "prefix", "") or ""
+            out.extend(prefix + p for p in _all_route_paths(orig.routes))
+    return out
+
+
+
 # ── PDF report tests ───────────────────────────────────────────────────────────
 class TestPDFTrendReport:
     def test_monthly_trend_table_present(self):
@@ -211,6 +229,6 @@ class TestAnalyticsRouter:
 class TestMainRegistration:
     def test_analytics_router_in_app(self):
         from app.main import app
-        paths = [r.path for r in app.routes]
+        paths = _all_route_paths(app.routes)
         # Analytics routes should be reachable
         assert any("analytics" in p for p in paths), f"analytics not in routes: {paths}"

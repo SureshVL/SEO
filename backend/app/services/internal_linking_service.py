@@ -7,6 +7,7 @@ import logging
 from typing import Any, Callable
 from uuid import UUID
 
+from app.core.pgrest import q
 from app.agents.internal_linking_agent import (
     InternalLinkingAgent,
     LinkOpportunity,
@@ -14,6 +15,19 @@ from app.agents.internal_linking_agent import (
 )
 
 logger = logging.getLogger("omnirank.linking")
+
+
+def _topics_of(row) -> list:
+    """topics may be native jsonb (list), a legacy JSON string, or NULL."""
+    raw = row.get("topics")
+    if isinstance(raw, list):
+        return raw
+    if isinstance(raw, str):
+        try:
+            return json.loads(raw)
+        except (ValueError, TypeError):
+            return []
+    return []
 
 
 class InternalLinkingService:
@@ -36,17 +50,17 @@ class InternalLinkingService:
             word_count = len(content.split())
 
             # Check if page exists
-            existing = db_fn("get", "site_pages", params=f"project_id=eq.{project_id}&url=eq.{url}")
+            existing = db_fn("get", "site_pages", params=f"project_id=eq.{project_id}&url=eq.{q(url)}")
 
             if existing and isinstance(existing, list) and len(existing) > 0:
                 # Update
                 result = db_fn(
                     "patch",
-                    f"site_pages?project_id=eq.{project_id}&url=eq.{url}",
+                    f"site_pages?project_id=eq.{project_id}&url=eq.{q(url)}",
                     {
                         "title": title,
                         "content": content[:5000],  # Store first 5K words
-                        "topics": json.dumps(topics),
+                        "topics": topics,
                         "word_count": word_count,
                     },
                 )
@@ -60,7 +74,7 @@ class InternalLinkingService:
                         "url": url,
                         "title": title,
                         "content": content[:5000],
-                        "topics": json.dumps(topics),
+                        "topics": topics,
                         "word_count": word_count,
                     },
                 )
@@ -90,7 +104,7 @@ class InternalLinkingService:
                     url=p["url"],
                     title=p.get("title", ""),
                     content=p.get("content", ""),
-                    topics=json.loads(p.get("topics", "[]")),
+                    topics=_topics_of(p),
                     word_count=p.get("word_count", 0),
                 )
                 for p in pages
@@ -203,7 +217,15 @@ class InternalLinkingService:
         try:
             params = f"project_id=eq.{project_id}"
             if source_url:
-                params += f"&source_url=eq.{source_url}"
+                # table stores page ids, not urls - resolve the page first
+                pages = db_fn(
+                    "get", "site_pages",
+                    params=f"project_id=eq.{project_id}&url=eq.{q(source_url)}&select=id",
+                )
+                pages = pages if isinstance(pages, list) else [pages] if pages else []
+                if not pages:
+                    return []
+                params += f"&source_page_id=eq.{pages[0]['id']}"
             if status:
                 params += f"&status=eq.{status}"
             params += "&order=priority.desc"
@@ -219,12 +241,14 @@ class InternalLinkingService:
         self,
         opportunity_id: int,
         db_fn: Callable,
+        project_id: str = "",
     ) -> bool:
         """Approve a linking opportunity."""
+        project_scope = f"&project_id=eq.{project_id}" if project_id else ""
         try:
             db_fn(
                 "patch",
-                f"internal_link_opportunities?id=eq.{opportunity_id}",
+                f"internal_link_opportunities?id=eq.{opportunity_id}{project_scope}",
                 {"status": "approved"},
             )
             logger.info("Approved opportunity: %d", opportunity_id)

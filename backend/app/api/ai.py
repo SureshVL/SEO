@@ -38,7 +38,9 @@ async def generate(
             detail="No LLM configured. Set ANTHROPIC_API_KEY or GEMINI_API_KEY in .env",
         )
 
-    resp = client.complete(
+    import asyncio
+    resp = await asyncio.to_thread(
+        client.complete,
         messages=[{"role": "user", "content": body.prompt}],
         system=body.system,
         max_tokens=body.max_tokens,
@@ -46,10 +48,10 @@ async def generate(
     )
 
     return GenerateResponse(
-        result=resp.content,
-        model=resp.model,
-        tokens_used=resp.input_tokens + resp.output_tokens,
-        cost_usd=resp.cost_usd,
+        result=resp.get("content", ""),
+        model=resp.get("model", ""),
+        tokens_used=resp.get("input_tokens", 0) + resp.get("output_tokens", 0),
+        cost_usd=resp.get("cost_usd", 0.0),
     )
 
 
@@ -63,7 +65,9 @@ async def generate_json(
     if not client:
         raise HTTPException(status_code=400, detail="No LLM configured.")
 
-    parsed, resp = client.complete_json(
+    import asyncio
+    parsed, resp = await asyncio.to_thread(
+        client.complete_json,
         messages=[{"role": "user", "content": body.prompt}],
         system=body.system,
         max_tokens=body.max_tokens,
@@ -72,7 +76,7 @@ async def generate_json(
 
     return {
         "result": parsed,
-        "model": resp.model,
-        "tokens_used": resp.input_tokens + resp.output_tokens,
-        "cost_usd": resp.cost_usd,
+        "model": resp.get("model", ""),
+        "tokens_used": resp.get("input_tokens", 0) + resp.get("output_tokens", 0),
+        "cost_usd": resp.get("cost_usd", 0.0),
     }

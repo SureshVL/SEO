@@ -73,8 +73,23 @@ class AutopilotScheduler:
         self._running = False
 
     async def tick(self) -> None:
+        await self._reap_stale_runs()
         await self._run_due_audit_schedules()
         await self._send_due_wins_emails()
+
+    async def _reap_stale_runs(self) -> None:
+        """Mark audit_runs stuck in 'running' (crashed/killed workers) as failed."""
+        from app.core.pgrest import ts
+        cutoff = ts(_now() - timedelta(hours=2))
+        try:
+            await self._db(
+                "patch",
+                f"audit_runs?status=eq.running&started_at=lt.{cutoff}",
+                {"status": "failed", "completed_at": _now().isoformat(),
+                 "summary": "Marked failed by reaper: run exceeded 2h (worker crash/restart)."},
+            )
+        except Exception:
+            pass
 
     # ── Scheduled audits ────────────────────────────────────────────
 
@@ -91,10 +106,34 @@ class AutopilotScheduler:
             next_run = _parse_ts(schedule.get("next_run"))
             if next_run and next_run > now:
                 continue
+            if not await self._claim_schedule(schedule):
+                continue  # another worker claimed it
             try:
                 await self._execute_audit_schedule(schedule)
+            except asyncio.CancelledError:
+                raise
             except Exception as exc:
                 logger.error("Scheduled audit %s failed: %s", schedule.get("id"), exc)
+
+    async def _claim_schedule(self, schedule: dict[str, Any]) -> bool:
+        """Atomically advance next_run; only the worker whose PATCH matches
+        the old value wins the claim (compare-and-set via PostgREST filter)."""
+        from app.core.pgrest import q
+
+        frequency = schedule.get("frequency", "weekly")
+        days = FREQ_DAYS.get(frequency, 7)
+        params = f"audit_schedules?id=eq.{schedule['id']}"
+        old = schedule.get("next_run")
+        params += f"&next_run=eq.{q(old)}" if old else "&next_run=is.null"
+        try:
+            rows = await self._db("patch", params, {
+                "next_run": (_now() + timedelta(days=days)).isoformat(),
+            })
+            rows = rows if isinstance(rows, list) else [rows] if rows else []
+            return bool(rows)
+        except Exception as exc:
+            logger.warning("Could not claim schedule %s: %s", schedule.get("id"), exc)
+            return False
 
     async def _execute_audit_schedule(self, schedule: dict[str, Any]) -> None:
         from app.services.crawler_service import CrawlerService, analyze_crawl
@@ -159,7 +198,7 @@ class AutopilotScheduler:
                     "affected_url": issue["affected_url"],
                     "description": issue["description"],
                     "recommendation": issue["recommendation"],
-                    "evidence": json.dumps(issue.get("evidence", {})),
+                    "evidence": issue.get("evidence", {}),
                     "status": "open",
                     "first_detected": _now().isoformat(),
                     "last_detected": _now().isoformat(),
@@ -169,12 +208,13 @@ class AutopilotScheduler:
                     stored += 1
                 except Exception:
                     # duplicate (same project/type/url) -> refresh last_detected
+                    from app.core.pgrest import q
                     try:
                         await self._db(
                             "patch",
                             f"audit_issues?project_id=eq.{project_id}"
                             f"&issue_type=eq.{issue['issue_type']}"
-                            f"&affected_url=eq.{issue['affected_url']}",
+                            f"&affected_url=eq.{q(issue['affected_url'])}",
                             {"last_detected": _now().isoformat(), "status": "open"},
                         )
                     except Exception:
@@ -197,25 +237,31 @@ class AutopilotScheduler:
                         + f". Site score: {report['score']}/100."
                         + (f" {len(report.get('template_findings', []))} systemic template issues found." if report.get("template_findings") else "")
                     ),
-                    "result": json.dumps({
+                    "result": {
                         "score": report["score"],
                         "new_issues": stored,
                         "inventory_size": report.get("inventory_size", 0),
                         "template_findings": report.get("template_findings", [])[:20],
-                    }),
+                    },
                 })
+        except asyncio.CancelledError:
+            if run_id:
+                try:
+                    self.db_fn("patch", f"audit_runs?id=eq.{run_id}", {
+                        "status": "failed", "completed_at": _now().isoformat(),
+                    })
+                except Exception:
+                    pass
+            raise
         except Exception:
             if run_id:
                 await self._db("patch", f"audit_runs?id=eq.{run_id}", {
                     "status": "failed", "completed_at": _now().isoformat(),
                 })
             raise
-        finally:
-            frequency = schedule.get("frequency", "weekly")
-            days = FREQ_DAYS.get(frequency, 7)
+        else:
             await self._db("patch", f"audit_schedules?id=eq.{schedule['id']}", {
                 "last_run": _now().isoformat(),
-                "next_run": (_now() + timedelta(days=days)).isoformat(),
             })
 
     # ── Weekly wins emails ──────────────────────────────────────────

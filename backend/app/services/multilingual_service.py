@@ -7,6 +7,7 @@ import logging
 from typing import Any, Callable
 from uuid import UUID
 
+from app.core.pgrest import q
 from app.agents.multilingual_agent import (
     MultilingualAgent,
     LocalizedContent,
@@ -122,10 +123,7 @@ class MultilingualService:
             else:
                 localized_url = f"/{lang_segment}/{source_url.lstrip('/')}"
 
-            result = db_fn(
-                "post",
-                "localized_content",
-                {
+            row = {
                     "project_id": str(project_id),
                     "language_id": target_language_id,
                     "source_url": source_url,
@@ -133,13 +131,22 @@ class MultilingualService:
                     "title": localized.title,
                     "description": localized.description,
                     "content_markdown": localized.content,
-                    "keywords": json.dumps(localized.keywords),
+                    "keywords": localized.keywords,
                     "translation_status": "completed" if not localized.needs_review else "needs_review",
                     "translation_model": "claude",
                     "needs_human_review": localized.needs_review,
                     "translated_by": "claude-opus-4-8",
-                },
+            }
+            existing = db_fn(
+                "get", "localized_content",
+                params=f"project_id=eq.{project_id}&language_id=eq.{target_language_id}"
+                       f"&source_url=eq.{q(source_url)}&select=id",
             )
+            existing = existing if isinstance(existing, list) else [existing] if existing else []
+            if existing:
+                db_fn("patch", f"localized_content?id=eq.{existing[0]['id']}", row)
+            else:
+                db_fn("post", "localized_content", row)
 
             logger.info("Localized content for %s to %s", source_url, target_language)
 
@@ -317,7 +324,7 @@ class MultilingualService:
                             "language_id": language_id,
                             "region_code": variant.region_code,
                             "region_name": variant.region_name,
-                            "target_keywords": json.dumps(variant.target_keywords),
+                            "target_keywords": variant.target_keywords,
                             "local_content_needed": variant.local_content_needed,
                             "seo_priority": variant.priority,
                         },
@@ -357,7 +364,7 @@ class MultilingualService:
             if language_id:
                 params += f"&language_id=eq.{language_id}"
             if source_url:
-                params += f"&source_url=eq.{source_url}"
+                params += f"&source_url=eq.{q(source_url)}"
             params += "&order=created_at.desc"
 
             result = db_fn("get", "localized_content", params=params)
@@ -380,7 +387,7 @@ class MultilingualService:
         try:
             params = f"project_id=eq.{project_id}"
             if source_url:
-                params += f"&source_url=eq.{source_url}"
+                params += f"&source_url=eq.{q(source_url)}"
 
             result = db_fn("get", "hreflang_config", params=params)
             return result if isinstance(result, list) else [result] if result else []

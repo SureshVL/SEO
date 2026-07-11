@@ -101,7 +101,9 @@ export default function KeywordMappingPage() {
     if (!apiKey) return;
     setLoading(true);
     try {
-      const res = await apiFetch(`/keywords/gaps`, {
+      // run the AI analysis (stores results), then read them back
+      const res = await apiFetch(`/keywords/gaps/identify`, {
+        method: "POST",
         headers: { "X-API-KEY": apiKey },
       });
       if (res.ok) {

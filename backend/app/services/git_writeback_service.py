@@ -151,8 +151,11 @@ class GitWritebackService:
         rows = rows if isinstance(rows, list) else [rows] if rows else []
         return [_strip_token(r) for r in rows]
 
-    def delete_connection(self, connection_id: str, db_fn: Callable) -> bool:
-        db_fn("delete", f"git_connections?id=eq.{connection_id}")
+    def delete_connection(self, connection_id: str, db_fn: Callable, project_id: str = "") -> bool:
+        params = f"git_connections?id=eq.{connection_id}"
+        if project_id:
+            params += f"&project_id=eq.{project_id}"
+        db_fn("delete", params)
         return True
 
     def open_fix_pr(
@@ -174,7 +177,12 @@ class GitWritebackService:
             if not f.get("path") or f.get("content") is None:
                 raise ValueError("Each file needs a path and content")
 
-        rows = db_fn("get", "git_connections", params=f"id=eq.{connection_id}")
+        # the connection MUST belong to the calling project - this is what
+        # stops one tenant pushing commits to another tenant's repository
+        rows = db_fn(
+            "get", "git_connections",
+            params=f"id=eq.{connection_id}&project_id=eq.{project_id}",
+        )
         rows = rows if isinstance(rows, list) else [rows] if rows else []
         if not rows:
             raise ValueError("Git connection not found")
@@ -218,7 +226,7 @@ class GitWritebackService:
             "title": title,
             "description": description,
             "fix_type": fix_type,
-            "files": json.dumps(committed),
+            "files": committed,
             "status": "open",
         }
         try:

@@ -111,7 +111,10 @@ def rule_matches(rule: dict[str, Any], path: str) -> bool:
     if match_type == "prefix":
         return path.startswith(norm_pattern)
     if match_type == "contains":
-        return norm_pattern.strip("/") in path
+        needle = norm_pattern.strip("/")
+        if not needle:  # '/' would match every page; treat as homepage-only
+            return path == "/"
+        return needle in path
     return False
 
 
@@ -184,14 +187,13 @@ class EdgeService:
             raise ValueError(f"rule_type must be one of {sorted(ALLOWED_RULE_TYPES)}")
         if match_type not in ALLOWED_MATCH_TYPES:
             raise ValueError(f"match_type must be one of {sorted(ALLOWED_MATCH_TYPES)}")
-        import json as _json
         rows = db_fn("post", "edge_rules", {
             "project_id": project_id,
             "site_id": site_id,
             "url_pattern": url_pattern or "*",
             "match_type": match_type,
             "rule_type": rule_type,
-            "payload": _json.dumps(payload) if not isinstance(payload, str) else payload,
+            "payload": payload,
             "enabled": True,
             "source": source,
             "notes": notes,
@@ -211,21 +213,24 @@ class EdgeService:
         rows = db_fn("get", "edge_rules", params=params)
         return rows if isinstance(rows, list) else [rows] if rows else []
 
-    def update_rule(self, rule_id: int, changes: dict[str, Any], db_fn: Callable) -> bool:
+    def update_rule(self, rule_id: int, changes: dict[str, Any], db_fn: Callable, project_id: str = "") -> bool:
         allowed = {"enabled", "url_pattern", "match_type", "payload", "priority", "notes"}
         patch = {k: v for k, v in changes.items() if k in allowed}
         if not patch:
             return False
-        if "payload" in patch and not isinstance(patch["payload"], str):
-            import json as _json
-            patch["payload"] = _json.dumps(patch["payload"])
         patch["updated_at"] = datetime.now(timezone.utc).isoformat()
-        db_fn("patch", f"edge_rules?id=eq.{rule_id}", patch)
+        params = f"edge_rules?id=eq.{rule_id}"
+        if project_id:
+            params += f"&project_id=eq.{project_id}"
+        db_fn("patch", params, patch)
         self._invalidate_cache()
         return True
 
-    def delete_rule(self, rule_id: int, db_fn: Callable) -> bool:
-        db_fn("delete", f"edge_rules?id=eq.{rule_id}")
+    def delete_rule(self, rule_id: int, db_fn: Callable, project_id: str = "") -> bool:
+        params = f"edge_rules?id=eq.{rule_id}"
+        if project_id:
+            params += f"&project_id=eq.{project_id}"
+        db_fn("delete", params)
         self._invalidate_cache()
         return True
 
@@ -236,6 +241,12 @@ class EdgeService:
 
         Returns None for unknown/disabled tokens. Cached for 60s per site.
         """
+        # bound the caches - /edge/v1/config is public and unauthenticated
+        if len(self._cache) > 10_000:
+            self._cache.clear()
+        if len(self._seen_writes) > 10_000:
+            self._seen_writes.clear()
+
         entry = self._cache.get(token)
         now = time.time()
         if entry and entry[0] > now:

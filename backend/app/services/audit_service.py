@@ -52,7 +52,7 @@ class AuditService:
                     "frequency": frequency,
                     "enabled": True,
                     "next_run": next_run.isoformat() if next_run else None,
-                    "config": json.dumps(config or {}),
+                    "config": config or {},
                 },
             )
 
@@ -132,7 +132,7 @@ class AuditService:
                             "affected_element": issue.affected_element,
                             "description": issue.description,
                             "recommendation": issue.recommendation,
-                            "evidence": json.dumps(issue.evidence),
+                            "evidence": issue.evidence,
                             "status": "open",
                             "first_detected": datetime.utcnow().isoformat(),
                             "last_detected": datetime.utcnow().isoformat(),
@@ -154,12 +154,12 @@ class AuditService:
                     "critical_count": audit_result.critical_count,
                     "warning_count": audit_result.warning_count,
                     "summary": audit_result.summary,
-                    "result": json.dumps({
+                    "result": {
                         "audit_type": audit_result.audit_type,
                         "status": audit_result.status,
                         "total_pages_checked": audit_result.total_pages_checked,
                         "issues_found": audit_result.issues_found,
-                    }),
+                    },
                 },
             )
 
@@ -266,15 +266,17 @@ class AuditService:
         issue_id: int,
         status: str,
         db_fn: Callable | None = None,
+        project_id: str = "",
     ) -> bool:
-        """Update issue status."""
+        """Update issue status (scoped to the calling project)."""
         if not db_fn:
             return False
 
         try:
+            scope = f"&project_id=eq.{project_id}" if project_id else ""
             db_fn(
                 "patch",
-                f"audit_issues?id=eq.{issue_id}",
+                f"audit_issues?id=eq.{issue_id}{scope}",
                 {
                     "status": status,
                     "resolved_at": datetime.utcnow().isoformat() if status == "resolved" else None,
@@ -295,14 +297,15 @@ class AuditService:
         resolution_details: str,
         resolved_by: str = "autopilot",
         db_fn: Callable | None = None,
+        project_id: str = "",
     ) -> bool:
-        """Record issue resolution."""
+        """Record issue resolution (scoped to the calling project)."""
         if not db_fn:
             return False
 
         try:
-            # Get the issue first to get project_id
-            issue_result = db_fn("get", "audit_issues", params=f"id=eq.{issue_id}")
+            scope = f"&project_id=eq.{project_id}" if project_id else ""
+            issue_result = db_fn("get", "audit_issues", params=f"id=eq.{issue_id}{scope}")
             issue_data = issue_result if isinstance(issue_result, list) else [issue_result] if issue_result else []
 
             if not issue_data:

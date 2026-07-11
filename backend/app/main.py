@@ -86,15 +86,21 @@ async def _project_scope_middleware(request: Request, call_next):
 
 
 def _get_scoped_projects():
-    """Rows for the client-selected project, else the first project."""
+    """Rows for the client-selected project, else the first project.
+
+    A project id that is explicitly supplied but unknown is an error -
+    silently falling back to another tenant's project would read/write
+    the wrong data.
+    """
     pid = _scoped_project_id.get()
     if pid:
-        try:
-            rows = _supabase_rest("get", "projects", params=f"id=eq.{pid}")
-            if rows:
-                return rows
-        except Exception:
-            logger.warning("Scoped project %s not found; falling back to first", pid)
+        import re as _re
+        if not _re.fullmatch(r"[0-9a-fA-F-]{32,36}", pid):
+            raise HTTPException(status_code=400, detail="Invalid X-Project-ID")
+        rows = _supabase_rest("get", "projects", params=f"id=eq.{pid}")
+        if not rows:
+            raise HTTPException(status_code=404, detail="Project not found")
+        return rows
     return _supabase_rest("get", "projects", params="limit=1")
 
 # Register AI router
@@ -888,6 +894,8 @@ def schema_inject_batch(
             "failure_count": result.failure_count,
             "injections": result.injections,
         }
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error("Batch injection failed: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
@@ -946,6 +954,8 @@ def save_cms_credentials(
             "platform": body.cms_platform,
             "endpoint": body.endpoint_url,
         }
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error("Failed to save CMS credentials: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
@@ -977,6 +987,8 @@ def get_cms_credentials(
             "endpoint_url": cred.get("endpoint_url", ""),
             "has_api_key": bool(cred.get("api_key")),
         }
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error("Failed to get CMS credentials: %s", exc)
         return {"platform": platform, "saved": False, "error": str(exc)}
@@ -998,6 +1010,8 @@ def delete_cms_credentials(
     try:
         _supabase_rest("delete", f"cms_credentials?project_id=eq.{project_id}&cms_platform=eq.{platform}", None)
         return {"status": "deleted", "platform": platform}
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error("Failed to delete CMS credentials: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
@@ -1053,6 +1067,8 @@ def create_bulk_content_job(
             "completed_articles": result.completed_articles,
             "failed_articles": result.failed_articles,
         }
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error("Failed to create bulk content job: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
@@ -1079,6 +1095,8 @@ def get_bulk_job_status(
             "export_url": result.export_url,
             "error_message": result.error_message,
         }
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error("Failed to get bulk job status: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
@@ -1099,6 +1117,8 @@ def get_bulk_job_articles(
         svc = BulkContentService()
         articles = svc.get_articles(job_id, limit=limit, offset=offset, db_fn=_supabase_rest)
         return {"articles": articles, "limit": limit, "offset": offset}
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error("Failed to get bulk articles: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
@@ -1120,6 +1140,8 @@ def cancel_bulk_job(
             return {"status": "cancelled", "job_id": job_id}
         else:
             raise HTTPException(status_code=400, detail="Failed to cancel job")
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error("Failed to cancel bulk job: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
@@ -1166,6 +1188,8 @@ def schedule_article(
         result = svc.schedule_article(req, _supabase_rest)
         return result
 
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error("Failed to schedule article: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
@@ -1200,6 +1224,8 @@ def get_calendar(
         )
         return {"events": events, "count": len(events)}
 
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error("Failed to fetch calendar: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
@@ -1222,6 +1248,8 @@ def reschedule_article(
             return {"status": "rescheduled", "calendar_id": calendar_id, "new_date": new_date}
         else:
             raise HTTPException(status_code=400, detail="Failed to reschedule")
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error("Failed to reschedule article: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
@@ -1243,6 +1271,8 @@ def cancel_article(
             return {"status": "cancelled", "calendar_id": calendar_id}
         else:
             raise HTTPException(status_code=400, detail="Failed to cancel")
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error("Failed to cancel article: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
@@ -1264,6 +1294,8 @@ async def publish_article(
             return {"status": "published", "calendar_id": calendar_id}
         else:
             raise HTTPException(status_code=400, detail="Failed to publish")
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error("Failed to publish article: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
@@ -1283,6 +1315,8 @@ def get_publishing_logs(
         logs = svc.get_publishing_logs(calendar_id, db_fn=_supabase_rest)
         return {"logs": logs, "count": len(logs)}
 
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error("Failed to fetch publishing logs: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
@@ -1319,6 +1353,8 @@ def add_competitor(
         result = svc.add_competitor(req, _supabase_rest)
         return result
 
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error("Failed to add competitor: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
@@ -1344,6 +1380,8 @@ def get_competitors(
         competitors = svc.get_competitors(UUID(project_id), db_fn=_supabase_rest)
         return {"competitors": competitors, "count": len(competitors)}
 
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error("Failed to fetch competitors: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
@@ -1365,6 +1403,8 @@ def remove_competitor(
             return {"status": "removed", "competitor_id": competitor_id}
         else:
             raise HTTPException(status_code=400, detail="Failed to remove")
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error("Failed to remove competitor: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
@@ -1397,6 +1437,8 @@ async def analyze_competitor(
         )
         return result
 
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error("Failed to analyze competitor: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
@@ -1418,6 +1460,8 @@ def get_competitor_analysis(
             raise HTTPException(status_code=404, detail="No analysis found")
         return analysis
 
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error("Failed to fetch analysis: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
@@ -1451,6 +1495,8 @@ async def generate_strategies(
         )
         return {"strategies": strategies, "count": len(strategies)}
 
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error("Failed to generate strategies: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
@@ -1483,6 +1529,8 @@ def get_strategies(
         )
         return {"strategies": strategies, "count": len(strategies)}
 
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error("Failed to fetch strategies: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
@@ -1505,6 +1553,8 @@ def update_strategy(
             return {"status": "updated", "strategy_id": strategy_id, "new_status": status}
         else:
             raise HTTPException(status_code=400, detail="Failed to update")
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error("Failed to update strategy: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
@@ -1540,6 +1590,8 @@ def add_site_page(
         )
         return result
 
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error("Failed to add page: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
@@ -1565,6 +1617,8 @@ async def analyze_site(
         analysis = await svc.analyze_site_structure(UUID(project_id), _supabase_rest)
         return analysis
 
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error("Failed to analyze site: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
@@ -1595,6 +1649,8 @@ async def find_opportunities(
         )
         return {"opportunities": opportunities, "count": len(opportunities)}
 
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error("Failed to find opportunities: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
@@ -1627,6 +1683,8 @@ def get_opportunities(
         )
         return {"opportunities": opportunities, "count": len(opportunities)}
 
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error("Failed to fetch opportunities: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
@@ -1657,6 +1715,8 @@ def approve_opportunity(
         else:
             raise HTTPException(status_code=400, detail="Failed to update")
 
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error("Failed to update opportunity: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
@@ -1682,6 +1742,8 @@ async def identify_orphans(
         orphans = await svc.identify_orphans(UUID(project_id), _supabase_rest)
         return orphans
 
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error("Failed to identify orphans: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
@@ -1722,6 +1784,8 @@ def import_keywords(
         )
         return result
 
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error("Failed to import keywords: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
@@ -1748,6 +1812,8 @@ async def cluster_keywords(
         clusters = await svc.cluster_keywords(UUID(project_id), _supabase_rest)
         return {"clusters": clusters, "count": len(clusters)}
 
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error("Failed to cluster keywords: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
@@ -1774,6 +1840,8 @@ async def assign_keywords(
         assignments = await svc.assign_keywords_to_urls(UUID(project_id), _supabase_rest)
         return {"assignments": assignments, "count": len(assignments)}
 
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error("Failed to assign keywords: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
@@ -1799,6 +1867,8 @@ def get_clusters(
         clusters = svc.get_clusters(UUID(project_id), _supabase_rest)
         return {"clusters": clusters, "count": len(clusters)}
 
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error("Failed to fetch clusters: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
@@ -1831,18 +1901,47 @@ def get_mappings(
         )
         return {"mappings": mappings, "count": len(mappings)}
 
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error("Failed to fetch mappings: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
 
 
 @app.get("/keywords/gaps")
-async def get_gaps(
+def get_gaps(
     gap_type: str = "",
     _auth: None = Depends(require_api_key),
     _rate: None = Depends(enforce_rate_limit),
 ):
-    """Identify keyword gaps and content opportunities."""
+    """Read stored keyword gaps. (POST /keywords/gaps/identify runs the analysis.)"""
+    projects = _get_scoped_projects()
+    if not projects:
+        raise HTTPException(status_code=400, detail="No projects found")
+
+    project_id = projects[0]["id"] if isinstance(projects, list) else projects.get("id")
+
+    try:
+        params = f"project_id=eq.{project_id}&order=priority.desc"
+        if gap_type:
+            params += f"&gap_type=eq.{gap_type}"
+        gaps = _supabase_rest("get", "keyword_gaps", params=params)
+        gaps = gaps if isinstance(gaps, list) else [gaps] if gaps else []
+        return {"gaps": gaps, "count": len(gaps)}
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("Failed to fetch gaps: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/keywords/gaps/identify")
+async def identify_gaps(
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """Run AI gap analysis and store the results."""
     from app.services.keyword_mapping_service import KeywordMappingService
     from uuid import UUID
 
@@ -1857,6 +1956,8 @@ async def get_gaps(
         gaps = await svc.identify_gaps(UUID(project_id), _supabase_rest)
         return gaps
 
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error("Failed to identify gaps: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
@@ -1917,6 +2018,8 @@ def add_language(
         )
         return result
 
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error("Failed to add language: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
@@ -1942,6 +2045,8 @@ def get_languages(
         languages = svc.get_languages(UUID(project_id), _supabase_rest)
         return {"languages": languages, "count": len(languages)}
 
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error("Failed to fetch languages: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
@@ -1977,6 +2082,8 @@ async def localize_content(
         )
         return result
 
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error("Failed to localize content: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
@@ -2007,6 +2114,8 @@ async def generate_hreflang(
         )
         return {"hreflang_links": hreflang, "count": len(hreflang)}
 
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error("Failed to generate hreflang: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
@@ -2037,6 +2146,8 @@ def get_hreflang_config(
         )
         return {"hreflang_config": config, "count": len(config)}
 
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error("Failed to fetch hreflang config: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
@@ -2068,6 +2179,8 @@ async def identify_regional_opportunities(
         )
         return {"opportunities": opportunities, "count": len(opportunities)}
 
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error("Failed to identify regional opportunities: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
@@ -2098,6 +2211,8 @@ def get_regional_targeting(
         )
         return {"regional_targeting": targeting, "count": len(targeting)}
 
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error("Failed to fetch regional targeting: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
@@ -2130,6 +2245,8 @@ def get_localized_content(
         )
         return {"localized_content": content, "count": len(content)}
 
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error("Failed to fetch localized content: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
@@ -2155,6 +2272,8 @@ async def analyze_multilingual_seo(
         analysis = await svc.analyze_multilingual_setup(UUID(project_id), _supabase_rest)
         return analysis
 
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error("Failed to analyze multilingual setup: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
@@ -2777,6 +2896,8 @@ def workflow_run(
                 "triggered_by": (body.triggered_by if body else "manual"),
             },
         )
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.warning("Could not persist workflow_run: %s", exc)
 
@@ -2795,6 +2916,8 @@ def workflow_runs(
             "get", "workflow_runs",
             params=f"project_id=eq.{project_id}&order=started_at.desc&limit={max(1, min(limit, 100))}",
         ) or []
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.warning("workflow_runs fetch failed: %s", exc)
         rows = []
@@ -3151,6 +3274,8 @@ def create_audit_schedule(
         )
         return result
 
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error("Failed to create audit schedule: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
@@ -3176,6 +3301,8 @@ def get_audit_schedules(
         schedules = svc.get_audit_schedules(UUID(project_id), _supabase_rest)
         return {"schedules": schedules, "count": len(schedules)}
 
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error("Failed to fetch audit schedules: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
@@ -3314,6 +3441,8 @@ async def _run_public_audit(audit_id: str, domain: str, email: str) -> None:
         except Exception as exc:
             logger.warning("Could not persist audit lead: %s", exc)
 
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error("Public audit failed for %s: %s", domain, exc)
         _public_audits[audit_id].update({"status": "failed", "error": str(exc)[:300]})
@@ -3334,6 +3463,13 @@ async def start_public_audit(
     if "@" not in body.email or "." not in body.email.split("@")[-1]:
         raise HTTPException(status_code=400, detail="Please provide a valid email address")
 
+    # bound the in-memory store (multi-worker/GC safety; DB holds the record)
+    if len(_public_audits) > 500:
+        for old_key in list(_public_audits.keys())[:100]:
+            _public_audits.pop(old_key, None)
+    if len(_public_audit_rate) > 10_000:
+        _public_audit_rate.clear()
+
     audit_id = str(_uuid.uuid4())
     _public_audits[audit_id] = {
         "status": "queued",
@@ -3350,6 +3486,19 @@ def get_public_audit(audit_id: str):
     """Poll a free audit's status/report. Public - no API key required."""
     entry = _public_audits.get(audit_id)
     if not entry:
+        # different worker or restarted process: fall back to the DB record
+        try:
+            rows = _supabase_rest("get", "audit_leads", params=f"id=eq.{audit_id}")
+            rows = rows if isinstance(rows, list) else [rows] if rows else []
+            if rows:
+                return {
+                    "status": rows[0].get("status", "completed"),
+                    "domain": rows[0].get("domain"),
+                    "report": rows[0].get("report"),
+                    "error": None,
+                }
+        except Exception:
+            pass
         raise HTTPException(status_code=404, detail="Audit not found")
     return {
         "status": entry["status"],
@@ -3385,6 +3534,8 @@ def edge_config(token: str, url: str = "/"):
         raise HTTPException(status_code=400, detail="Invalid token")
     try:
         result = EdgeService().resolve_directives(token, url, _supabase_rest)
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.warning("edge config lookup failed: %s", exc)
         result = None
@@ -3433,6 +3584,8 @@ def create_edge_site(
     try:
         site = EdgeService().create_site(project_id, body.domain, _supabase_rest)
         return site
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error("Failed to create edge site: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
@@ -3462,7 +3615,12 @@ async def verify_edge_site(
 ):
     from app.services.edge_service import EdgeService
 
-    sites = _supabase_rest("get", "edge_sites", params=f"id=eq.{site_id}")
+    projects = _get_scoped_projects()
+    if not projects:
+        raise HTTPException(status_code=400, detail="No projects found")
+    project_id = projects[0]["id"] if isinstance(projects, list) else projects["id"]
+
+    sites = _supabase_rest("get", "edge_sites", params=f"id=eq.{site_id}&project_id=eq.{project_id}")
     sites = sites if isinstance(sites, list) else [sites] if sites else []
     if not sites:
         raise HTTPException(status_code=404, detail="Site not found")
@@ -3498,6 +3656,8 @@ def create_edge_rule(
         return rule
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error("Failed to create edge rule: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
@@ -3529,8 +3689,13 @@ def update_edge_rule(
 ):
     from app.services.edge_service import EdgeService
 
+    projects = _get_scoped_projects()
+    if not projects:
+        raise HTTPException(status_code=400, detail="No projects found")
+    project_id = projects[0]["id"] if isinstance(projects, list) else projects["id"]
+
     changes = {k: v for k, v in body.model_dump().items() if v is not None}
-    ok = EdgeService().update_rule(rule_id, changes, _supabase_rest)
+    ok = EdgeService().update_rule(rule_id, changes, _supabase_rest, project_id=project_id)
     if not ok:
         raise HTTPException(status_code=400, detail="Nothing to update")
     return {"updated": True, "rule_id": rule_id}
@@ -3544,7 +3709,12 @@ def delete_edge_rule(
 ):
     from app.services.edge_service import EdgeService
 
-    EdgeService().delete_rule(rule_id, _supabase_rest)
+    projects = _get_scoped_projects()
+    if not projects:
+        raise HTTPException(status_code=400, detail="No projects found")
+    project_id = projects[0]["id"] if isinstance(projects, list) else projects["id"]
+
+    EdgeService().delete_rule(rule_id, _supabase_rest, project_id=project_id)
     return {"deleted": True, "rule_id": rule_id}
 
 
@@ -3593,6 +3763,8 @@ def connect_git_repo(
         return conn
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error("Failed to connect repo: %s", exc)
         raise HTTPException(status_code=502, detail="Could not reach GitHub")
@@ -3622,7 +3794,12 @@ def delete_git_connection(
 ):
     from app.services.git_writeback_service import GitWritebackService
 
-    GitWritebackService().delete_connection(connection_id, _supabase_rest)
+    projects = _get_scoped_projects()
+    if not projects:
+        raise HTTPException(status_code=400, detail="No projects found")
+    project_id = projects[0]["id"] if isinstance(projects, list) else projects["id"]
+
+    GitWritebackService().delete_connection(connection_id, _supabase_rest, project_id=project_id)
     return {"deleted": True}
 
 
@@ -3654,6 +3831,8 @@ def open_fix_pr(
         return result
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error("Failed to open PR: %s", exc)
         raise HTTPException(status_code=502, detail="Could not open the pull request on GitHub")
@@ -3704,6 +3883,8 @@ async def import_product_feed(
         return result
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error("Feed import failed: %s", exc)
         raise HTTPException(status_code=502, detail="Could not import the feed")
@@ -3736,11 +3917,32 @@ def list_feed_products(
 ):
     from app.services.feed_service import FeedService
 
+    projects = _get_scoped_projects()
+    if not projects:
+        raise HTTPException(status_code=400, detail="No projects found")
+    project_id = projects[0]["id"] if isinstance(projects, list) else projects["id"]
+
     products = FeedService().get_products(
         feed_id, _supabase_rest,
         only_issues=only_issues, limit=min(limit, 500), offset=offset,
+        project_id=project_id,
     )
     return {"products": products, "count": len(products)}
+
+
+def _require_feed_in_project(feed_id: int) -> str:
+    """404 unless the feed belongs to the scoped project. Returns project_id."""
+    projects = _get_scoped_projects()
+    if not projects:
+        raise HTTPException(status_code=400, detail="No projects found")
+    project_id = projects[0]["id"] if isinstance(projects, list) else projects["id"]
+    rows = _supabase_rest(
+        "get", "product_feeds", params=f"id=eq.{feed_id}&project_id=eq.{project_id}&select=id"
+    )
+    rows = rows if isinstance(rows, list) else [rows] if rows else []
+    if not rows:
+        raise HTTPException(status_code=404, detail="Feed not found")
+    return project_id
 
 
 @app.post("/feeds/{feed_id}/optimize")
@@ -3751,11 +3953,9 @@ async def optimize_feed_products(
 ):
     """AI-optimize titles/descriptions for products with issues (plan-limited)."""
     from app.services.feed_service import FeedService, feed_sku_budget_for
-    from app.services.billing import crawl_budget_for  # noqa: F401 (same lookup pattern)
 
+    _require_feed_in_project(feed_id)
     projects = _get_scoped_projects()
-    if not projects:
-        raise HTTPException(status_code=400, detail="No projects found")
     project = projects[0] if isinstance(projects, list) else projects
 
     # plan-gated SKU budget
@@ -3775,6 +3975,8 @@ async def optimize_feed_products(
         result = await FeedService().optimize_products(feed_id, budget, _supabase_rest)
         result["plan"] = plan if status == "active" else "trial"
         return result
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error("Feed optimization failed: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
@@ -3789,6 +3991,7 @@ def export_supplemental_feed(
     """Download the optimized supplemental feed CSV for Google Merchant Center."""
     from app.services.feed_service import FeedService
 
+    _require_feed_in_project(feed_id)
     csv_content = FeedService().export_supplemental_feed(feed_id, _supabase_rest)
     return _Response(
         content=csv_content,
@@ -3824,6 +4027,8 @@ def get_audit_runs(
         )
         return {"runs": runs, "count": len(runs)}
 
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error("Failed to fetch audit runs: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
@@ -3858,6 +4063,8 @@ def get_audit_issues(
         )
         return {"issues": issues, "count": len(issues)}
 
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error("Failed to fetch audit issues: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
@@ -3873,15 +4080,22 @@ def update_issue(
     """Update issue status."""
     from app.services.audit_service import AuditService
 
+    projects = _get_scoped_projects()
+    if not projects:
+        raise HTTPException(status_code=400, detail="No projects found")
+    project_id = projects[0]["id"] if isinstance(projects, list) else projects["id"]
+
     try:
         svc = AuditService()
-        success = svc.update_issue_status(issue_id, body.status, _supabase_rest)
+        success = svc.update_issue_status(issue_id, body.status, _supabase_rest, project_id=project_id)
 
         if success:
             return {"status": body.status, "issue_id": issue_id}
         else:
             raise HTTPException(status_code=400, detail="Failed to update")
 
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error("Failed to update issue: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
@@ -3897,6 +4111,11 @@ def resolve_issue(
     """Resolve an issue."""
     from app.services.audit_service import AuditService
 
+    projects = _get_scoped_projects()
+    if not projects:
+        raise HTTPException(status_code=400, detail="No projects found")
+    project_id = projects[0]["id"] if isinstance(projects, list) else projects["id"]
+
     try:
         svc = AuditService()
         success = svc.resolve_issue(
@@ -3904,6 +4123,7 @@ def resolve_issue(
             body.resolution_type,
             body.resolution_details,
             db_fn=_supabase_rest,
+            project_id=project_id,
         )
 
         if success:
@@ -3911,6 +4131,8 @@ def resolve_issue(
         else:
             raise HTTPException(status_code=400, detail="Failed to resolve")
 
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error("Failed to resolve issue: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
@@ -3937,6 +4159,8 @@ def get_audit_summary(
         summary = svc.get_audit_summary(UUID(project_id), days, _supabase_rest)
         return summary
 
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error("Failed to fetch audit summary: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
@@ -4026,10 +4250,16 @@ def create_subscription(
     if not client.enabled:
         raise HTTPException(status_code=400, detail="Razorpay not configured.")
 
+    projects = _get_scoped_projects()
+    projects = projects if isinstance(projects, list) else [projects] if projects else []
+    org_id = projects[0].get("org_id", "") if projects else ""
+
     result = client.create_subscription(
         plan_id=plan_info["razorpay_plan_id"],
         customer_email=email,
         customer_name=name,
+        org_id=org_id,
+        plan_name=plan,
     )
     return {
         "subscription_id": result.subscription_id,
@@ -4069,34 +4299,43 @@ async def razorpay_webhook(request: Request):
 
     logger.info("Razorpay webhook: %s", event)
 
-    if event == "subscription.activated":
-        sub = payload.get("subscription", {}).get("entity", {})
-        notes = sub.get("notes", {})
-        # Update org plan status
-        if notes.get("email"):
-            _supabase_rest("patch", f"organizations?id=eq.{notes.get('org_id', '')}", {
-                "plan_status": "active",
-                "razorpay_subscription_id": sub.get("id"),
-            })
+    try:
+        if event == "subscription.activated":
+            sub = payload.get("subscription", {}).get("entity", {})
+            notes = sub.get("notes", {}) or {}
+            org_id = notes.get("org_id", "")
+            if org_id:
+                _supabase_rest("patch", f"organizations?id=eq.{org_id}", {
+                    "plan_status": "active",
+                    **({"plan": notes["plan"]} if notes.get("plan") else {}),
+                    "razorpay_subscription_id": sub.get("id"),
+                })
+            else:
+                logger.error("Razorpay activation without org_id in notes: %s", sub.get("id"))
 
-    elif event == "subscription.charged":
-        sub = payload.get("subscription", {}).get("entity", {})
-        payment = payload.get("payment", {}).get("entity", {})
-        # Log billing event
-        _supabase_rest("post", "billing_events", {
-            "org_id": sub.get("notes", {}).get("org_id", ""),
-            "event_type": "payment_success",
-            "amount_inr": payment.get("amount"),
-            "razorpay_payment_id": payment.get("id"),
-            "metadata": {"subscription_id": sub.get("id")},
-        })
+        elif event == "subscription.charged":
+            sub = payload.get("subscription", {}).get("entity", {})
+            payment = payload.get("payment", {}).get("entity", {})
+            org_id = (sub.get("notes", {}) or {}).get("org_id", "")
+            if org_id:
+                _supabase_rest("post", "billing_events", {
+                    "org_id": org_id,
+                    "event_type": "payment_success",
+                    "amount_inr": payment.get("amount"),
+                    "razorpay_payment_id": payment.get("id"),
+                    "metadata": {"subscription_id": sub.get("id")},
+                })
 
-    elif event in ("subscription.cancelled", "subscription.paused"):
-        sub = payload.get("subscription", {}).get("entity", {})
-        status = "cancelled" if "cancel" in event else "past_due"
-        org_id = sub.get("notes", {}).get("org_id", "")
-        if org_id:
-            _supabase_rest("patch", f"organizations?id=eq.{org_id}", {"plan_status": status})
+        elif event in ("subscription.cancelled", "subscription.paused"):
+            sub = payload.get("subscription", {}).get("entity", {})
+            status = "cancelled" if "cancel" in event else "past_due"
+            org_id = (sub.get("notes", {}) or {}).get("org_id", "")
+            if org_id:
+                _supabase_rest("patch", f"organizations?id=eq.{org_id}", {"plan_status": status})
+    except Exception as exc:
+        # log but acknowledge - a 500 makes the provider retry forever and
+        # eventually disable the webhook
+        logger.error("Razorpay webhook handling failed (%s): %s", event, exc)
 
     return {"received": True}
 
@@ -4144,15 +4383,21 @@ def create_stripe_checkout(
         raise HTTPException(status_code=400, detail="Stripe not configured.")
 
     if not org_id:
-        orgs = _supabase_rest("get", "organizations", params="limit=1")
-        orgs = orgs if isinstance(orgs, list) else [orgs] if orgs else []
-        org_id = orgs[0]["id"] if orgs else ""
+        # resolve the org from the scoped project - payments must never be
+        # attributed to an arbitrary org
+        projects = _get_scoped_projects()
+        projects = projects if isinstance(projects, list) else [projects] if projects else []
+        org_id = projects[0].get("org_id", "") if projects else ""
+    if not org_id:
+        raise HTTPException(status_code=400, detail="No organization found for this project")
 
     try:
         result = client.create_checkout_session(plan, org_id, customer_email=email)
         return result
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error("Stripe checkout failed: %s", exc)
         raise HTTPException(status_code=502, detail="Could not create Stripe checkout session")

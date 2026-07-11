@@ -81,12 +81,16 @@ class LLMClient:
 
     def _get_fallback_order(self, primary: str) -> List[str]:
         available = self._get_available()
-        order = [primary] if primary in available else []
-        for p in CHEAPEST_FIRST_ORDER:
-            if p in available and p not in order:
-                s = self._status.get(p)
-                if s and s.rate_limited_until > time.time(): continue
-                order.append(p)
+        order = []
+        for p in ([primary] if primary in available else []) + CHEAPEST_FIRST_ORDER:
+            if p not in available or p in order:
+                continue
+            s = self._status.get(p)
+            if s and s.rate_limited_until > time.time():
+                continue
+            if not self.allow_paid and not PROVIDER_COST_TIERS.get(p, {}).get("free_tier"):
+                continue  # paid providers excluded while allow_paid is off
+            order.append(p)
         return order
 
     @staticmethod
@@ -94,30 +98,52 @@ class LLMClient:
         """Only forward a model override to the provider family it belongs to."""
         if not model:
             return None
-        families = {"claude": "claude", "gemini": "gemini", "openai": "gpt", "perplexity": "sonar"}
-        prefix = families.get(provider)
-        if prefix and model.startswith(prefix):
+        families = {
+            "claude": ("claude",),
+            "gemini": ("gemini",),
+            "openai": ("gpt", "o1", "o3", "o4"),
+            "perplexity": ("sonar",),
+            "groq": ("llama", "mixtral", "gemma", "qwen", "deepseek"),
+        }
+        prefixes = families.get(provider, ())
+        if any(model.startswith(p) for p in prefixes):
             return model
         return None  # fall back to that provider's default model
+
+    @staticmethod
+    def _normalize(result) -> Dict[str, Any]:
+        """Providers return either a dict or an AIResponse dataclass; unify to dict."""
+        if isinstance(result, dict):
+            return result
+        return {
+            "content": getattr(result, "content", str(result)),
+            "model": getattr(result, "model", ""),
+            "input_tokens": getattr(result, "input_tokens", 0),
+            "output_tokens": getattr(result, "output_tokens", 0),
+            "cost_usd": getattr(result, "cost_usd", 0.0),
+            "cached": getattr(result, "cached", False),
+        }
 
     def _call_provider(self, provider, messages, model=None, temperature=0.7, max_tokens=4000, **kw):
         model = self._model_for_provider(provider, model)
         if provider == "claude":
             from .claude_client import ClaudeClient
-            return ClaudeClient().complete(messages, model=model or settings.default_claude_model, temperature=temperature, max_tokens=max_tokens, **kw)
+            result = ClaudeClient().complete(messages, model=model or settings.default_claude_model, temperature=temperature, max_tokens=max_tokens, **kw)
         elif provider == "gemini":
             from .gemini_client import GeminiClient
-            return GeminiClient().complete(messages, model or settings.default_gemini_model, temperature=temperature, max_tokens=max_tokens, **kw)
+            result = GeminiClient().complete(messages, model=model or settings.default_gemini_model, temperature=temperature, max_tokens=max_tokens, **kw)
         elif provider == "groq":
             from .groq_client import GroqClient
-            return GroqClient().complete(messages, model or settings.default_groq_model, temperature=temperature, max_tokens=max_tokens, **kw)
+            result = GroqClient().complete(messages, model=model or settings.default_groq_model, temperature=temperature, max_tokens=max_tokens, **kw)
         elif provider == "openai":
             from .openai_client import OpenAIClient
-            return OpenAIClient().complete(messages, model or settings.default_openai_model, temperature=temperature, max_tokens=max_tokens, **kw)
+            result = OpenAIClient().complete(messages, model=model or settings.default_openai_model, temperature=temperature, max_tokens=max_tokens, **kw)
         elif provider == "perplexity":
             from .perplexity_client import PerplexityClient
-            return PerplexityClient().complete(messages, model or settings.default_perplexity_model, temperature=temperature, max_tokens=max_tokens, **kw)
-        raise Exception(f"Unknown provider: {provider}")
+            result = PerplexityClient().complete(messages, model=model or settings.default_perplexity_model, temperature=temperature, max_tokens=max_tokens, **kw)
+        else:
+            raise Exception(f"Unknown provider: {provider}")
+        return self._normalize(result)
 
     def complete(self, messages: List[Dict], **kwargs) -> Dict[str, Any]:
         """Smart complete: cheapest first, auto-fallback on 429/503."""
@@ -150,6 +176,7 @@ class LLMClient:
                     status.last_error = err[:200]
                     status.last_error_time = time.time()
                     self._status[provider] = status
+                    last_error = exc
                     if "429" in err or "rate" in err.lower() or "quota" in err.lower():
                         status.rate_limited_until = time.time() + 60
                         if PROVIDER_COST_TIERS.get(provider, {}).get("free_tier"):
@@ -162,7 +189,6 @@ class LLMClient:
                         time.sleep(wait)
                         continue
                     logger.warning("%s failed: %s", provider, err[:100])
-                    last_error = exc
                     break
         raise Exception(f"All providers failed: {last_error}")
 

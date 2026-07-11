@@ -31,6 +31,13 @@ _SPA_MARKERS = (
 )
 
 
+def _same_host(netloc: str, host: str) -> bool:
+    """Exact host or subdomain match - never substring (badexample.com != example.com)."""
+    netloc = netloc.lower().split(":")[0]
+    host = host.lower()
+    return netloc == host or netloc.endswith("." + host) or host.endswith("." + netloc)
+
+
 def _looks_client_rendered(html: str) -> bool:
     """Does this thin HTML look like a JavaScript app shell (React/Vue/Next/...)?"""
     sample = html[:200_000]
@@ -262,8 +269,9 @@ class CrawlerService:
 
             sem = asyncio.Semaphore(self.concurrency)
             while queue and len(result.pages) < self.max_pages:
-                batch = queue[: self.concurrency]
-                queue = queue[self.concurrency:]
+                take = min(self.concurrency, self.max_pages - len(result.pages))
+                batch = queue[:take]
+                queue = queue[take:]
                 pages = await asyncio.gather(
                     *[self._fetch_page(client, sem, u, host) for u in batch]
                 )
@@ -305,7 +313,7 @@ class CrawlerService:
                             "source_url": src,
                             "target_url": url,
                             "status_code": status or "timeout",
-                            "internal": host in urlparse(url).netloc,
+                            "internal": _same_host(urlparse(url).netloc, host),
                         })
 
             # Also record crawled pages that themselves errored
@@ -365,7 +373,7 @@ class CrawlerService:
             parsed = urlparse(absolute)
             if parsed.scheme not in ("http", "https"):
                 return None
-            if host not in parsed.netloc:
+            if not _same_host(parsed.netloc, host):
                 return None
             # strip fragments and common non-page assets
             path = parsed.path or "/"
@@ -396,6 +404,9 @@ class CrawlerService:
             except httpx.HTTPError as exc:
                 page.error = str(exc)[:200]
                 page.load_time_ms = int((time.time() - start) * 1000)
+            except Exception as exc:  # malformed URLs/content must never kill a crawl
+                page.error = str(exc)[:200]
+                page.load_time_ms = int((time.time() - start) * 1000)
         return page
 
     def _parse_into(self, page: PageData, html: str, url: str, host: str) -> None:
@@ -419,9 +430,12 @@ class CrawlerService:
             if cleaned:
                 internal.append(cleaned)
             else:
-                absolute = urljoin(url, href.strip())
-                p = urlparse(absolute)
-                if p.scheme in ("http", "https") and host not in p.netloc:
+                try:
+                    absolute = urljoin(url, href.strip())
+                    p = urlparse(absolute)
+                except ValueError:
+                    continue
+                if p.scheme in ("http", "https") and p.netloc and not _same_host(p.netloc, host):
                     external.append(absolute)
         page.internal_links = list(dict.fromkeys(internal))[:100]
         page.external_links = list(dict.fromkeys(external))[:30]
@@ -477,7 +491,7 @@ class CrawlerService:
                 if r.status_code in (405, 403, 501):  # some servers reject HEAD
                     r = await client.get(url)
                 return r.status_code
-            except httpx.HTTPError:
+            except Exception:  # httpx.InvalidURL etc. are not HTTPError
                 return 0
 
     async def crawl_site_smart(self, domain: str, sample_per_template: int = 5) -> CrawlResult:
@@ -640,8 +654,11 @@ def analyze_crawl(result: CrawlResult) -> dict[str, Any]:
                 "Add descriptive alt text for accessibility and image SEO.",
                 count=p.images_missing_alt)
 
-    # Orphan pages (no inbound links within the crawl)
-    inbound: dict[str, int] = {p.url: 0 for p in ok_pages}
+    # Orphan pages (no inbound links within the crawl).
+    # Only meaningful when the crawl saw the whole site through links -
+    # sitemap-seeded/sampled crawls would flag every seeded page as an orphan.
+    full_coverage = result.inventory_size <= len(result.pages)
+    inbound: dict[str, int] = {p.url: 0 for p in ok_pages} if full_coverage else {}
     for p in ok_pages:
         for link in p.internal_links:
             if link in inbound and link != p.url:

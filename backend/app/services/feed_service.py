@@ -71,21 +71,24 @@ def parse_csv_feed(text: str) -> list[dict[str, str]]:
     delimiter = "\t" if text[:2000].count("\t") > text[:2000].count(",") else ","
     reader = csv.DictReader(io.StringIO(text), delimiter=delimiter)
     products = []
+    truncated = False
     for i, row in enumerate(reader):
         if i >= IMPORT_CAP:
+            truncated = True
             break
         product = {f: _pick(row, f) for f in CSV_FIELD_ALIASES}
         if not product["product_key"]:
             product["product_key"] = f"row-{i + 1}"
         if product["title"] or product["link"]:
             products.append(product)
-    return products
+    return products, truncated
 
 
 def parse_xml_feed(content: bytes) -> list[dict[str, str]]:
     """Parse a Google Merchant RSS/Atom XML feed."""
     root = ElementTree.fromstring(content)
     g = "{http://base.google.com/ns/1.0}"
+    atom = "{http://www.w3.org/2005/Atom}"
 
     def text_of(item, *names) -> str:
         for name in names:
@@ -94,22 +97,33 @@ def parse_xml_feed(content: bytes) -> list[dict[str, str]]:
                 return el.text.strip()
         return ""
 
-    items = root.findall(".//item") or root.findall(".//{http://www.w3.org/2005/Atom}entry")
+    def link_of(item) -> str:
+        text = text_of(item, f"{g}link", "link", f"{atom}link")
+        if text:
+            return text
+        el = item.find(f"{atom}link") or item.find("link")
+        return (el.get("href", "") if el is not None else "").strip()
+
+    items = root.findall(".//item") or root.findall(f".//{atom}entry")
     products = []
+    truncated = False
     for i, item in enumerate(items):
         if i >= IMPORT_CAP:
+            truncated = True
             break
-        products.append({
-            "product_key": text_of(item, f"{g}id", "id") or f"item-{i + 1}",
-            "title": text_of(item, f"{g}title", "title"),
-            "description": text_of(item, f"{g}description", "description"),
+        product = {
+            "product_key": text_of(item, f"{g}id", "id", f"{atom}id") or f"item-{i + 1}",
+            "title": text_of(item, f"{g}title", "title", f"{atom}title"),
+            "description": text_of(item, f"{g}description", "description", f"{atom}summary"),
             "brand": text_of(item, f"{g}brand"),
             "category": text_of(item, f"{g}google_product_category", f"{g}product_type"),
             "price": text_of(item, f"{g}price"),
-            "link": text_of(item, f"{g}link", "link"),
+            "link": link_of(item),
             "availability": text_of(item, f"{g}availability"),
-        })
-    return products
+        }
+        if product["title"] or product["link"]:
+            products.append(product)
+    return products, truncated
 
 
 # ── Deterministic listing analysis ───────────────────────────────────
@@ -160,6 +174,19 @@ def analyze_product(p: dict[str, str], duplicate_titles: set[str]) -> list[dict[
     return issues
 
 
+def _issues_of(p: dict[str, Any]) -> list[dict[str, Any]]:
+    """feed_products.issues may arrive as native jsonb (list) or legacy string."""
+    raw = p.get("issues")
+    if isinstance(raw, list):
+        return raw
+    if isinstance(raw, str):
+        try:
+            return json.loads(raw)
+        except (ValueError, TypeError):
+            return []
+    return []
+
+
 class FeedService:
     """Import, analyze, optimize, and export product feeds."""
 
@@ -179,12 +206,12 @@ class FeedService:
                 body = resp.content
             stripped = body.lstrip()[:200]
             if stripped.startswith(b"<"):
-                products = parse_xml_feed(body)
+                products, truncated = parse_xml_feed(body)
             else:
-                products = parse_csv_feed(body.decode("utf-8", errors="replace"))
+                products, truncated = parse_csv_feed(body.decode("utf-8", errors="replace"))
             source_type = "url"
         elif csv_text:
-            products = parse_csv_feed(csv_text)
+            products, truncated = parse_csv_feed(csv_text)
             source_type = "csv"
         else:
             raise ValueError("Provide a feed URL or CSV content")
@@ -214,17 +241,17 @@ class FeedService:
             "source_url": source_url,
             "product_count": len(products),
             "issue_count": total_issues,
-            "truncated": len(products) >= IMPORT_CAP,
+            "truncated": truncated,
             "status": "ready",
             "last_imported": datetime.now(timezone.utc).isoformat(),
         })
         feed = feed_rows[0] if isinstance(feed_rows, list) and feed_rows else feed_rows
         feed_id = feed["id"]
 
-        stored = 0
-        for p, issues in analyzed:
-            try:
-                db_fn("post", "feed_products", {
+        def _store_all() -> int:
+            count = 0
+            rows = [
+                {
                     "feed_id": feed_id,
                     "project_id": project_id,
                     "product_key": p["product_key"][:255],
@@ -235,12 +262,30 @@ class FeedService:
                     "price": (p.get("price") or "")[:100],
                     "link": (p.get("link") or "")[:1000],
                     "availability": (p.get("availability") or "")[:50],
-                    "issues": json.dumps(issues),
+                    "issues": issues,
                     "issue_count": len(issues),
-                })
-                stored += 1
-            except Exception as exc:
-                logger.warning("Could not store product %s: %s", p.get("product_key"), exc)
+                }
+                for p, issues in analyzed
+            ]
+            # bulk insert in chunks (PostgREST accepts arrays) - one call per
+            # 500 products instead of one per product, off the event loop
+            for start in range(0, len(rows), 500):
+                chunk = rows[start:start + 500]
+                try:
+                    db_fn("post", "feed_products", chunk)
+                    count += len(chunk)
+                except Exception as exc:
+                    logger.warning("Bulk insert failed (%d rows): %s - retrying row-by-row", len(chunk), exc)
+                    for row in chunk:
+                        try:
+                            db_fn("post", "feed_products", row)
+                            count += 1
+                        except Exception as row_exc:
+                            logger.warning("Could not store product %s: %s", row.get("product_key"), row_exc)
+            return count
+
+        import asyncio
+        stored = await asyncio.to_thread(_store_all)
 
         logger.info("Imported feed %s: %d products, %d issues", feed_id, stored, total_issues)
         return {
@@ -248,7 +293,7 @@ class FeedService:
             "product_count": len(products),
             "stored": stored,
             "issue_count": total_issues,
-            "truncated": len(products) >= IMPORT_CAP,
+            "truncated": truncated,
         }
 
     def get_feeds(self, project_id: str, db_fn: Callable) -> list[dict[str, Any]]:
@@ -258,10 +303,15 @@ class FeedService:
     def get_products(
         self, feed_id: int, db_fn: Callable,
         only_issues: bool = False, limit: int = 100, offset: int = 0,
+        optimization_status: str = "", project_id: str = "",
     ) -> list[dict[str, Any]]:
         params = f"feed_id=eq.{feed_id}&order=issue_count.desc&limit={limit}&offset={offset}"
+        if project_id:
+            params += f"&project_id=eq.{project_id}"
         if only_issues:
             params += "&issue_count=gt.0"
+        if optimization_status:
+            params += f"&optimization_status=eq.{optimization_status}"
         rows = db_fn("get", "feed_products", params=params)
         return rows if isinstance(rows, list) else [rows] if rows else []
 
@@ -274,8 +324,13 @@ class FeedService:
         """AI-rewrite titles/descriptions for the worst products, within budget."""
         from app.clients.llm import llm_client
 
-        products = self.get_products(feed_id, db_fn, only_issues=True, limit=min(sku_budget, 500))
-        pending = [p for p in products if p.get("optimization_status") == "pending"][:sku_budget]
+        import asyncio as _aio
+
+        # fetch PENDING products only, so repeat runs keep making progress
+        pending = (await _aio.to_thread(
+            self.get_products, feed_id, db_fn, True,
+            min(sku_budget, 500), 0, "pending",
+        ))[:sku_budget]
         if not pending:
             return {"optimized": 0, "message": "No pending products with issues"}
 
@@ -308,23 +363,36 @@ Return ONLY a JSON array:
                 logger.error("Feed optimization batch failed: %s", exc)
                 continue
 
+            batch_ids = {p["id"] for p in batch}
             for rw in rewrites:
                 pid = rw.get("id")
                 new_title = (rw.get("title") or "").strip()
-                if not pid or not new_title:
+                # only accept ids that were actually in this batch - LLM output
+                # must never be able to address other rows
+                if pid not in batch_ids or not new_title:
                     continue
                 try:
-                    db_fn("patch", f"feed_products?id=eq.{pid}", {
-                        "optimized_title": new_title[:1000],
-                        "optimized_description": (rw.get("description") or "").strip(),
-                        "optimization_status": "optimized",
-                    })
+                    import asyncio as _aio
+                    await _aio.to_thread(
+                        db_fn, "patch",
+                        f"feed_products?id=eq.{pid}&feed_id=eq.{feed_id}",
+                        {
+                            "optimized_title": new_title[:1000],
+                            "optimized_description": (rw.get("description") or "").strip(),
+                            "optimization_status": "optimized",
+                        },
+                    )
                     optimized += 1
                 except Exception as exc:
                     logger.warning("Could not store optimization for %s: %s", pid, exc)
 
         try:
-            db_fn("patch", f"product_feeds?id=eq.{feed_id}", {"optimized_count": optimized})
+            all_optimized = db_fn(
+                "get", "feed_products",
+                params=f"feed_id=eq.{feed_id}&optimization_status=eq.optimized&select=id&limit=10000",
+            )
+            total = len(all_optimized) if isinstance(all_optimized, list) else 0
+            db_fn("patch", f"product_feeds?id=eq.{feed_id}", {"optimized_count": total})
         except Exception:
             pass
 

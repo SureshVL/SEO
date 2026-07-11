@@ -88,6 +88,8 @@ class RazorpayClient:
         customer_email: str,
         customer_name: str = "",
         total_count: int = 12,  # 12 months
+        org_id: str = "",
+        plan_name: str = "",
     ) -> SubscriptionResult:
         """Create a new subscription and return checkout link."""
         if not self.enabled:
@@ -101,6 +103,9 @@ class RazorpayClient:
             "notes": {
                 "email": customer_email,
                 "name": customer_name,
+                # webhooks activate the org via these - they are required
+                "org_id": org_id,
+                "plan": plan_name,
             },
         }
 

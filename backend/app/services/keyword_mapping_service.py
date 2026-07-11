@@ -7,6 +7,7 @@ import logging
 from typing import Any, Callable
 from uuid import UUID
 
+from app.core.pgrest import q
 from app.agents.keyword_mapping_agent import (
     KeywordMappingAgent,
     Keyword,
@@ -15,6 +16,18 @@ from app.agents.keyword_mapping_agent import (
 )
 
 logger = logging.getLogger("omnirank.keyword_mapping")
+
+
+def _json_list(raw) -> list:
+    """jsonb columns may arrive native (list), as a legacy string, or NULL."""
+    if isinstance(raw, list):
+        return raw
+    if isinstance(raw, str):
+        try:
+            return json.loads(raw)
+        except (ValueError, TypeError):
+            return []
+    return []
 
 
 class KeywordMappingService:
@@ -40,14 +53,14 @@ class KeywordMappingService:
                     existing = db_fn(
                         "get",
                         "keywords",
-                        params=f"project_id=eq.{project_id}&keyword=eq.{kw_data.get('keyword', '')}",
+                        params=f"project_id=eq.{project_id}&keyword=eq.{q(kw_data.get('keyword', ''))}",
                     )
 
                     if existing and isinstance(existing, list) and len(existing) > 0:
                         # Update existing
                         db_fn(
                             "patch",
-                            f"keywords?project_id=eq.{project_id}&keyword=eq.{kw_data.get('keyword', '')}",
+                            f"keywords?project_id=eq.{project_id}&keyword=eq.{q(kw_data.get('keyword', ''))}",
                             {
                                 "search_volume": kw_data.get("search_volume", 0),
                                 "keyword_difficulty": kw_data.get("difficulty", 0),
@@ -144,7 +157,7 @@ class KeywordMappingService:
                         "project_id": str(project_id),
                         "cluster_name": cluster.cluster_name,
                         "seed_keyword": cluster.seed_keyword,
-                        "keywords": json.dumps(cluster.keywords),
+                        "keywords": cluster.keywords,
                         "intent": cluster.intent,
                         "volume": cluster.total_volume,
                         "difficulty": cluster.avg_difficulty,
@@ -185,7 +198,7 @@ class KeywordMappingService:
                 KeywordCluster(
                     cluster_name=c.get("cluster_name", ""),
                     seed_keyword=c.get("seed_keyword", ""),
-                    keywords=json.loads(c.get("keywords", "[]")),
+                    keywords=_json_list(c.get("keywords")),
                     intent=c.get("intent", "informational"),
                     total_volume=c.get("volume", 0),
                     avg_difficulty=c.get("difficulty", 0),
@@ -212,7 +225,7 @@ class KeywordMappingService:
                         "project_id": str(project_id),
                         "url": assignment.url,
                         "primary_keyword": assignment.primary_keyword,
-                        "secondary_keywords": json.dumps(assignment.secondary_keywords),
+                        "secondary_keywords": assignment.secondary_keywords,
                         "target_volume": assignment.target_volume,
                         "optimization_score": 0,  # To be calculated
                     },
@@ -225,6 +238,27 @@ class KeywordMappingService:
                     "target_volume": assignment.target_volume,
                     "priority": assignment.priority,
                 })
+
+            # also persist per-keyword mappings so /keywords/mappings has data
+            id_rows = db_fn("get", "keywords", params=f"project_id=eq.{project_id}&select=id,keyword")
+            id_rows = id_rows if isinstance(id_rows, list) else [id_rows] if id_rows else []
+            keyword_ids = {r.get("keyword", "").lower(): r.get("id") for r in id_rows}
+            for assignment in assignments:
+                names = [assignment.primary_keyword] + list(assignment.secondary_keywords or [])
+                for name in names:
+                    keyword_id = keyword_ids.get((name or "").lower())
+                    if not keyword_id or not assignment.url:
+                        continue
+                    try:
+                        db_fn("post", "keyword_mappings", {
+                            "project_id": str(project_id),
+                            "keyword_id": keyword_id,
+                            "url": assignment.url,
+                            "recommendation": "target" if name == assignment.primary_keyword else "optimize",
+                            "priority": assignment.priority,
+                        })
+                    except Exception:
+                        pass  # duplicate mapping (unique project/keyword/url)
 
             logger.info("Assigned %d keyword clusters to URLs", len(stored))
             return stored
@@ -258,15 +292,22 @@ class KeywordMappingService:
             # Identify gaps
             gaps = await self.agent.identify_gaps(keywords, existing_mappings)
 
-            # Store gaps
+            # Store gaps with real keyword ids (the FK requires one)
+            id_rows = db_fn("get", "keywords", params=f"project_id=eq.{project_id}&select=id,keyword")
+            id_rows = id_rows if isinstance(id_rows, list) else [id_rows] if id_rows else []
+            keyword_ids = {r.get("keyword", "").lower(): r.get("id") for r in id_rows}
+
             for gap in gaps.get("opportunities", []):
+                keyword_id = keyword_ids.get((gap.get("keyword") or "").lower())
+                if not keyword_id:
+                    continue
                 try:
                     db_fn(
                         "post",
                         "keyword_gaps",
                         {
                             "project_id": str(project_id),
-                            "keyword_id": 0,  # Would need to look up actual ID
+                            "keyword_id": keyword_id,
                             "gap_type": gap.get("gap_type", "new_content_needed"),
                             "volume": gap.get("volume", 0),
                             "difficulty": 0,

@@ -43,7 +43,8 @@ class WinsService:
         if not db_fn:
             return {}
 
-        since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+        from app.core.pgrest import ts
+        since = ts(datetime.now(timezone.utc) - timedelta(days=days))
 
         def count(table: str, extra: str = "", ts_col: str = "created_at") -> int:
             try:
@@ -131,10 +132,19 @@ class WinsService:
             "project_id": project_id,
             "period_start": (now - timedelta(days=7)).isoformat(),
             "period_end": now.isoformat(),
-            "stats": json.dumps(wins["stats"]),
+            "stats": wins["stats"],
             "value_inr": wins["value_inr"],
             "value_usd": wins["value_usd"],
         }
+
+        # claim first: if this insert fails we do NOT send, so a broken table
+        # can never cause the same email to fire on every scheduler tick
+        try:
+            created = db_fn("post", "wins_reports", report_row)
+            report_id = created[0].get("id") if isinstance(created, list) and created else None
+        except Exception as exc:
+            logger.warning("Could not store wins report (email skipped): %s", exc)
+            return False
 
         sent = False
         if recipient:
@@ -145,14 +155,14 @@ class WinsService:
                 project_name=project.get("name", "your site"),
                 wins=wins,
             )
-            if sent:
-                report_row["sent_to"] = recipient
-                report_row["sent_at"] = now.isoformat()
-
-        try:
-            db_fn("post", "wins_reports", report_row)
-        except Exception as exc:
-            logger.warning("Could not store wins report: %s", exc)
+            if sent and report_id:
+                try:
+                    db_fn("patch", f"wins_reports?id=eq.{report_id}", {
+                        "sent_to": recipient,
+                        "sent_at": now.isoformat(),
+                    })
+                except Exception:
+                    pass
 
         logger.info(
             "Weekly wins for %s: %d actions, ₹%d value%s",
