@@ -112,6 +112,8 @@ _scoped_user_id: contextvars.ContextVar[str] = contextvars.ContextVar(
     "scoped_user_id", default=""
 )
 
+# Register AI router
+app.include_router(ai_router, prefix="/api/ai")
 
 @app.middleware("http")
 async def _project_scope_middleware(request: Request, call_next):

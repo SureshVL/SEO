@@ -76,6 +76,8 @@ class AlgorithmicReverseEngineerAgent:
         self.usage = AIUsageAccumulator()
         self.serper = serper_client
         self.firecrawl = firecrawl_client
+        self.claude = claude_client
+        self.usage = AIUsageAccumulator()
 
     def run(self, request):
         keyword = request.primary_keyword
