@@ -10,6 +10,7 @@ from typing import Any, Callable
 from uuid import UUID
 
 from app.clients.cms_client import get_cms_client
+from app.core.secrets_crypto import decrypt
 
 logger = logging.getLogger("omnirank.calendar")
 
@@ -180,8 +181,8 @@ class ContentCalendarService:
             cms_client = get_cms_client(
                 article["cms_platform"],
                 creds.get("endpoint_url", ""),
-                creds.get("api_key", ""),
-                creds.get("api_secret", ""),
+                decrypt(creds.get("api_key", "")),
+                decrypt(creds.get("api_secret", "")),
             )
 
             # Prepare content for CMS
@@ -268,8 +269,8 @@ class ContentCalendarService:
                 cred = result[0] if isinstance(result, list) else result
                 return {
                     "endpoint_url": cred.get("endpoint_url", ""),
-                    "api_key": cred.get("api_key", ""),
-                    "api_secret": cred.get("api_secret", ""),
+                    "api_key": decrypt(cred.get("api_key", "")),
+                    "api_secret": decrypt(cred.get("api_secret", "")),
                 }
             return {}
         except Exception as exc:

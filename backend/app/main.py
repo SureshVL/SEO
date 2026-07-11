@@ -1034,14 +1034,19 @@ def save_cms_credentials(
 
     try:
         # Check if credentials already exist
-        existing = _supabase_rest("get", "cms_credentials", params=f"project_id=eq.{project_id}&cms_platform=eq.{body.cms_platform}")
+        from app.core.secrets_crypto import encrypt
+        from app.core.pgrest import q
+        plat = q(body.cms_platform)
+        existing = _supabase_rest("get", "cms_credentials", params=f"project_id=eq.{project_id}&cms_platform=eq.{plat}")
 
+        enc_key = encrypt(body.api_key)
+        enc_secret = encrypt(body.api_secret)
         if existing and isinstance(existing, list) and len(existing) > 0:
             # Update
-            result = _supabase_rest("patch", f"cms_credentials?project_id=eq.{project_id}&cms_platform=eq.{body.cms_platform}", {
+            result = _supabase_rest("patch", f"cms_credentials?project_id=eq.{project_id}&cms_platform=eq.{plat}", {
                 "endpoint_url": body.endpoint_url,
-                "api_key": body.api_key,
-                "api_secret": body.api_secret,
+                "api_key": enc_key,
+                "api_secret": enc_secret,
             })
         else:
             # Create
@@ -1049,8 +1054,8 @@ def save_cms_credentials(
                 "project_id": project_id,
                 "cms_platform": body.cms_platform,
                 "endpoint_url": body.endpoint_url,
-                "api_key": body.api_key,
-                "api_secret": body.api_secret,
+                "api_key": enc_key,
+                "api_secret": enc_secret,
             })
 
         return {
@@ -1079,7 +1084,8 @@ def get_cms_credentials(
     project_id = projects[0]["id"] if isinstance(projects, list) else projects.get("id")
 
     try:
-        result = _supabase_rest("get", "cms_credentials", params=f"project_id=eq.{project_id}&cms_platform=eq.{platform}")
+        from app.core.pgrest import q as _q
+        result = _supabase_rest("get", "cms_credentials", params=f"project_id=eq.{project_id}&cms_platform=eq.{_q(platform)}")
         if not result or (isinstance(result, list) and len(result) == 0):
             return {"platform": platform, "saved": False}
 
@@ -1095,7 +1101,7 @@ def get_cms_credentials(
         raise
     except Exception as exc:
         logger.error("Failed to get CMS credentials: %s", exc)
-        return {"platform": platform, "saved": False, "error": str(exc)}
+        return {"platform": platform, "saved": False, "error": "Internal error"}
 
 
 @app.delete("/cms/credentials/{platform}")
@@ -1112,7 +1118,8 @@ def delete_cms_credentials(
     project_id = projects[0]["id"] if isinstance(projects, list) else projects.get("id")
 
     try:
-        _supabase_rest("delete", f"cms_credentials?project_id=eq.{project_id}&cms_platform=eq.{platform}", None)
+        from app.core.pgrest import q as _q
+        _supabase_rest("delete", f"cms_credentials?project_id=eq.{project_id}&cms_platform=eq.{_q(platform)}", None)
         return {"status": "deleted", "platform": platform}
     except HTTPException:
         raise
@@ -2654,7 +2661,8 @@ def list_link_prospects(
 ):
     params = f"project_id=eq.{project_id}&order=created_at.desc&limit=200"
     if status:
-        params = f"project_id=eq.{project_id}&status=eq.{status}&order=created_at.desc&limit=200"
+        from app.core.pgrest import q as _q
+        params = f"project_id=eq.{project_id}&status=eq.{_q(status)}&order=created_at.desc&limit=200"
     return _supabase_rest("get", "link_prospects", params=params)
 
 
@@ -3217,7 +3225,8 @@ def list_content(
 ):
     params = f"project_id=eq.{project_id}&order=created_at.desc&limit=50"
     if status:
-        params += f"&queue_status=eq.{status}"
+        from app.core.pgrest import q as _q
+        params += f"&queue_status=eq.{_q(status)}"
     rows = _supabase_rest("get", "content_queue", params=params)
     return rows
 
@@ -3633,10 +3642,30 @@ def serve_edge_snippet():
     )
 
 
+_edge_config_rate: dict[str, tuple[int, float]] = {}  # ip -> (count, window_start)
+
+
+def _edge_config_rate_ok(ip: str, per_minute: int = 600) -> bool:
+    import time as _t
+    now = _t.time()
+    count, start = _edge_config_rate.get(ip, (0, now))
+    if now - start > 60:
+        count, start = 0, now
+    count += 1
+    if len(_edge_config_rate) > 50_000:
+        _edge_config_rate.clear()
+    _edge_config_rate[ip] = (count, start)
+    return count <= per_minute
+
+
 @app.get("/edge/v1/config")
-def edge_config(token: str, url: str = "/"):
+def edge_config(token: str, request: Request, url: str = "/"):
     """Directives for a page. Called by the snippet on every pageview - public."""
     from app.services.edge_service import EdgeService
+
+    ip = request.client.host if request.client else "unknown"
+    if not _edge_config_rate_ok(ip):
+        raise HTTPException(status_code=429, detail="Rate limited")
 
     import re as _re
     if not token or not _re.fullmatch(r"or_[A-Za-z0-9_-]{1,80}", token):
@@ -4392,6 +4421,32 @@ def cancel_subscription(
 
 from fastapi import Request
 
+def _webhook_already_processed(provider: str, event_id: str) -> bool:
+    """Record a provider event id; return True if it was already seen (replay).
+
+    Uses the DB unique constraint as the source of truth (survives restarts and
+    is shared across workers). Fails open on DB errors so a transient outage
+    doesn't drop a legitimate webhook."""
+    if not event_id:
+        return False
+    try:
+        rows = _supabase_rest("post", "webhook_events",
+                              {"provider": provider, "event_id": event_id})
+        # insert succeeded -> first time we've seen it
+        return not rows
+    except Exception:
+        # unique-violation (already processed) OR table missing/transient error.
+        # Distinguish by checking existence; if the row exists it's a replay.
+        try:
+            existing = _supabase_rest(
+                "get", "webhook_events",
+                params=f"provider=eq.{provider}&event_id=eq.{event_id}&select=id",
+            )
+            return bool(existing)
+        except Exception:
+            return False  # fail open
+
+
 @app.post("/webhooks/razorpay")
 async def razorpay_webhook(request: Request):
     """Handle Razorpay subscription webhooks."""
@@ -4405,6 +4460,12 @@ async def razorpay_webhook(request: Request):
     data = json.loads(body)
     event = data.get("event", "")
     payload = data.get("payload", {})
+
+    # replay protection: Razorpay sends a unique delivery id per event
+    event_id = request.headers.get("X-Razorpay-Event-Id", "") or data.get("id", "")
+    if _webhook_already_processed("razorpay", event_id):
+        logger.info("Razorpay webhook replay ignored: %s", event_id)
+        return {"received": True, "duplicate": True}
 
     logger.info("Razorpay webhook: %s", event)
 
@@ -4526,6 +4587,11 @@ async def stripe_webhook(request: Request):
     data = json.loads(body)
     event_type = data.get("type", "")
     obj = data.get("data", {}).get("object", {})
+
+    if _webhook_already_processed("stripe", data.get("id", "")):
+        logger.info("Stripe webhook replay ignored: %s", data.get("id"))
+        return {"received": True, "duplicate": True}
+
     logger.info("Stripe webhook: %s", event_type)
 
     def _org_id_of(o: dict) -> str:

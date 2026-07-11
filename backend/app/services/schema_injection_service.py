@@ -14,6 +14,7 @@ from uuid import UUID, uuid4
 
 from app.clients.cms_client import detect_cms, get_cms_client
 from app.agents.schema_agent import SchemaAgent
+from app.core.secrets_crypto import decrypt
 
 logger = logging.getLogger("omnirank.schema_injection")
 
@@ -99,8 +100,8 @@ class SchemaInjectionService:
                         api_secret = ""
                         if cms_platform in stored_creds:
                             cred = stored_creds[cms_platform]
-                            api_key = cred.get("api_key", "")
-                            api_secret = cred.get("api_secret", "")
+                            api_key = decrypt(cred.get("api_key", ""))
+                            api_secret = decrypt(cred.get("api_secret", ""))
 
                         cms_client = get_cms_client(cms_platform or "custom", url, api_key, api_secret)
                         injection_result = cms_client.inject_schema(schema_jsonld, url)

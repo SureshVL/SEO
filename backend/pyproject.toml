@@ -26,6 +26,11 @@ dev = [
 render = [
   "playwright>=1.45.0",
 ]
+# At-rest encryption for stored third-party secrets (GitHub PATs, CMS creds).
+# Without it, those secrets fall back to plaintext storage (a warning is logged).
+crypto = [
+  "cryptography>=41.0.0",
+]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

@@ -110,3 +110,38 @@ class TestSecurityHeaders:
         r = c.get("/edge/v1/omnirank.js")
         assert r.headers.get("X-Content-Type-Options") == "nosniff"
         assert r.headers.get("X-Frame-Options") == "DENY"
+
+
+class TestSecretsCrypto:
+    def test_passthrough_without_key(self, monkeypatch):
+        monkeypatch.delenv("SECRET_ENCRYPTION_KEY", raising=False)
+        import importlib
+        from app.core import secrets_crypto as sc
+        importlib.reload(sc)
+        assert sc.encrypt("ghp_secret") == "ghp_secret"
+        assert sc.decrypt("ghp_secret") == "ghp_secret"
+
+    def test_encrypted_value_without_key_raises(self, monkeypatch):
+        # a value tagged encrypted must never be silently returned as ciphertext
+        monkeypatch.setenv("SECRET_ENCRYPTION_KEY", "unusable")
+        import importlib
+        from app.core import secrets_crypto as sc
+        importlib.reload(sc)
+        with pytest.raises(RuntimeError):
+            sc.decrypt("enc:v1:garbage")
+
+    def test_legacy_plaintext_passthrough(self, monkeypatch):
+        monkeypatch.delenv("SECRET_ENCRYPTION_KEY", raising=False)
+        import importlib
+        from app.core import secrets_crypto as sc
+        importlib.reload(sc)
+        assert sc.decrypt("legacy_plaintext_token") == "legacy_plaintext_token"
+
+
+class TestWebhookReplay:
+    def test_edge_config_rate_limit(self):
+        import app.main as m
+        m._edge_config_rate.clear()
+        ok = [m._edge_config_rate_ok("1.2.3.4", per_minute=5) for _ in range(7)]
+        assert ok[:5] == [True] * 5
+        assert ok[5] is False and ok[6] is False

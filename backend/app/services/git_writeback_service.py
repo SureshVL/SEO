@@ -16,6 +16,8 @@ from typing import Any, Callable
 
 import httpx
 
+from app.core.secrets_crypto import encrypt, decrypt
+
 logger = logging.getLogger("omnirank.git")
 
 GITHUB_API = "https://api.github.com"
@@ -137,7 +139,7 @@ class GitWritebackService:
             "repo_owner": repo_owner,
             "repo_name": repo_name,
             "base_branch": base,
-            "access_token": access_token,
+            "access_token": encrypt(access_token),
             "enabled": True,
             "verified": True,
             "verified_at": datetime.now(timezone.utc).isoformat(),
@@ -191,7 +193,7 @@ class GitWritebackService:
             raise ValueError("Git connection is disabled")
 
         owner, repo, base = conn["repo_owner"], conn["repo_name"], conn["base_branch"]
-        gh = GitHubClient(conn["access_token"])
+        gh = GitHubClient(decrypt(conn["access_token"]))
 
         branch = f"omnirank/{fix_type}-{secrets.token_hex(4)}"
         base_sha = gh.get_branch_sha(owner, repo, base)
@@ -260,7 +262,7 @@ class GitWritebackService:
                 if not conn.get("access_token") or not pr.get("pr_number"):
                     continue
                 try:
-                    gh = GitHubClient(conn["access_token"])
+                    gh = GitHubClient(decrypt(conn["access_token"]))
                     remote = gh.get_pull_request(conn["repo_owner"], conn["repo_name"], pr["pr_number"])
                     new_status = "merged" if remote.get("merged_at") else remote.get("state", "open")
                     if new_status != pr.get("status"):
