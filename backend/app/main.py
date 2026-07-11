@@ -3675,6 +3675,128 @@ def list_fix_prs(
     return {"pull_requests": prs, "count": len(prs)}
 
 
+# ── Product-feed intelligence (SKU-scale listing optimization) ──────
+
+class ImportFeedRequest(BaseModel):
+    name: str = ""
+    source_url: str = ""
+    csv_text: str = ""
+
+
+@app.post("/feeds/import")
+async def import_product_feed(
+    body: ImportFeedRequest,
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """Import a product feed (URL to Google Merchant XML/CSV, or pasted CSV)."""
+    from app.services.feed_service import FeedService
+
+    projects = _get_scoped_projects()
+    if not projects:
+        raise HTTPException(status_code=400, detail="No projects found")
+    project_id = projects[0]["id"] if isinstance(projects, list) else projects["id"]
+
+    try:
+        result = await FeedService().import_feed(
+            project_id, body.name, body.source_url, body.csv_text, _supabase_rest,
+        )
+        return result
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        logger.error("Feed import failed: %s", exc)
+        raise HTTPException(status_code=502, detail="Could not import the feed")
+
+
+@app.get("/feeds")
+def list_product_feeds(
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    from app.services.feed_service import FeedService
+
+    projects = _get_scoped_projects()
+    if not projects:
+        raise HTTPException(status_code=400, detail="No projects found")
+    project_id = projects[0]["id"] if isinstance(projects, list) else projects["id"]
+
+    feeds = FeedService().get_feeds(project_id, _supabase_rest)
+    return {"feeds": feeds, "count": len(feeds)}
+
+
+@app.get("/feeds/{feed_id}/products")
+def list_feed_products(
+    feed_id: int,
+    only_issues: bool = False,
+    limit: int = 100,
+    offset: int = 0,
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    from app.services.feed_service import FeedService
+
+    products = FeedService().get_products(
+        feed_id, _supabase_rest,
+        only_issues=only_issues, limit=min(limit, 500), offset=offset,
+    )
+    return {"products": products, "count": len(products)}
+
+
+@app.post("/feeds/{feed_id}/optimize")
+async def optimize_feed_products(
+    feed_id: int,
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """AI-optimize titles/descriptions for products with issues (plan-limited)."""
+    from app.services.feed_service import FeedService, feed_sku_budget_for
+    from app.services.billing import crawl_budget_for  # noqa: F401 (same lookup pattern)
+
+    projects = _get_scoped_projects()
+    if not projects:
+        raise HTTPException(status_code=400, detail="No projects found")
+    project = projects[0] if isinstance(projects, list) else projects
+
+    # plan-gated SKU budget
+    plan, status = None, None
+    org_id = project.get("org_id")
+    if org_id:
+        try:
+            orgs = _supabase_rest("get", "organizations", params=f"id=eq.{org_id}&select=plan,plan_status")
+            orgs = orgs if isinstance(orgs, list) else [orgs] if orgs else []
+            if orgs:
+                plan, status = orgs[0].get("plan"), orgs[0].get("plan_status")
+        except Exception:
+            pass
+    budget = feed_sku_budget_for(plan, status)
+
+    try:
+        result = await FeedService().optimize_products(feed_id, budget, _supabase_rest)
+        result["plan"] = plan if status == "active" else "trial"
+        return result
+    except Exception as exc:
+        logger.error("Feed optimization failed: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/feeds/{feed_id}/export")
+def export_supplemental_feed(
+    feed_id: int,
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """Download the optimized supplemental feed CSV for Google Merchant Center."""
+    from app.services.feed_service import FeedService
+
+    csv_content = FeedService().export_supplemental_feed(feed_id, _supabase_rest)
+    return _Response(
+        content=csv_content,
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="omnirank-supplemental-feed-{feed_id}.csv"'},
+    )
+
+
 @app.get("/audits/runs")
 def get_audit_runs(
     audit_type: str = "",

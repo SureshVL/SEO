@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BarChart3, Bot, Braces, Calendar, ClipboardList, Coins, Eye, FileText, GitPullRequest, Grid3x3, Home, LayoutDashboard, Lightbulb, Link2, LogOut, Palette, Rocket, Search, Settings, Shield, Sparkles, Zap } from "lucide-react";
+import { BarChart3, Bot, Braces, Calendar, ClipboardList, Coins, Eye, FileText, GitPullRequest, Grid3x3, Home, LayoutDashboard, Lightbulb, Link2, LogOut, Palette, Rocket, Search, Settings, Shield, ShoppingCart, Sparkles, Zap } from "lucide-react";
 import { ThemeToggle } from "../ui/ThemeToggle";
 import { ProjectPicker } from "./ProjectPicker";
 
@@ -28,6 +28,7 @@ const navSections = [
     { href: "/dashboard/links", label: "Link Building", icon: Link2, color: "#2DD4BF" },
     { href: "/dashboard/edge", label: "Edge Deploy", icon: Rocket, color: "#14B8A6" },
     { href: "/dashboard/git", label: "Git Write-back", icon: GitPullRequest, color: "#6366F1" },
+    { href: "/dashboard/feeds", label: "Product Feeds", icon: ShoppingCart, color: "#F97316" },
     { href: "/dashboard/reports", label: "Reports", icon: ClipboardList, color: "#EC4899" },
   ]},
   { label: "Account", items: [
