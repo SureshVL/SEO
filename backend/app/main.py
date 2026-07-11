@@ -6,7 +6,7 @@ import asyncio
 import json
 import logging
 
-from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
@@ -3154,29 +3154,136 @@ async def run_audit(
     _auth: None = Depends(require_api_key),
     _rate: None = Depends(enforce_rate_limit),
 ):
-    """Run an audit."""
+    """Run an audit. When no audit_data is supplied, the project's domain is
+    crawled live so the audit runs on real data."""
     from app.services.audit_service import AuditService
+    from app.services.crawler_service import CrawlerService, crawl_to_audit_data
     from uuid import UUID
 
     projects = _supabase_rest("get", "projects", params="limit=1")
     if not projects:
         raise HTTPException(status_code=400, detail="No projects found")
 
-    project_id = projects[0]["id"] if isinstance(projects, list) else projects.get("id")
+    project = projects[0] if isinstance(projects, list) else projects
+    project_id = project["id"]
 
     try:
+        audit_data = body.audit_data
+        if not audit_data:
+            domain = project.get("domain") or str(project.get("client_url", ""))
+            if not domain:
+                raise HTTPException(status_code=400, detail="Project has no domain to crawl")
+            crawler = CrawlerService(max_pages=20)
+            crawl_result = await crawler.crawl_site(domain)
+            if not crawl_result.pages:
+                raise HTTPException(status_code=400, detail=f"Could not crawl {domain}")
+            audit_data = crawl_to_audit_data(crawl_result, body.audit_type)
+
         svc = AuditService()
         result = await svc.run_audit(
             UUID(project_id),
             body.audit_type,
-            body.audit_data,
+            audit_data,
             _supabase_rest,
         )
         return result
 
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error("Failed to run audit: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
+
+
+# ── Free Instant Audit (public lead-gen funnel) ─────────────────────
+
+_public_audits: dict[str, dict] = {}  # in-memory store: audit_id -> report/status
+_public_audit_rate: dict[str, list[float]] = {}  # ip -> request timestamps
+
+
+class PublicAuditRequest(BaseModel):
+    domain: str = Field(..., min_length=3, max_length=255)
+    email: str = Field(..., min_length=5, max_length=255)
+
+
+def _check_public_rate_limit(ip: str, max_per_hour: int = 5) -> None:
+    import time as _time
+    now = _time.time()
+    window = [t for t in _public_audit_rate.get(ip, []) if now - t < 3600]
+    if len(window) >= max_per_hour:
+        raise HTTPException(status_code=429, detail="Too many audits from this IP. Try again later.")
+    window.append(now)
+    _public_audit_rate[ip] = window
+
+
+async def _run_public_audit(audit_id: str, domain: str, email: str) -> None:
+    from app.services.crawler_service import CrawlerService, analyze_crawl
+
+    _public_audits[audit_id]["status"] = "crawling"
+    try:
+        crawler = CrawlerService(max_pages=20)
+        crawl_result = await crawler.crawl_site(domain)
+        if not crawl_result.pages:
+            raise ValueError(f"Could not reach {domain}")
+        report = analyze_crawl(crawl_result)
+        _public_audits[audit_id].update({"status": "completed", "report": report})
+
+        # Persist lead best-effort (table may not exist yet on fresh installs)
+        try:
+            _supabase_rest("post", "audit_leads", {
+                "id": audit_id,
+                "email": email,
+                "domain": report["domain"],
+                "status": "completed",
+                "score": report["score"],
+                "report": report,
+            })
+        except Exception as exc:
+            logger.warning("Could not persist audit lead: %s", exc)
+
+    except Exception as exc:
+        logger.error("Public audit failed for %s: %s", domain, exc)
+        _public_audits[audit_id].update({"status": "failed", "error": str(exc)[:300]})
+
+
+@app.post("/public/audit")
+async def start_public_audit(
+    body: PublicAuditRequest,
+    request: Request,
+    background_tasks: BackgroundTasks,
+):
+    """Start a free instant audit. Public - no API key required."""
+    import uuid as _uuid
+
+    ip = request.client.host if request.client else "unknown"
+    _check_public_rate_limit(ip)
+
+    if "@" not in body.email or "." not in body.email.split("@")[-1]:
+        raise HTTPException(status_code=400, detail="Please provide a valid email address")
+
+    audit_id = str(_uuid.uuid4())
+    _public_audits[audit_id] = {
+        "status": "queued",
+        "domain": body.domain,
+        "email": body.email,
+        "report": None,
+    }
+    background_tasks.add_task(_run_public_audit, audit_id, body.domain, body.email)
+    return {"audit_id": audit_id, "status": "queued"}
+
+
+@app.get("/public/audit/{audit_id}")
+def get_public_audit(audit_id: str):
+    """Poll a free audit's status/report. Public - no API key required."""
+    entry = _public_audits.get(audit_id)
+    if not entry:
+        raise HTTPException(status_code=404, detail="Audit not found")
+    return {
+        "status": entry["status"],
+        "domain": entry.get("domain"),
+        "report": entry.get("report"),
+        "error": entry.get("error"),
+    }
 
 
 @app.get("/audits/runs")

@@ -57,10 +57,10 @@ export default function LandingPage() {
               generate content, track rankings, and execute technical fixes — autonomously.
             </p>
             <div className="flex items-center gap-4">
-              <Link href="/auth/signup" className="btn-primary text-base px-8 py-3.5 flex items-center gap-2">
-                Start 14-day free trial <ArrowRight className="w-4 h-4" />
+              <Link href="/audit" className="btn-primary text-base px-8 py-3.5 flex items-center gap-2">
+                Free instant SEO audit <ArrowRight className="w-4 h-4" />
               </Link>
-              <Link href="#features" className="btn-secondary text-base px-6 py-3.5">How it works</Link>
+              <Link href="/auth/signup" className="btn-secondary text-base px-6 py-3.5">Start free trial</Link>
             </div>
             <p className="text-xs font-sans mt-5" style={{ color: "rgba(200, 180, 150, 0.25)" }}>No credit card required &middot; Cancel anytime</p>
           </div>
