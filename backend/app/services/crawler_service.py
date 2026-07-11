@@ -24,6 +24,20 @@ logger = logging.getLogger("omnirank.crawler")
 USER_AGENT = "OmniRankBot/1.0 (+https://omnirank.ai/bot)"
 MAX_CRAWL_DELAY = 2.0  # seconds; we honor robots crawl-delay up to this cap
 
+_SPA_MARKERS = (
+    'id="root"', "id='root'", 'id="app"', "id='app'", 'id="__next"',
+    "__NEXT_DATA__", "__NUXT__", "data-reactroot", "ng-version",
+    'id="___gatsby"', "data-v-app",
+)
+
+
+def _looks_client_rendered(html: str) -> bool:
+    """Does this thin HTML look like a JavaScript app shell (React/Vue/Next/...)?"""
+    sample = html[:200_000]
+    if any(marker in sample for marker in _SPA_MARKERS):
+        return True
+    return sample.count("<script") >= 3
+
 
 @dataclass
 class PageData:
@@ -40,6 +54,8 @@ class PageData:
     external_links: list[str] = field(default_factory=list)
     images_missing_alt: int = 0
     error: str = ""
+    needs_js_render: bool = False  # page looks client-side rendered (SPA)
+    js_rendered: bool = False      # we re-rendered it with a headless browser
 
 
 @dataclass
@@ -54,6 +70,8 @@ class CrawlResult:
     inventory_size: int = 0  # total URLs known from sitemaps (may exceed pages crawled)
     templates: list[dict[str, Any]] = field(default_factory=list)  # url-pattern groups
     skipped_by_robots: int = 0
+    js_rendered_count: int = 0      # SPA pages successfully re-rendered headlessly
+    js_render_unavailable: int = 0  # SPA pages we could not render (playwright missing)
 
 
 def url_template(path: str) -> str:
@@ -260,6 +278,9 @@ class CrawlerService:
                             continue
                         queue.append(link)
 
+            # Re-render SPA pages with headless Chromium (React/Vue/Next storefronts)
+            await self._render_js_pages(result, host)
+
             # Check links found on pages but not crawled (broken-link detection)
             crawled = {p.url for p in result.pages}
             statuses = {p.url: p.status_code for p in result.pages}
@@ -369,35 +390,85 @@ class CrawlerService:
                 page.load_time_ms = int((time.time() - start) * 1000)
                 content_type = r.headers.get("content-type", "")
                 if r.status_code == 200 and "text/html" in content_type:
-                    parser = _SEOPageParser()
-                    try:
-                        parser.feed(r.text[:500_000])
-                    except Exception:  # malformed HTML should never kill the crawl
-                        pass
-                    page.title = parser.title.strip()[:300]
-                    page.meta_description = parser.meta_description.strip()[:500]
-                    page.h1s = [h.strip() for h in parser.h1s if h.strip()][:5]
-                    page.canonical = parser.canonical[:500]
-                    page.has_schema = parser.has_schema
-                    page.images_missing_alt = parser.images_missing_alt
-                    page.word_count = len(" ".join(parser.text_parts).split())
-                    base = f"{urlparse(url).scheme}://{urlparse(url).netloc}"
-                    internal, external = [], []
-                    for href in parser.links:
-                        cleaned = self._clean_url(href, base, host)
-                        if cleaned:
-                            internal.append(cleaned)
-                        else:
-                            absolute = urljoin(url, href.strip())
-                            p = urlparse(absolute)
-                            if p.scheme in ("http", "https") and host not in p.netloc:
-                                external.append(absolute)
-                    page.internal_links = list(dict.fromkeys(internal))[:100]
-                    page.external_links = list(dict.fromkeys(external))[:30]
+                    self._parse_into(page, r.text, url, host)
+                    if page.word_count < 50 and _looks_client_rendered(r.text):
+                        page.needs_js_render = True
             except httpx.HTTPError as exc:
                 page.error = str(exc)[:200]
                 page.load_time_ms = int((time.time() - start) * 1000)
         return page
+
+    def _parse_into(self, page: PageData, html: str, url: str, host: str) -> None:
+        """Parse HTML into the PageData fields (used for raw and JS-rendered HTML)."""
+        parser = _SEOPageParser()
+        try:
+            parser.feed(html[:500_000])
+        except Exception:  # malformed HTML should never kill the crawl
+            pass
+        page.title = parser.title.strip()[:300]
+        page.meta_description = parser.meta_description.strip()[:500]
+        page.h1s = [h.strip() for h in parser.h1s if h.strip()][:5]
+        page.canonical = parser.canonical[:500]
+        page.has_schema = parser.has_schema
+        page.images_missing_alt = parser.images_missing_alt
+        page.word_count = len(" ".join(parser.text_parts).split())
+        base = f"{urlparse(url).scheme}://{urlparse(url).netloc}"
+        internal, external = [], []
+        for href in parser.links:
+            cleaned = self._clean_url(href, base, host)
+            if cleaned:
+                internal.append(cleaned)
+            else:
+                absolute = urljoin(url, href.strip())
+                p = urlparse(absolute)
+                if p.scheme in ("http", "https") and host not in p.netloc:
+                    external.append(absolute)
+        page.internal_links = list(dict.fromkeys(internal))[:100]
+        page.external_links = list(dict.fromkeys(external))[:30]
+
+    async def _render_js_pages(self, result: CrawlResult, host: str, max_render: int = 8) -> None:
+        """Re-render client-side (SPA) pages with headless Chromium so React/Vue/
+        Next storefronts audit correctly. Gracefully skipped when Playwright is
+        not installed - the pages are flagged instead."""
+        candidates = [p for p in result.pages if p.needs_js_render][:max_render]
+        if not candidates:
+            return
+
+        try:
+            from playwright.async_api import async_playwright
+        except ImportError:
+            result.js_render_unavailable = len(candidates)
+            logger.info("Playwright not installed - %d SPA pages flagged, not rendered", len(candidates))
+            return
+
+        try:
+            async with async_playwright() as pw:
+                import os
+                launch_kwargs: dict[str, Any] = {"headless": True}
+                try:
+                    browser = await pw.chromium.launch(**launch_kwargs)
+                except Exception:
+                    # fall back to a system-provided chromium build if pinned
+                    # browser binaries don't match the installed playwright
+                    exe = os.environ.get("PLAYWRIGHT_CHROMIUM_PATH", "/opt/pw-browsers/chromium")
+                    browser = await pw.chromium.launch(executable_path=exe, **launch_kwargs)
+
+                context = await browser.new_context(user_agent=USER_AGENT)
+                for page_data in candidates:
+                    try:
+                        tab = await context.new_page()
+                        await tab.goto(page_data.url, wait_until="networkidle", timeout=20_000)
+                        html = await tab.content()
+                        await tab.close()
+                        self._parse_into(page_data, html, page_data.url, host)
+                        page_data.js_rendered = True
+                        result.js_rendered_count += 1
+                    except Exception as exc:
+                        logger.warning("JS render failed for %s: %s", page_data.url, str(exc)[:150])
+                await browser.close()
+        except Exception as exc:
+            result.js_render_unavailable = len([p for p in candidates if not p.js_rendered])
+            logger.warning("Headless rendering unavailable: %s", str(exc)[:200])
 
     async def _check_link(self, client, sem, url: str) -> int:
         async with sem:
@@ -516,6 +587,10 @@ def analyze_crawl(result: CrawlResult) -> dict[str, Any]:
 
     titles_seen: dict[str, str] = {}
     for p in ok_pages:
+        if p.needs_js_render and not p.js_rendered:
+            # we couldn't see the real content; the client_side_rendered
+            # finding covers it - don't pile on false "missing X" issues
+            continue
         if not p.title:
             add("missing_title", "critical", p.url,
                 "Page has no <title> tag.",
@@ -577,6 +652,22 @@ def analyze_crawl(result: CrawlResult) -> dict[str, Any]:
             add("orphan_page", "warning", url,
                 "No internal links point to this page (within the crawl).",
                 "Link to this page from related content and navigation.")
+
+    # Client-side rendering findings (SPA storefronts)
+    for p in result.pages:
+        if not p.needs_js_render:
+            continue
+        if p.js_rendered:
+            add("client_side_rendered", "info", p.url,
+                "Page content is rendered by JavaScript (audited via headless browser).",
+                "Consider server-side rendering or prerendering: many crawlers and "
+                "AI answer engines do not execute JavaScript, so this content is "
+                "invisible to them.")
+        else:
+            add("client_side_rendered", "warning", p.url,
+                "Page appears to be a JavaScript app shell with little crawlable HTML.",
+                "Enable server-side rendering or prerendering. Content rendered only "
+                "by JavaScript is invisible to most crawlers and AI answer engines.")
 
     if not result.sitemap_found:
         add("missing_sitemap", "warning", result.base_url,
@@ -642,6 +733,8 @@ def analyze_crawl(result: CrawlResult) -> dict[str, Any]:
         "robots_found": result.robots_found,
         "inventory_size": result.inventory_size,
         "skipped_by_robots": result.skipped_by_robots,
+        "js_rendered_count": result.js_rendered_count,
+        "js_render_unavailable": result.js_render_unavailable,
         "templates": result.templates[:30],
         "template_findings": template_findings[:30],
         "issues": issues[:100],

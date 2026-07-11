@@ -21,6 +21,11 @@ dev = [
   "pytest>=8.4.0",
   "ruff>=0.8.0",
 ]
+# Headless rendering for JS-heavy sites (React/Vue/Next storefronts):
+#   pip install -e ".[render]" && playwright install chromium
+render = [
+  "playwright>=1.45.0",
+]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

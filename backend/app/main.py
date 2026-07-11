@@ -3239,6 +3239,8 @@ async def run_audit(
                 "pages_crawled": len(crawl_result.pages),
                 "inventory_size": crawl_result.inventory_size,
                 "skipped_by_robots": crawl_result.skipped_by_robots,
+                "js_rendered": crawl_result.js_rendered_count,
+                "js_render_unavailable": crawl_result.js_render_unavailable,
                 "templates": crawl_result.templates[:15],
                 "crawl_budget": budget,
                 "plan": plan_label,
