@@ -126,7 +126,9 @@ async def _project_scope_middleware(request: Request, call_next):
     if auth_header.startswith("Bearer "):
         try:
             from app.api.auth import _verify_token
-            claims = _verify_token(auth_header[7:].strip())
+            # Token verification may hit the network (Supabase); never run it
+            # synchronously on the event loop or it blocks every other request.
+            claims = await asyncio.to_thread(_verify_token, auth_header[7:].strip())
             uid = claims.get("sub", "")
             if uid:
                 _scoped_user_id.set(uid)
