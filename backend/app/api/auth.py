@@ -18,6 +18,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import asyncio
 import json
 import logging
 import time
@@ -120,7 +121,9 @@ async def get_current_user(request: Request) -> dict[str, Any]:
 
     token = auth_header[7:].strip()
     try:
-        claims = _verify_token(token)
+        # Runs a network call (Supabase /auth/v1/user) when no local JWT secret
+        # is configured; offload to a thread so it never blocks the event loop.
+        claims = await asyncio.to_thread(_verify_token, token)
     except ValueError as exc:
         raise HTTPException(status_code=401, detail=str(exc))
 

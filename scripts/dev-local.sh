@@ -14,8 +14,13 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-gen() { python3 -c "import secrets;print(secrets.token_hex(32))"; }
-gen_fernet() { python3 -c "from cryptography.fernet import Fernet;print(Fernet.generate_key().decode())" 2>/dev/null || echo ""; }
+# Resolve a Python command (Windows Git Bash usually has `python`, not `python3`).
+if command -v python3 >/dev/null 2>&1; then PY=python3
+elif command -v python >/dev/null 2>&1; then PY=python
+else echo "Python not found. Install Python 3.11+ and re-run." >&2; exit 1; fi
+
+gen() { "$PY" -c "import secrets;print(secrets.token_hex(32))"; }
+gen_fernet() { "$PY" -c "from cryptography.fernet import Fernet;print(Fernet.generate_key().decode())" 2>/dev/null || echo ""; }
 
 # ---------- backend/.env ----------
 if [ ! -f backend/.env ]; then
@@ -25,7 +30,7 @@ if [ ! -f backend/.env ]; then
   ORCH_KEY="$(gen)"
   ENC_KEY="$(gen_fernet)"
   # Portable in-place edits (works on both GNU and BSD sed).
-  python3 - "$ORCH_KEY" "$ENC_KEY" <<'PY'
+  "$PY" - "$ORCH_KEY" "$ENC_KEY" <<'PY'
 import sys, re, pathlib
 orch, enc = sys.argv[1], sys.argv[2]
 p = pathlib.Path("backend/.env"); t = p.read_text()
@@ -56,10 +61,10 @@ fi
 
 # ---------- dependencies ----------
 echo "→ Installing backend deps…"
-python3 -m pip install -q -e "backend/.[render]" 2>/dev/null \
-  || python3 -m pip install -q -e "backend/." 2>/dev/null \
-  || python3 -m pip install -q fastapi "uvicorn[standard]" pydantic pydantic-settings httpx requests python-dotenv
-python3 -m pip install -q cryptography 2>/dev/null || true
+"$PY" -m pip install -q -e "backend/.[render]" 2>/dev/null \
+  || "$PY" -m pip install -q -e "backend/." 2>/dev/null \
+  || "$PY" -m pip install -q fastapi "uvicorn[standard]" pydantic pydantic-settings httpx requests python-dotenv
+"$PY" -m pip install -q cryptography 2>/dev/null || true
 
 echo "→ Installing frontend deps…"
 ( cd frontend && npm install --silent )
@@ -77,7 +82,7 @@ cleanup() { echo; echo "Stopping…"; for p in "${pids[@]}"; do kill "$p" 2>/dev
 trap cleanup INT TERM EXIT
 
 ( cd backend && set -a && . ./.env && set +a && \
-  exec python3 -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000 ) &
+  exec "$PY" -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000 ) &
 pids+=($!)
 
 ( cd frontend && exec npm run dev ) &
