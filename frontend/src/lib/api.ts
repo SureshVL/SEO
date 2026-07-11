@@ -621,12 +621,13 @@ export interface AttributionReport {
 
 export async function attributionReport(
   payload: {
-    ga4_access_token: string;
+    ga4_access_token?: string;
     ga4_property_id: string;
-    gsc_access_token: string;
+    gsc_access_token?: string;
     gsc_site_url: string;
     date_range_days?: number;
     top_n?: number;
+    project_id?: string;
   },
   apiKey: string,
 ) {

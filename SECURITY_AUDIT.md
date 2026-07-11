@@ -76,10 +76,13 @@ enables RLS everywhere and rebuilds every feature-table policy on the real
 `org_id` model; `git_connections` stays deny-by-default (tokens never
 client-readable).
 
-### H6. OAuth/API tokens in localStorage — **MITIGATED / TODO**
-GA4/GSC OAuth tokens and the API key were persisted in `localStorage` (XSS-stealable).
-The API key is no longer defaulted or required client-side. **TODO:** move GA4/GSC
-tokens server-side (encrypted) and have the backend make the Google calls.
+### H6. OAuth/API tokens in localStorage — **FIXED**
+GA4/GSC OAuth tokens and the API key were persisted in `localStorage`
+(XSS-stealable). Now: the API key is no longer defaulted or persisted client-side;
+GA4/GSC tokens are stored **encrypted server-side** (`oauth_tokens`, migration
+0020) on OAuth exchange, are no longer returned to the browser, and are no longer
+persisted in `localStorage`. The backend fetches them by `project_id` and refreshes
+expired access tokens via the stored refresh token.
 
 ---
 
@@ -87,19 +90,18 @@ tokens server-side (encrypted) and have the backend make the Google calls.
 
 ### M1. Public edge-config token injection + amplification — **FIXED**
 `GET /edge/v1/config` interpolated the token into a PostgREST filter with only a
-length check. Now the token must match `^or_[A-Za-z0-9_-]{1,80}$` before use.
-Regression test: `TestEdgeTokenValidation`. (Rate limiting on this endpoint: TODO.)
+length check. Now the token must match `^or_[A-Za-z0-9_-]{1,80}$` and the endpoint
+has a per-IP rate limit (600/min). Regression test: `TestEdgeTokenValidation`.
 
-### M2. PostgREST filter injection via unencoded params — **FIXED (hot paths)**
-User input (URLs, keywords, timestamps, tokens, affected_url) is now percent-encoded
-via `app/core/pgrest.q()` before entering query strings across wins, scheduler,
-linking, keyword-mapping, multilingual, and edge services. **TODO:** sweep
-remaining callers (CMS platform filter, link-prospect status) for the same pattern.
+### M2. PostgREST filter injection via unencoded params — **FIXED**
+User input (URLs, keywords, timestamps, tokens, affected_url, CMS platform,
+link-prospect status, content queue status) is percent-encoded via
+`app/core/pgrest.q()` before entering query strings across all services.
 
-### M3. Razorpay webhook replay — **TODO**
-Stripe enforces a timestamp tolerance; Razorpay does not de-duplicate event ids.
-Recommend storing processed `x-razorpay-event-id` and rejecting replays. (Both
-webhooks already verify HMAC signatures and no longer 500-loop.)
+### M3. Razorpay webhook replay — **FIXED**
+The `webhook_events` table (migration 0019) records processed provider event ids
+with a unique constraint; both Razorpay and Stripe handlers now reject duplicate
+deliveries (fail-open on DB error so legitimate webhooks aren't dropped).
 
 ### M4. Verbose 500 error details — **FIXED**
 59 handlers returned `detail=str(exc)` (leaking DB/PostgREST internals). All now
@@ -120,11 +122,13 @@ untrusted text as data and validating LLM output before export.
 
 ---
 
-## Secrets at rest — **TODO**
-GitHub PATs (`git_connections.access_token`) and CMS credentials are stored
-plaintext (RLS-protected, never returned to clients, but readable via the
-service-role path or a DB backup). Recommend envelope encryption (pgcrypto/KMS)
-and minimal token scopes with rotation on disconnect.
+## Secrets at rest — **FIXED**
+GitHub PATs (`git_connections.access_token`) and CMS `api_key`/`api_secret` are
+now encrypted with Fernet envelope encryption (`app/core/secrets_crypto.py`)
+using `SECRET_ENCRYPTION_KEY`, transparently on write and decrypt on use.
+Backward compatible with existing plaintext rows; degrades to plaintext (with a
+logged warning) only if no key is configured. Token scoping/rotation on
+disconnect remains recommended operational hygiene.
 
 ---
 
@@ -144,8 +148,15 @@ and add rate limiting to `/edge/v1/config`.
 - No open redirect (the `redirect` query param is never consumed).
 - Service-role key is server-side only; the frontend uses the anon key.
 
-## Recommended pre-public-launch order
-1. Complete H6 (server-side OAuth tokens), Secrets-at-rest, M3 (webhook replay).
-2. Finish the M2 param-encoding sweep and per-endpoint org checks for H1's tail.
-3. Redis-backed rate limiting + `/edge/v1/config` throttle.
-4. Penetration test against a staging deploy with real Supabase RLS enabled.
+## Remaining before public self-serve launch
+Almost everything from the audit is now fixed. What's left is operational, not
+code:
+1. **Redis-backed rate limiting** for multi-worker/behind-proxy production (the
+   current limiters are per-process; edge-config has a per-IP throttle but is
+   also per-process). Derive the client IP from a trusted forwarded-for hop.
+2. **Set the production secrets**: a strong `ORCHESTRATOR_API_KEY`,
+   `SECRET_ENCRYPTION_KEY` (or credentials are stored plaintext), and
+   `SUPABASE_JWT_SECRET`; run migrations 0018–0020.
+3. **Penetration test** against a staging deploy with real Supabase RLS enabled.
+4. Operational hygiene: minimal GitHub PAT scopes with rotation on disconnect;
+   log scrubbing; per-tenant credential-read auditing.
