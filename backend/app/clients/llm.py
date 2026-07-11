@@ -89,10 +89,22 @@ class LLMClient:
                 order.append(p)
         return order
 
+    @staticmethod
+    def _model_for_provider(provider: str, model: Optional[str]) -> Optional[str]:
+        """Only forward a model override to the provider family it belongs to."""
+        if not model:
+            return None
+        families = {"claude": "claude", "gemini": "gemini", "openai": "gpt", "perplexity": "sonar"}
+        prefix = families.get(provider)
+        if prefix and model.startswith(prefix):
+            return model
+        return None  # fall back to that provider's default model
+
     def _call_provider(self, provider, messages, model=None, temperature=0.7, max_tokens=4000, **kw):
+        model = self._model_for_provider(provider, model)
         if provider == "claude":
             from .claude_client import ClaudeClient
-            return ClaudeClient().complete(messages, model or settings.default_claude_model, temperature=temperature, max_tokens=max_tokens, **kw)
+            return ClaudeClient().complete(messages, model=model or settings.default_claude_model, temperature=temperature, max_tokens=max_tokens, **kw)
         elif provider == "gemini":
             from .gemini_client import GeminiClient
             return GeminiClient().complete(messages, model or settings.default_gemini_model, temperature=temperature, max_tokens=max_tokens, **kw)
@@ -153,6 +165,22 @@ class LLMClient:
                     last_error = exc
                     break
         raise Exception(f"All providers failed: {last_error}")
+
+    async def agenerate_text(self, prompt: str, model: Optional[str] = None,
+                             max_tokens: int = 4000, temperature: float = 0.7, **kwargs) -> str:
+        """Async text generation used by the agent classes. Returns the raw text."""
+        import asyncio
+
+        def _run() -> str:
+            result = self.complete(
+                [{"role": "user", "content": prompt}],
+                model=model, max_tokens=max_tokens, temperature=temperature, **kwargs,
+            )
+            if isinstance(result, dict):
+                return result.get("content", "")
+            return getattr(result, "content", str(result))
+
+        return await asyncio.to_thread(_run)
 
     def complete_json(self, messages: List[Dict], system: str = None, **kwargs) -> tuple:
         if system:

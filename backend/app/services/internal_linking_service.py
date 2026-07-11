@@ -128,16 +128,17 @@ class InternalLinkingService:
                 max_opportunities=10,
             )
 
+            # Build url -> database id map so we store real page IDs
+            raw_rows = db_fn("get", "site_pages", params=f"project_id=eq.{project_id}&select=id,url")
+            raw_rows = raw_rows if isinstance(raw_rows, list) else [raw_rows] if raw_rows else []
+            page_id_by_url = {row["url"]: row["id"] for row in raw_rows}
+
             # Store opportunities
             stored = []
             for opp in opportunities:
-                # Find target page ID
-                target_page = next((p for p in all_pages if p.url == opp.target_url), None)
-                if not target_page:
-                    continue
-
-                source_page_obj = next((p for p in all_pages if p.url == opp.source_url), None)
-                if not source_page_obj:
+                source_page_id = page_id_by_url.get(opp.source_url)
+                target_page_id = page_id_by_url.get(opp.target_url)
+                if not source_page_id or not target_page_id:
                     continue
 
                 result = db_fn(
@@ -145,8 +146,8 @@ class InternalLinkingService:
                     "internal_link_opportunities",
                     {
                         "project_id": str(project_id),
-                        "source_page_id": source_page_obj,  # Would need to get actual ID
-                        "target_page_id": target_page,
+                        "source_page_id": source_page_id,
+                        "target_page_id": target_page_id,
                         "anchor_text": opp.anchor_text,
                         "relevance_score": opp.relevance_score,
                         "keyword_match": opp.keyword_match,

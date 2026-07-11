@@ -114,9 +114,13 @@ class MultilingualService:
             )
 
             # Store localized content
-            localized_url = source_url.replace("/en/", f"/{target_language}/")
-            if target_region:
-                localized_url = localized_url.replace(f"/{target_language}/", f"/{target_language}-{target_region}/")
+            lang_segment = f"{target_language}-{target_region}" if target_region else target_language
+            if "/en/" in source_url:
+                localized_url = source_url.replace("/en/", f"/{lang_segment}/")
+            elif source_url.startswith("/"):
+                localized_url = f"/{lang_segment}{source_url}"
+            else:
+                localized_url = f"/{lang_segment}/{source_url.lstrip('/')}"
 
             result = db_fn(
                 "post",
@@ -178,9 +182,18 @@ class MultilingualService:
                 available_langs,
             )
 
+            # Map language code -> id so we store a valid foreign key
+            lang_id_by_code = {
+                lang.get("language_code"): lang.get("id") for lang in languages
+            }
+
             # Store hreflang config
             stored = []
             for link in hreflang_links:
+                target_lang_id = lang_id_by_code.get(link.target_language)
+                if not target_lang_id:
+                    logger.warning("Skipping hreflang for unknown language: %s", link.target_language)
+                    continue
                 try:
                     result = db_fn(
                         "post",
@@ -189,10 +202,10 @@ class MultilingualService:
                             "project_id": str(project_id),
                             "source_url": link.source_url,
                             "target_url": link.target_url,
-                            "target_language_id": 0,  # Would need to look up
+                            "target_language_id": target_lang_id,
                             "relationship_type": link.relationship_type,
                             "is_configured": False,
-                            "config_method": link.relationship_type,
+                            "config_method": "tag",
                         },
                     )
 

@@ -61,6 +61,7 @@ class MultilingualAgent:
         """Translate and localize content for a target language/region."""
         try:
             region_info = f" (for {target_region})" if target_region else ""
+            region_hint = f"\n- {target_region}-specific context and keywords" if target_region else ""
 
             prompt = f"""Translate and localize this SEO content to {target_language}{region_info}.
 
@@ -80,7 +81,7 @@ Provide:
 Consider:
 - Cultural adaptation (idioms, references, units)
 - Search behavior differences in {target_language} markets
-- Regional terminology and preferences{f"\\n- {target_region}-specific context and keywords" if target_region else ""}
+- Regional terminology and preferences{region_hint}
 
 Format as JSON:
 {{

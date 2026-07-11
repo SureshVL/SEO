@@ -91,8 +91,15 @@ class AuditService:
                 },
             )
 
-            # Get audit run ID if needed
-            run_id = run_result.get("id") if isinstance(run_result, dict) else 0
+            # Supabase returns the created row(s) as a list
+            if isinstance(run_result, list) and run_result:
+                run_id = run_result[0].get("id")
+            elif isinstance(run_result, dict):
+                run_id = run_result.get("id")
+            else:
+                run_id = None
+            if not run_id:
+                raise ValueError("Failed to create audit run record")
 
             # Execute appropriate audit based on type
             if audit_type == "crawl_errors":
