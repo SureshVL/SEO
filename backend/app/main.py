@@ -3319,6 +3319,195 @@ def get_public_audit(audit_id: str):
     }
 
 
+# ── Edge snippet injection (works on ANY website) ───────────────────
+
+from fastapi.responses import Response as _Response
+
+
+@app.get("/edge/v1/omnirank.js")
+def serve_edge_snippet():
+    """The loader script clients embed. Public, heavily cacheable."""
+    from app.services.edge_service import EDGE_SNIPPET_JS
+
+    return _Response(
+        content=EDGE_SNIPPET_JS,
+        media_type="application/javascript",
+        headers={"Cache-Control": "public, max-age=3600"},
+    )
+
+
+@app.get("/edge/v1/config")
+def edge_config(token: str, url: str = "/"):
+    """Directives for a page. Called by the snippet on every pageview - public."""
+    from app.services.edge_service import EdgeService
+
+    if not token or len(token) > 80:
+        raise HTTPException(status_code=400, detail="Invalid token")
+    try:
+        result = EdgeService().resolve_directives(token, url, _supabase_rest)
+    except Exception as exc:
+        logger.warning("edge config lookup failed: %s", exc)
+        result = None
+    if result is None:
+        # Unknown/disabled site: return an empty directive set so the
+        # snippet never errors on the client's page.
+        return {"directives": []}
+    return result
+
+
+class CreateEdgeSiteRequest(BaseModel):
+    domain: str = Field(..., min_length=3, max_length=255)
+
+
+class CreateEdgeRuleRequest(BaseModel):
+    site_id: str
+    url_pattern: str = "*"
+    match_type: str = "exact"  # exact, prefix, contains, all
+    rule_type: str  # schema, title, meta_description, canonical, hreflang, meta
+    payload: dict[str, Any]
+    notes: str = ""
+
+
+class UpdateEdgeRuleRequest(BaseModel):
+    enabled: bool | None = None
+    url_pattern: str | None = None
+    match_type: str | None = None
+    payload: dict[str, Any] | None = None
+    priority: int | None = None
+    notes: str | None = None
+
+
+@app.post("/edge/sites")
+def create_edge_site(
+    body: CreateEdgeSiteRequest,
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    from app.services.edge_service import EdgeService
+
+    projects = _get_scoped_projects()
+    if not projects:
+        raise HTTPException(status_code=400, detail="No projects found")
+    project_id = projects[0]["id"] if isinstance(projects, list) else projects["id"]
+
+    try:
+        site = EdgeService().create_site(project_id, body.domain, _supabase_rest)
+        return site
+    except Exception as exc:
+        logger.error("Failed to create edge site: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/edge/sites")
+def list_edge_sites(
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    from app.services.edge_service import EdgeService
+
+    projects = _get_scoped_projects()
+    if not projects:
+        raise HTTPException(status_code=400, detail="No projects found")
+    project_id = projects[0]["id"] if isinstance(projects, list) else projects["id"]
+
+    sites = EdgeService().get_sites(project_id, _supabase_rest)
+    return {"sites": sites, "count": len(sites)}
+
+
+@app.post("/edge/sites/{site_id}/verify")
+async def verify_edge_site(
+    site_id: str,
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    from app.services.edge_service import EdgeService
+
+    sites = _supabase_rest("get", "edge_sites", params=f"id=eq.{site_id}")
+    sites = sites if isinstance(sites, list) else [sites] if sites else []
+    if not sites:
+        raise HTTPException(status_code=404, detail="Site not found")
+
+    result = await EdgeService().verify_site(sites[0], _supabase_rest)
+    return result
+
+
+@app.post("/edge/rules")
+def create_edge_rule(
+    body: CreateEdgeRuleRequest,
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    from app.services.edge_service import EdgeService
+
+    projects = _get_scoped_projects()
+    if not projects:
+        raise HTTPException(status_code=400, detail="No projects found")
+    project_id = projects[0]["id"] if isinstance(projects, list) else projects["id"]
+
+    try:
+        rule = EdgeService().create_rule(
+            project_id,
+            body.site_id,
+            body.url_pattern,
+            body.match_type,
+            body.rule_type,
+            body.payload,
+            notes=body.notes,
+            db_fn=_supabase_rest,
+        )
+        return rule
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        logger.error("Failed to create edge rule: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/edge/rules")
+def list_edge_rules(
+    site_id: str = "",
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    from app.services.edge_service import EdgeService
+
+    projects = _get_scoped_projects()
+    if not projects:
+        raise HTTPException(status_code=400, detail="No projects found")
+    project_id = projects[0]["id"] if isinstance(projects, list) else projects["id"]
+
+    rules = EdgeService().get_rules(project_id, site_id=site_id or None, db_fn=_supabase_rest)
+    return {"rules": rules, "count": len(rules)}
+
+
+@app.patch("/edge/rules/{rule_id}")
+def update_edge_rule(
+    rule_id: int,
+    body: UpdateEdgeRuleRequest,
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    from app.services.edge_service import EdgeService
+
+    changes = {k: v for k, v in body.model_dump().items() if v is not None}
+    ok = EdgeService().update_rule(rule_id, changes, _supabase_rest)
+    if not ok:
+        raise HTTPException(status_code=400, detail="Nothing to update")
+    return {"updated": True, "rule_id": rule_id}
+
+
+@app.delete("/edge/rules/{rule_id}")
+def delete_edge_rule(
+    rule_id: int,
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    from app.services.edge_service import EdgeService
+
+    EdgeService().delete_rule(rule_id, _supabase_rest)
+    return {"deleted": True, "rule_id": rule_id}
+
+
 @app.get("/audits/runs")
 def get_audit_runs(
     audit_type: str = "",

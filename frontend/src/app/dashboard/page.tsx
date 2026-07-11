@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import {
   ArrowRight, ArrowUpRight, BarChart3, Bot, Calendar, FileText, Globe, Grid3x3,
-  Link2, MapPin, Palette, Search, Shield, Sparkles, Tag, Zap,
+  Link2, MapPin, Palette, Rocket, Search, Shield, Sparkles, Tag, Zap,
 } from "lucide-react";
 import { cn, scoreColor } from "@/lib/utils";
 import { useAppStore } from "@/lib/store";
@@ -95,6 +95,7 @@ export default function DashboardPage() {
     { label: "Multilingual",     href: "/dashboard/multilingual",     icon: Globe,     bg: "#0EA5E9", text: "#fff" },
     { label: "Programmatic",     href: "/dashboard/programmatic",     icon: Grid3x3,   bg: SUN,     text: "#0b1020" },
     { label: "Link Building",    href: "/dashboard/links",            icon: Link2,     bg: "#14B8A6", text: "#fff" },
+    { label: "Edge Deploy",      href: "/dashboard/edge",             icon: Rocket,    bg: "#0D9488", text: "#fff" },
     { label: "White-label",      href: "/dashboard/branding",         icon: Palette,   bg: "#F43F5E", text: "#fff" },
     { label: "Workflow",         href: "/dashboard/workflow",         icon: Calendar,  bg: "#0EA5E9", text: "#fff" },
   ];
