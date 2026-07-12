@@ -567,6 +567,136 @@ def keyword_research(
     }
 
 
+# ── Budget Keywords (PPC keyword mix for a spend target) ───────────
+from pydantic import BaseModel, Field  # noqa: E402 (also imported below)
+
+
+class OptimisedKeywordsRequest(BaseModel):
+    budget_inr: float = Field(..., gt=0, le=10_000_000)
+    seed_keyword: str = Field(..., min_length=1, max_length=200)
+    url: str = ""
+    mode: str = "balanced"  # aggressive | balanced | conservative
+    region: str = "IN"
+    locale: str = "en-US"
+
+
+# How each mode weights volume (reach) vs relevance vs cheap clicks.
+_BUDGET_MODE_WEIGHTS = {
+    "aggressive":   {"volume": 0.55, "relevance": 0.25, "cheap": 0.20},
+    "balanced":     {"volume": 0.35, "relevance": 0.35, "cheap": 0.30},
+    "conservative": {"volume": 0.20, "relevance": 0.35, "cheap": 0.45},
+}
+
+
+def _build_optimised_keywords(body: OptimisedKeywordsRequest) -> dict:
+    """Turn a monthly budget + seed into the best keyword mix that spend can buy.
+    Serper provides live SERP context; the LLM expands + estimates CPC/volume;
+    Python does the deterministic budget allocation."""
+    mode = body.mode.lower() if body.mode.lower() in _BUDGET_MODE_WEIGHTS else "balanced"
+    weights = _BUDGET_MODE_WEIGHTS[mode]
+
+    # Live SERP context (grounds the suggestions in the real market).
+    serp_titles: list[str] = []
+    if settings.serper_api_key:
+        try:
+            serper = SerperHTTPClient(api_key=settings.serper_api_key)
+            rows = serper.search_top_results(body.seed_keyword, body.locale, body.region, limit=8)
+            serp_titles = [r.get("title", "") for r in rows if r.get("title")][:8]
+        except Exception as exc:
+            logger.warning("Serper context unavailable for budget keywords: %s", exc)
+
+    llm = _get_llm_client()
+    system = (
+        "You are a paid-search strategist. Given a seed keyword and market, generate "
+        "25-35 realistic PPC keyword candidates a business could bid on. For each, "
+        "estimate CPC in INR (rupees, be realistic for the region — Indian CPCs are "
+        "typically 5-120), monthly search volume, competition and intent. "
+        'Respond ONLY as JSON: {"candidates":[{"keyword":"...","cpc_inr":<number>,'
+        '"monthly_searches":<int>,"competition":"low|medium|high",'
+        '"intent":"transactional|commercial|informational","relevance":<0-100>}]}'
+    )
+    user = (
+        f"Seed keyword: {body.seed_keyword}\nMarket: {body.region} ({body.locale})\n"
+        f"{'Site: ' + body.url if body.url else ''}\n"
+        f"{'Live SERP titles: ' + ' | '.join(serp_titles) if serp_titles else ''}\n"
+        f"Monthly budget: INR {int(body.budget_inr)}. Bias toward keywords that fit this budget."
+    )
+    parsed, _ = llm.complete_json(
+        messages=[{"role": "user", "content": user}],
+        system=system, max_tokens=4096, temperature=0.3,
+    )
+    cands = parsed.get("candidates", []) if isinstance(parsed, dict) else []
+
+    # Normalise + score each candidate under the chosen mode.
+    clean = []
+    for c in cands:
+        if not isinstance(c, dict) or not c.get("keyword"):
+            continue
+        cpc = max(0.5, float(c.get("cpc_inr", 20) or 20))
+        vol = max(0, int(c.get("monthly_searches", 0) or 0))
+        rel = max(0, min(100, float(c.get("relevance", 50) or 50)))
+        clean.append({
+            "keyword": str(c.get("keyword"))[:120],
+            "cpc_inr": round(cpc, 2),
+            "monthly_searches": vol,
+            "competition": c.get("competition", "medium"),
+            "intent": c.get("intent", "commercial"),
+            "relevance": round(rel),
+            "_cpc": cpc, "_vol": vol, "_rel": rel,
+        })
+    if not clean:
+        raise HTTPException(status_code=502, detail="Could not generate keyword candidates. Try again.")
+
+    max_vol = max((c["_vol"] for c in clean), default=1) or 1
+    max_cheap = max((1.0 / c["_cpc"] for c in clean), default=1) or 1
+    for c in clean:
+        vol_n = c["_vol"] / max_vol
+        rel_n = c["_rel"] / 100.0
+        cheap_n = (1.0 / c["_cpc"]) / max_cheap
+        c["priority"] = round(
+            (weights["volume"] * vol_n + weights["relevance"] * rel_n + weights["cheap"] * cheap_n) * 100, 1
+        )
+    clean.sort(key=lambda c: c["priority"], reverse=True)
+
+    # Allocate the budget across the top keywords, weighted by priority.
+    selected = clean[:12]
+    total_pri = sum(c["priority"] for c in selected) or 1
+    total_clicks = 0
+    mix = []
+    for c in selected:
+        alloc = round(body.budget_inr * c["priority"] / total_pri, 2)
+        clicks = int(alloc / c["_cpc"])
+        total_clicks += clicks
+        mix.append({
+            "keyword": c["keyword"], "cpc_inr": c["cpc_inr"],
+            "monthly_searches": c["monthly_searches"], "competition": c["competition"],
+            "intent": c["intent"], "relevance": c["relevance"], "priority": c["priority"],
+            "allocated_budget_inr": alloc, "estimated_clicks": clicks,
+        })
+
+    for c in clean:
+        for k in ("_cpc", "_vol", "_rel"):
+            c.pop(k, None)
+
+    return {
+        "seed_keyword": body.seed_keyword, "mode": mode, "budget_inr": body.budget_inr,
+        "region": body.region, "total_estimated_clicks": total_clicks,
+        "keywords_selected": len(mix), "recommended_mix": mix,
+        "all_candidates": clean,
+        "notes": "CPC and volume are AI estimates for planning; validate against Google Ads before spending.",
+    }
+
+
+@app.post("/keywords/optimised")
+def optimised_keywords(
+    body: OptimisedKeywordsRequest,
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """Generate the best keyword mix a monthly budget can buy (PPC planning)."""
+    return _build_optimised_keywords(body)
+
+
 # ── Technical Audit (NEW) ──────────────────────────────────────────
 
 def _build_technical_agent() -> TechnicalAgent:

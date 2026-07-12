@@ -114,6 +114,43 @@ export async function createResearchJob(payload: {
   );
 }
 
+export interface BudgetKeyword {
+  keyword: string;
+  cpc_inr: number;
+  monthly_searches: number;
+  competition: string;
+  intent: string;
+  relevance: number;
+  priority: number;
+  allocated_budget_inr: number;
+  estimated_clicks: number;
+}
+export interface BudgetKeywordsResult {
+  seed_keyword: string;
+  mode: string;
+  budget_inr: number;
+  region: string;
+  total_estimated_clicks: number;
+  keywords_selected: number;
+  recommended_mix: BudgetKeyword[];
+  all_candidates: Array<Omit<BudgetKeyword, "allocated_budget_inr" | "estimated_clicks">>;
+  notes: string;
+}
+export async function optimisedKeywords(payload: {
+  budget_inr: number;
+  seed_keyword: string;
+  url?: string;
+  mode?: string;
+  region?: string;
+  locale?: string;
+}, apiKey: string) {
+  return request<BudgetKeywordsResult>(
+    "/keywords/optimised",
+    { method: "POST", body: JSON.stringify(payload) },
+    apiKey
+  );
+}
+
 export async function getJob(jobId: string, apiKey: string) {
   return request<{
     job_id: string;

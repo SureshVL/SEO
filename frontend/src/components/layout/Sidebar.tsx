@@ -14,6 +14,7 @@ const navSections = [
   { label: "Intelligence", items: [
     { href: "/dashboard/research", label: "AI Research", icon: Bot, color: "#8B5CF6" },
     { href: "/dashboard/keywords", label: "Keywords", icon: Search, color: "#22D3EE" },
+    { href: "/dashboard/budget-keywords", label: "Budget Keywords", icon: Coins, color: "#FACC15" },
     { href: "/dashboard/rank-tracker", label: "Rank Tracker", icon: BarChart3, color: "#EC4899" },
     { href: "/dashboard/ai-visibility", label: "AI Visibility", icon: Sparkles, color: "#A3E635" },
     { href: "/dashboard/attribution", label: "Attribution", icon: Coins, color: "#F97316" },
