@@ -1011,6 +1011,114 @@ def project_ai_visibility(
     return _serialize_ai_visibility(report)
 
 
+@app.get("/projects/{project_id}/ai-visibility/history")
+def get_aeo_history(
+    project_id: str,
+    days: int = 30,
+    _auth: None = Depends(require_api_key),
+):
+    """Get AEO (AI Visibility) tracking history for a project."""
+    project_rows = _supabase_rest("get", "projects", params=f"id=eq.{project_id}")
+    if not project_rows:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # Get keyword visibility history (last N days)
+    from datetime import datetime, timedelta
+    cutoff = (datetime.utcnow() - timedelta(days=days)).isoformat()
+    history_rows = _supabase_rest(
+        "get", "keyword_ai_visibility",
+        params=f"project_id=eq.{project_id}&created_at=gte.{cutoff}&order=created_at.asc",
+    ) or []
+
+    # Aggregate by date
+    daily_data = {}
+    for row in history_rows:
+        date = row.get("created_at", "").split("T")[0]
+        if date not in daily_data:
+            daily_data[date] = {"overall_score": 0, "count": 0, "ai_overview_coverage": 0, "llm_citations": 0}
+        daily_data[date]["overall_score"] += row.get("visibility_score", 0)
+        daily_data[date]["ai_overview_coverage"] += (1 if row.get("ai_overview_cited") else 0)
+        daily_data[date]["llm_citations"] += (1 if row.get("llm_citation_count", 0) > 0 else 0)
+        daily_data[date]["count"] += 1
+
+    # Calculate averages
+    trends = [
+        {
+            "date": date,
+            "overall_score": round(data["overall_score"] / data["count"], 1),
+            "ai_overview_coverage": round((data["ai_overview_coverage"] / data["count"]) * 100, 1),
+            "llm_citation_rate": round((data["llm_citations"] / data["count"]) * 100, 1),
+        }
+        for date, data in sorted(daily_data.items())
+    ]
+
+    return {
+        "project_id": project_id,
+        "days": days,
+        "trends": trends,
+        "latest": trends[-1] if trends else None,
+    }
+
+
+@app.get("/projects/{project_id}/ai-visibility/summary")
+def get_aeo_summary(
+    project_id: str,
+    _auth: None = Depends(require_api_key),
+):
+    """Get current AEO visibility summary (latest snapshot)."""
+    project_rows = _supabase_rest("get", "projects", params=f"id=eq.{project_id}")
+    if not project_rows:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # Get latest snapshot
+    latest = _supabase_rest(
+        "get", "keyword_ai_visibility",
+        params=f"project_id=eq.{project_id}&order=created_at.desc&limit=100",
+    ) or []
+
+    if not latest:
+        return {
+            "project_id": project_id,
+            "ai_visibility_score": None,
+            "ai_overview_coverage": None,
+            "llm_citation_rate": None,
+            "total_keywords": 0,
+            "engines": {},
+        }
+
+    # Calculate aggregate metrics
+    total = len(latest)
+    visibility_scores = [row.get("visibility_score", 0) for row in latest if row.get("visibility_score")]
+    ai_overview_cited = sum(1 for row in latest if row.get("ai_overview_cited"))
+    llm_cited = sum(1 for row in latest if row.get("llm_citation_count", 0) > 0)
+
+    # Per-engine breakdown
+    engines = {}
+    for row in latest:
+        for engine in ["chat_gpt", "perplexity", "gemini"]:
+            if engine not in engines:
+                engines[engine] = {"cited": 0, "mentioned": 0}
+            if row.get(f"{engine}_citation_position"):
+                engines[engine]["cited"] += 1
+            elif row.get(f"{engine}_mentioned"):
+                engines[engine]["mentioned"] += 1
+
+    return {
+        "project_id": project_id,
+        "ai_visibility_score": round(sum(visibility_scores) / len(visibility_scores), 1) if visibility_scores else 0,
+        "ai_overview_coverage": round((ai_overview_cited / total) * 100, 1) if total else 0,
+        "llm_citation_rate": round((llm_cited / total) * 100, 1) if total else 0,
+        "total_keywords": total,
+        "engines": {
+            engine: {
+                "citation_rate": round((data["cited"] / total) * 100, 1) if total else 0,
+                "mention_rate": round((data["mentioned"] / total) * 100, 1) if total else 0,
+            }
+            for engine, data in engines.items()
+        },
+    }
+
+
 # ── Schema markup detection & generation ──────────────────────────
 
 class SchemaDetectRequest(BaseModel):
