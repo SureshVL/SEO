@@ -136,6 +136,11 @@ class GeminiClient:
         }
 
         model_id = GEMINI_MODELS.get(model, model)
+        # 2.5 models "think" by default, which consumes the output-token budget
+        # and can truncate/empty the JSON we ask for. Disable it for deterministic
+        # structured output.
+        if "2.5" in model_id:
+            payload["generationConfig"]["thinkingConfig"] = {"thinkingBudget": 0}
         url = f"{self.base_url}/models/{model_id}:generateContent?key={self.api_key}"
 
         start = time.time()
