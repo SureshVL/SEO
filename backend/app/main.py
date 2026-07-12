@@ -5177,6 +5177,150 @@ def get_job_report(job_id: str):
     )
     return HTMLResponse(content=html)
 
+# ── Email & Subscription Management ──────────────────────────
+
+@app.post("/email/subscribe")
+def subscribe_to_research_report(email: str, vertical: str = "general"):
+    """Subscribe to monthly research report and nurture sequence."""
+    # Validate email
+    if not email or "@" not in email:
+        raise HTTPException(status_code=400, detail="Invalid email address")
+
+    try:
+        from app.services.email_service import SubscriptionManager, get_email_service
+
+        # Subscribe in database
+        manager = SubscriptionManager(_supabase_client)
+        if not manager.subscribe(email, vertical, "research_report"):
+            raise HTTPException(status_code=400, detail="Failed to subscribe")
+
+        # Send welcome email with first report
+        email_service = get_email_service()
+        unsubscribe_link = f"https://omni-rank.com/email/unsubscribe?email={email}"
+        email_service.send_research_report(email, unsubscribe_link)
+
+        return {
+            "status": "success",
+            "message": f"Successfully subscribed {email} to research reports",
+            "email": email,
+        }
+    except Exception as e:
+        logger.error(f"Subscription error: {e}")
+        raise HTTPException(status_code=500, detail="Subscription failed")
+
+
+@app.get("/email/unsubscribe")
+def unsubscribe_from_emails(email: str):
+    """Unsubscribe from all emails."""
+    if not email:
+        raise HTTPException(status_code=400, detail="Email required")
+
+    try:
+        from app.services.email_service import SubscriptionManager
+
+        manager = SubscriptionManager(_supabase_client)
+        manager.unsubscribe(email)
+
+        return {
+            "status": "success",
+            "message": f"{email} has been unsubscribed",
+        }
+    except Exception as e:
+        logger.error(f"Unsubscribe error: {e}")
+        raise HTTPException(status_code=500, detail="Unsubscribe failed")
+
+
+@app.post("/cron/send-research-reports")
+def send_monthly_research_reports():
+    """Cron job endpoint: Send monthly research reports to all subscribers.
+    Run this monthly via external scheduler (GitHub Actions, AWS EventBridge, etc)."""
+    try:
+        from app.services.email_service import SubscriptionManager, get_email_service
+
+        manager = SubscriptionManager(_supabase_client)
+        email_service = get_email_service()
+
+        # Get all active subscribers
+        subscribers = manager.get_active_subscribers(limit=1000)
+
+        sent_count = 0
+        failed_count = 0
+
+        for subscriber in subscribers:
+            email = subscriber.get("email")
+            try:
+                unsubscribe_link = f"https://omni-rank.com/email/unsubscribe?email={email}"
+                if email_service.send_research_report(email, unsubscribe_link):
+                    sent_count += 1
+                    manager.update_subscription_state(email, 0, datetime.utcnow().isoformat())
+                else:
+                    failed_count += 1
+            except Exception as e:
+                logger.error(f"Failed to send report to {email}: {e}")
+                failed_count += 1
+
+        return {
+            "status": "success",
+            "sent": sent_count,
+            "failed": failed_count,
+            "total": len(subscribers),
+        }
+    except Exception as e:
+        logger.error(f"Report distribution error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to send reports")
+
+
+@app.post("/cron/send-nurture-sequence")
+def send_nurture_emails():
+    """Cron job endpoint: Send nurture emails to subscribers.
+    Run this weekly via external scheduler."""
+    try:
+        from app.services.email_service import SubscriptionManager, get_email_service
+        from datetime import datetime, timedelta
+
+        manager = SubscriptionManager(_supabase_client)
+        email_service = get_email_service()
+
+        # Get subscribers ready for next nurture email
+        subscribers = manager.get_active_subscribers(limit=500)
+
+        sent_count = 0
+        for subscriber in subscribers:
+            email = subscriber.get("email")
+            vertical = subscriber.get("vertical", "general")
+            sequence = subscriber.get("nurture_sequence", 0)
+            last_sent = subscriber.get("last_email_sent")
+
+            # Only send 1 nurture email per week
+            if last_sent:
+                last_sent_date = datetime.fromisoformat(last_sent)
+                if (datetime.utcnow() - last_sent_date).days < 7:
+                    continue
+
+            # Send next email in sequence (max 3 emails)
+            if sequence < 3:
+                next_sequence = sequence + 1
+                try:
+                    unsubscribe_link = f"https://omni-rank.com/email/unsubscribe?email={email}"
+                    if email_service.send_nurture_sequence(
+                        email, next_sequence, vertical, unsubscribe_link
+                    ):
+                        manager.update_subscription_state(
+                            email, next_sequence, datetime.utcnow().isoformat()
+                        )
+                        sent_count += 1
+                except Exception as e:
+                    logger.error(f"Failed to send nurture email to {email}: {e}")
+
+        return {
+            "status": "success",
+            "sent": sent_count,
+        }
+    except Exception as e:
+        logger.error(f"Nurture sequence error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to send nurture emails")
+
+
 @app.get("/api/llm/status")
 def llm_status():
     return llm_client.get_status()
