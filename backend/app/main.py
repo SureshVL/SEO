@@ -5344,6 +5344,69 @@ def send_nurture_emails():
         raise HTTPException(status_code=500, detail="Failed to send nurture emails")
 
 
+# ── AI Search Research Reports ──────────────────────────────────
+
+@app.get("/api/research/reports/{vertical}/{month}")
+def get_research_report(vertical: str, month: str):
+    """Get a research report for a vertical and month."""
+    from app.services.research_reports_service import ResearchReportsService
+
+    service = ResearchReportsService(llm_client)
+    report = service.get_report(vertical, month, _supabase_rest)
+
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found")
+
+    return {
+        "id": report.id,
+        "vertical": report.vertical,
+        "month": report.month,
+        "status": report.status,
+        "key_findings": report.key_findings,
+        "ai_engines": report.ai_engines,
+        "citations_analyzed": report.citations_analyzed,
+        "top_movers": report.top_movers,
+        "recommendations": report.recommendations,
+    }
+
+
+@app.get("/api/research/benchmarks/{vertical}")
+def get_benchmark_data(vertical: str):
+    """Get AI search benchmarks for a vertical."""
+    from app.services.research_reports_service import ResearchReportsService
+
+    service = ResearchReportsService(llm_client)
+    data = service.get_benchmark_data(vertical, _supabase_rest)
+    return data
+
+
+@app.get("/api/research/latest")
+def get_latest_reports():
+    """Get latest research reports by vertical."""
+    from app.services.research_reports_service import ResearchReportsService
+
+    service = ResearchReportsService(llm_client)
+    reports = service.get_latest_reports_by_vertical(limit=3, db_fn=_supabase_rest)
+
+    return {
+        "verticals": list(reports.keys()),
+        "reports": {
+            vertical: [
+                {
+                    "id": r.id,
+                    "vertical": r.vertical,
+                    "month": r.month,
+                    "status": r.status,
+                    "created_at": r.created_at,
+                    "key_findings": r.key_findings,
+                }
+                for r in reports_list
+            ]
+            for vertical, reports_list in reports.items()
+        },
+    }
+
+
 @app.get("/api/llm/status")
 def llm_status():
     return llm_client.get_status()
