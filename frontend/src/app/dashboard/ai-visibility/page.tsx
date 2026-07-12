@@ -19,7 +19,7 @@ const ENGINE_LABELS: Record<LLMEngine, string> = {
   gemini: "Gemini",
 };
 
-// Mock historical data (in production, fetch from backend)
+// Fallback mock data when no real data exists
 const MOCK_HISTORY = [
   { date: "2026-01-08", score: 42, coverage: 35, citations: 28 },
   { date: "2026-01-09", score: 44, coverage: 36, citations: 30 },
@@ -30,8 +30,17 @@ const MOCK_HISTORY = [
   { date: "2026-01-14", score: 54, coverage: 46, citations: 42 },
 ];
 
+interface DashboardData {
+  ai_visibility_score: number;
+  ai_overview_coverage: number;
+  llm_citation_rate: number;
+  total_keywords: number;
+  engines: Record<string, { citation_rate: number; mention_rate: number }>;
+  trends: Array<{ date: string; overall_score: number; ai_overview_coverage: number; llm_citation_rate: number }>;
+}
+
 export default function AIVisibilityPage() {
-  const { apiKey, businessProfile } = useAppStore();
+  const { apiKey, businessProfile, activeProject } = useAppStore();
   const [domain, setDomain] = useState("");
   const [keywordsText, setKeywordsText] = useState("");
   const [engines, setEngines] = useState<Record<LLMEngine, boolean>>({
@@ -41,8 +50,10 @@ export default function AIVisibilityPage() {
   });
   const [includeAiMode, setIncludeAiMode] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [dashboardLoading, setDashboardLoading] = useState(true);
   const [report, setReport] = useState<AIVisibilityReport | null>(null);
   const [activeTab, setActiveTab] = useState<"dashboard" | "checker">("dashboard");
+  const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
 
   useEffect(() => {
     if (businessProfile?.websiteUrl && !domain) {
@@ -56,6 +67,51 @@ export default function AIVisibilityPage() {
       setKeywordsText(businessProfile.keywords.slice(0, 5).join("\n"));
     }
   }, [businessProfile]);
+
+  useEffect(() => {
+    async function loadDashboardData() {
+      if (!activeProject?.id || !apiKey) {
+        setDashboardLoading(false);
+        return;
+      }
+
+      try {
+        setDashboardLoading(true);
+        const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+        const headers = { "x-api-key": apiKey };
+
+        // Fetch history and summary in parallel
+        const [historyRes, summaryRes] = await Promise.all([
+          fetch(`${apiBase}/projects/${activeProject.id}/ai-visibility/history?days=30`, { headers }),
+          fetch(`${apiBase}/projects/${activeProject.id}/ai-visibility/summary`, { headers }),
+        ]);
+
+        if (!historyRes.ok || !summaryRes.ok) {
+          console.error("Failed to fetch dashboard data:", historyRes.status, summaryRes.status);
+          setDashboardLoading(false);
+          return;
+        }
+
+        const history = await historyRes.json();
+        const summary = await summaryRes.json();
+
+        setDashboardData({
+          ai_visibility_score: summary.ai_visibility_score || 0,
+          ai_overview_coverage: summary.ai_overview_coverage || 0,
+          llm_citation_rate: summary.llm_citation_rate || 0,
+          total_keywords: summary.total_keywords || 0,
+          engines: summary.engines || {},
+          trends: history.trends || [],
+        });
+      } catch (err) {
+        console.error("Failed to load dashboard data:", err);
+      } finally {
+        setDashboardLoading(false);
+      }
+    }
+
+    loadDashboardData();
+  }, [activeProject?.id, apiKey]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -136,101 +192,124 @@ export default function AIVisibilityPage() {
       {/* Dashboard Tab */}
       {activeTab === "dashboard" && (
         <div className="space-y-6">
-          {/* KPI Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <KpiCard
-              label="AI Visibility Score"
-              value={54}
-              change={+12}
-              color="#A3E635"
-            />
-            <KpiCard
-              label="AI Overview Coverage"
-              value={46}
-              change={+11}
-              suffix="%"
-              color="#22D3EE"
-            />
-            <KpiCard
-              label="LLM Citation Rate"
-              value={42}
-              change={+14}
-              suffix="%"
-              color="#EC4899"
-            />
-            <KpiCard
-              label="Keywords Tracked"
-              value={147}
-              change={+3}
-              color="#F97316"
-            />
-          </div>
-
-          {/* Trend Chart */}
-          <div className="card p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold text-zinc-200">7-Day Trend</h3>
-              <span className="text-xs text-zinc-500">Last 7 days</span>
+          {dashboardLoading ? (
+            <div className="card p-12 text-center">
+              <Loader2 className="w-8 h-8 animate-spin mx-auto text-zinc-500" />
+              <p className="text-zinc-500 mt-4">Loading dashboard...</p>
             </div>
-            <AeoTrendChart data={MOCK_HISTORY} />
-          </div>
+          ) : dashboardData ? (
+            <>
+              {/* KPI Cards */}
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <KpiCard
+                  label="AI Visibility Score"
+                  value={dashboardData.ai_visibility_score}
+                  change={+12}
+                  color="#A3E635"
+                />
+                <KpiCard
+                  label="AI Overview Coverage"
+                  value={dashboardData.ai_overview_coverage}
+                  change={+11}
+                  suffix="%"
+                  color="#22D3EE"
+                />
+                <KpiCard
+                  label="LLM Citation Rate"
+                  value={dashboardData.llm_citation_rate}
+                  change={+14}
+                  suffix="%"
+                  color="#EC4899"
+                />
+                <KpiCard
+                  label="Keywords Tracked"
+                  value={dashboardData.total_keywords}
+                  change={+3}
+                  color="#F97316"
+                />
+              </div>
 
-          {/* Per-Engine Breakdown */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {(Object.entries(ENGINE_LABELS) as [LLMEngine, string][]).map(([engine, label]) => (
-              <div key={engine} className="card p-4 border border-zinc-800">
-                <div className="flex items-center gap-2 mb-3">
-                  <Bot className="w-4 h-4" style={{ color: "#A3E635" }} />
-                  <h4 className="font-semibold text-sm">{label}</h4>
+              {/* Trend Chart */}
+              <div className="card p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-semibold text-zinc-200">7-Day Trend</h3>
+                  <span className="text-xs text-zinc-500">Last 7 days</span>
                 </div>
-                <div className="space-y-2 text-sm">
-                  <div className="flex justify-between">
-                    <span className="text-zinc-500">Citation Rate</span>
-                    <span className="text-emerald-400 font-mono">38%</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-zinc-500">Mention Rate</span>
-                    <span className="text-blue-400 font-mono">12%</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-zinc-500">Last Checked</span>
-                    <span className="text-zinc-400 text-xs">2h ago</span>
+                <AeoTrendChart data={dashboardData.trends.length > 0 ? dashboardData.trends.map(t => ({
+                  date: t.date,
+                  score: t.overall_score,
+                  coverage: t.ai_overview_coverage,
+                  citations: t.llm_citation_rate,
+                })) : MOCK_HISTORY} />
+              </div>
+            </>
+          ) : (
+            <div className="card p-12 text-center">
+              <p className="text-zinc-500">No data yet. Run a check to get started.</p>
+            </div>
+          )}
+
+              {/* Per-Engine Breakdown */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                {(Object.entries(ENGINE_LABELS) as [LLMEngine, string][]).map(([engine, label]) => {
+                  const engineData = dashboardData.engines[engine] || { citation_rate: 0, mention_rate: 0 };
+                  return (
+                    <div key={engine} className="card p-4 border border-zinc-800">
+                      <div className="flex items-center gap-2 mb-3">
+                        <Bot className="w-4 h-4" style={{ color: "#A3E635" }} />
+                        <h4 className="font-semibold text-sm">{label}</h4>
+                      </div>
+                      <div className="space-y-2 text-sm">
+                        <div className="flex justify-between">
+                          <span className="text-zinc-500">Citation Rate</span>
+                          <span className="text-emerald-400 font-mono">{engineData.citation_rate}%</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-zinc-500">Mention Rate</span>
+                          <span className="text-blue-400 font-mono">{engineData.mention_rate}%</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-zinc-500">Last Checked</span>
+                          <span className="text-zinc-400 text-xs">2h ago</span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Alerts */}
+              <div className="card p-4 border border-amber-900/50 bg-amber-900/10">
+                <div className="flex items-start gap-3">
+                  <AlertCircle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+                  <div>
+                    <h4 className="font-semibold text-amber-200 text-sm">Opportunity</h4>
+                    <p className="text-xs text-amber-100 mt-1">
+                      "Best CRM software" keyword has 0% AI citation but 18 monthly searches. Optimize this page for E-E-A-T signals and entity coverage.
+                    </p>
                   </div>
                 </div>
               </div>
-            ))}
-          </div>
 
-          {/* Alerts */}
-          <div className="card p-4 border border-amber-900/50 bg-amber-900/10">
-            <div className="flex items-start gap-3">
-              <AlertCircle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
-              <div>
-                <h4 className="font-semibold text-amber-200 text-sm">Opportunity</h4>
-                <p className="text-xs text-amber-100 mt-1">
-                  "Best CRM software" keyword has 0% AI citation but 18 monthly searches. Optimize this page for E-E-A-T signals and entity coverage.
-                </p>
-              </div>
-            </div>
-          </div>
-
-          {/* Recommendations */}
-          <div className="card p-6">
-            <h3 className="text-lg font-semibold text-zinc-200 mb-4">Recommendations to Boost AEO</h3>
-            <div className="space-y-3">
-              {[
-                { title: "Add Entity Markup", desc: "Implement schema.org markup for better entity coverage in AI responses" },
-                { title: "Improve E-E-A-T Signals", desc: "Add author bios, credentials, publication dates to build topical authority" },
-                { title: "Optimize for Question Intent", desc: "Create FAQ blocks and Q&A content to match LLM training data patterns" },
-                { title: "Update Structured Data", desc: "Refresh FAQPage, Article, and Organization schemas monthly" },
-              ].map((rec, i) => (
-                <div key={i} className="p-3 rounded-lg bg-zinc-900/50 border border-zinc-800">
-                  <div className="font-medium text-sm text-zinc-200">{rec.title}</div>
-                  <div className="text-xs text-zinc-500 mt-1">{rec.desc}</div>
+              {/* Recommendations */}
+              <div className="card p-6">
+                <h3 className="text-lg font-semibold text-zinc-200 mb-4">Recommendations to Boost AEO</h3>
+                <div className="space-y-3">
+                  {[
+                    { title: "Add Entity Markup", desc: "Implement schema.org markup for better entity coverage in AI responses" },
+                    { title: "Improve E-E-A-T Signals", desc: "Add author bios, credentials, publication dates to build topical authority" },
+                    { title: "Optimize for Question Intent", desc: "Create FAQ blocks and Q&A content to match LLM training data patterns" },
+                    { title: "Update Structured Data", desc: "Refresh FAQPage, Article, and Organization schemas monthly" },
+                  ].map((rec, i) => (
+                    <div key={i} className="p-3 rounded-lg bg-zinc-900/50 border border-zinc-800">
+                      <div className="font-medium text-sm text-zinc-200">{rec.title}</div>
+                      <div className="text-xs text-zinc-500 mt-1">{rec.desc}</div>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
-          </div>
+              </div>
+            </>
+          )}
         </div>
       )}
 
