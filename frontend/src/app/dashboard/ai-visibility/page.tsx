@@ -40,7 +40,7 @@ interface DashboardData {
 }
 
 export default function AIVisibilityPage() {
-  const { apiKey, businessProfile, activeProject } = useAppStore();
+  const { apiKey, businessProfile } = useAppStore();
   const [domain, setDomain] = useState("");
   const [keywordsText, setKeywordsText] = useState("");
   const [engines, setEngines] = useState<Record<LLMEngine, boolean>>({
@@ -70,7 +70,7 @@ export default function AIVisibilityPage() {
 
   useEffect(() => {
     async function loadDashboardData() {
-      if (!activeProject?.id || !apiKey) {
+      if (!businessProfile?.projectId || !apiKey) {
         setDashboardLoading(false);
         return;
       }
@@ -82,8 +82,8 @@ export default function AIVisibilityPage() {
 
         // Fetch history and summary in parallel
         const [historyRes, summaryRes] = await Promise.all([
-          fetch(`${apiBase}/projects/${activeProject.id}/ai-visibility/history?days=30`, { headers }),
-          fetch(`${apiBase}/projects/${activeProject.id}/ai-visibility/summary`, { headers }),
+          fetch(`${apiBase}/projects/${businessProfile.projectId}/ai-visibility/history?days=30`, { headers }),
+          fetch(`${apiBase}/projects/${businessProfile.projectId}/ai-visibility/summary`, { headers }),
         ]);
 
         if (!historyRes.ok || !summaryRes.ok) {
@@ -111,7 +111,7 @@ export default function AIVisibilityPage() {
     }
 
     loadDashboardData();
-  }, [activeProject?.id, apiKey]);
+  }, [businessProfile?.projectId, apiKey]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -242,12 +242,6 @@ export default function AIVisibilityPage() {
                   citations: t.llm_citation_rate,
                 })) : MOCK_HISTORY} />
               </div>
-            </>
-          ) : (
-            <div className="card p-12 text-center">
-              <p className="text-zinc-500">No data yet. Run a check to get started.</p>
-            </div>
-          )}
 
               {/* Per-Engine Breakdown */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -309,6 +303,10 @@ export default function AIVisibilityPage() {
                 </div>
               </div>
             </>
+          ) : (
+            <div className="card p-12 text-center">
+              <p className="text-zinc-500">No data yet. Run a check to get started.</p>
+            </div>
           )}
         </div>
       )}
