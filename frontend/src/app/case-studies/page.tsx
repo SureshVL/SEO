@@ -8,6 +8,7 @@ const caseStudies = [
     title: "SaaS Feature Clustering: 340% Keyword Growth",
     company: "Acme CRM",
     vertical: "saas",
+    slug: "saas-feature-clustering-340-keyword-growth",
     metrics: { before: 47, after: 207, improvement: "340%", timeframe: "6 months" },
     description: "Feature-focused keyword clustering increased rankings from 47 to 207 for core feature keywords.",
   },
@@ -15,6 +16,7 @@ const caseStudies = [
     title: "Ecommerce Product SEO: 28% Revenue Increase",
     company: "ShopFlow",
     vertical: "ecommerce",
+    slug: "shopflow-revenue-increase",
     metrics: { before: "12%", after: "28%", improvement: "+16%", timeframe: "4 months" },
     description: "Product page optimization with schema markup increased organic revenue contribution.",
   },
@@ -22,6 +24,7 @@ const caseStudies = [
     title: "Healthcare E-E-A-T: 89% More Qualified Traffic",
     company: "HealthCare Plus",
     vertical: "healthcare",
+    slug: "healthcare-eeat",
     metrics: { before: 1200, after: 2268, improvement: "89%", timeframe: "5 months" },
     description: "E-E-A-T signal optimization reclaimed lost traffic from Google's core update.",
   },
@@ -29,6 +32,7 @@ const caseStudies = [
     title: "Fintech Comparison Keywords: 4.2x Leads",
     company: "PayFlow",
     vertical: "fintech",
+    slug: "payflow-comparison-keywords",
     metrics: { before: 8, after: 34, improvement: "4.2x", timeframe: "3 months" },
     description: "Dominating 'vs.' comparison keywords captured buyer decision-making intent.",
   },
@@ -36,6 +40,7 @@ const caseStudies = [
     title: "B2B Persona Segmentation: 287% Pipeline Growth",
     company: "CloudTech Inc",
     vertical: "b2b",
+    slug: "cloudtech-persona-segmentation",
     metrics: { before: "18%", after: "52%", improvement: "+34%", timeframe: "7 months" },
     description: "Buyer persona segmentation aligned keyword strategy to sales cycle stages.",
   },
@@ -43,6 +48,7 @@ const caseStudies = [
     title: "Legal Practice Area Ranking: 156% Client Growth",
     company: "Law Firm Associates",
     vertical: "legal",
+    slug: "law-firm-associates",
     metrics: { before: 23, after: 59, improvement: "156%", timeframe: "4 months" },
     description: "Location + practice area tracking increased qualified lead volume across all areas.",
   },
@@ -74,7 +80,7 @@ export default function CaseStudiesPage() {
           {caseStudies.map((study, i) => (
             <Link
               key={i}
-              href={`/case-studies/${study.vertical}/${study.title.toLowerCase().replace(/[^a-z0-9]/g, '-')}`}
+              href={`/case-studies/${study.vertical}/${study.slug}`}
               className="group"
             >
               <div className="card p-6 h-full border border-slate-200 hover:border-violet-300 hover:shadow-lg transition">

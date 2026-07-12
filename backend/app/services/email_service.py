@@ -5,7 +5,7 @@ Handles sending transactional and marketing emails.
 
 import os
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 from app.email_templates import (
     research_report_email,
@@ -41,8 +41,10 @@ class EmailService:
 
     def send_research_report(self, to_email: str, unsubscribe_link: str) -> bool:
         """Send monthly research report."""
+        next_month = (datetime.now().replace(day=1) + timedelta(days=32)).replace(day=1)
+        month_year = next_month.strftime("%B %Y")
         subject, html = research_report_email(
-            "February 2026",  # Next month
+            month_year,
             {},  # report_data
             to_email,
             unsubscribe_link,
@@ -191,7 +193,6 @@ class SubscriptionManager:
                 {
                     "nurture_sequence": sequence,
                     "last_email_sent": last_sent,
-                    "email_count": self.db.rpc("increment_email_count", {"email": email}),
                 }
             ).eq("email", email).execute()
             return True

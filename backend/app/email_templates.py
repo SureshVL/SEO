@@ -4,7 +4,9 @@ Email templates for OMNI-RANK automated campaigns.
 
 def research_report_email(month_year: str, report_data: dict, subscriber_email: str, unsubscribe_link: str) -> tuple[str, str]:
     """Generate research report email subject and HTML body."""
-    subject = f"January 2026 AI Search Report: How AI is Reshaping Search - OMNI-RANK"
+    subject = f"{month_year} AI Search Report: How AI is Reshaping Search - OMNI-RANK"
+
+    email_name = subscriber_email.split("@")[0].capitalize() if subscriber_email else "there"
 
     html = f"""
     <!DOCTYPE html>
@@ -28,16 +30,16 @@ def research_report_email(month_year: str, report_data: dict, subscriber_email: 
     <body>
         <div class="container">
             <div class="header">
-                <h1 style="margin: 0; font-size: 28px;">Your January AI Search Report</h1>
+                <h1 style="margin: 0; font-size: 28px;">Your {month_year} AI Search Report</h1>
                 <p style="margin: 10px 0 0 0; opacity: 0.9;">How AI is reshaping search. Industry by industry.</p>
             </div>
 
             <div class="content">
-                <p>Hi {subscriber_email.split('@')[0].capitalize()},</p>
+                <p>Hi {email_name},</p>
 
                 <p>Your monthly AI search report is ready. We analyzed 10M+ AI search queries across ChatGPT, Perplexity, Gemini, and Google AI Overviews to show you what's happening in your industry.</p>
 
-                <h2 style="margin-top: 30px; margin-bottom: 20px;">January 2026 Highlights</h2>
+                <h2 style="margin-top: 30px; margin-bottom: 20px;">{month_year} Highlights</h2>
 
                 <div class="insight">
                     <strong>SaaS AI Citation Surge</strong><br/>

@@ -5188,9 +5188,16 @@ def subscribe_to_research_report(email: str, vertical: str = "general"):
 
     try:
         from app.services.email_service import SubscriptionManager, get_email_service
+        from supabase import create_client
+
+        # Create Supabase client for subscription manager
+        supabase = create_client(
+            settings.supabase_url,
+            settings.supabase_service_role_key,
+        )
 
         # Subscribe in database
-        manager = SubscriptionManager(_supabase_client)
+        manager = SubscriptionManager(supabase)
         if not manager.subscribe(email, vertical, "research_report"):
             raise HTTPException(status_code=400, detail="Failed to subscribe")
 
@@ -5217,8 +5224,14 @@ def unsubscribe_from_emails(email: str):
 
     try:
         from app.services.email_service import SubscriptionManager
+        from supabase import create_client
 
-        manager = SubscriptionManager(_supabase_client)
+        supabase = create_client(
+            settings.supabase_url,
+            settings.supabase_service_role_key,
+        )
+
+        manager = SubscriptionManager(supabase)
         manager.unsubscribe(email)
 
         return {
@@ -5236,8 +5249,13 @@ def send_monthly_research_reports():
     Run this monthly via external scheduler (GitHub Actions, AWS EventBridge, etc)."""
     try:
         from app.services.email_service import SubscriptionManager, get_email_service
+        from supabase import create_client
 
-        manager = SubscriptionManager(_supabase_client)
+        supabase = create_client(
+            settings.supabase_url,
+            settings.supabase_service_role_key,
+        )
+        manager = SubscriptionManager(supabase)
         email_service = get_email_service()
 
         # Get all active subscribers
@@ -5277,8 +5295,13 @@ def send_nurture_emails():
     try:
         from app.services.email_service import SubscriptionManager, get_email_service
         from datetime import datetime, timedelta
+        from supabase import create_client
 
-        manager = SubscriptionManager(_supabase_client)
+        supabase = create_client(
+            settings.supabase_url,
+            settings.supabase_service_role_key,
+        )
+        manager = SubscriptionManager(supabase)
         email_service = get_email_service()
 
         # Get subscribers ready for next nurture email
