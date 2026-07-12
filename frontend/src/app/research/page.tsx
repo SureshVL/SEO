@@ -120,7 +120,7 @@ export default function ResearchPage() {
                           Industry Report
                         </p>
                         <h3 className="text-xl font-bold text-slate-900 group-hover:text-violet-600 transition">
-                          {verticalTitles[vertical] || vertical.title()}
+                          {verticalTitles[vertical] || vertical.charAt(0).toUpperCase() + vertical.slice(1)}
                         </h3>
                       </div>
                       <TrendingUp className="w-5 h-5 text-emerald-500 flex-shrink-0" />
