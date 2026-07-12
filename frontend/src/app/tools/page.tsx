@@ -404,17 +404,21 @@ function ScoreTool() {
   const [keywords, setKeywords] = useState("1");
   const [links, setLinks] = useState("1");
   const score = (num(title) + num(meta) + num(h1) + num(keywords) + num(links)) * 20;
+  const checks = [["Title", title, setTitle], ["Meta description", meta, setMeta], ["H1 tag", h1, setH1], ["Keywords in copy", keywords, setKeywords], ["Internal links", links, setLinks]] as const;
   return (
     <div>
       <h2 className="text-lg font-bold">SEO On-Page Score</h2>
       <p className="text-sm text-slate-600 mt-2 mb-4">Check each item (1 = yes, 0 = no)</p>
       <div className="grid sm:grid-cols-2 gap-3 mt-4">
-        {[["Title", title, setTitle], ["Meta description", meta, setMeta], ["H1 tag", h1, setH1], ["Keywords in copy", keywords, setKeywords], ["Internal links", links, setLinks]].map(([l, v, s]) => (
-          <label key={l} className="flex items-center gap-2">
-            <input type="checkbox" checked={num(v) === 1} onChange={(e) => s(e.target.checked ? "1" : "0")} className="w-4 h-4" />
-            <span className="text-sm">{l}</span>
-          </label>
-        ))}
+        {checks.map((item, idx) => {
+          const [label, value, setter] = item;
+          return (
+            <label key={idx} className="flex items-center gap-2">
+              <input type="checkbox" checked={num(value as string) === 1} onChange={(e) => setter(e.target.checked ? "1" : "0")} className="w-4 h-4" />
+              <span className="text-sm">{label}</span>
+            </label>
+          );
+        })}
       </div>
       <Result items={[
         ["SEO Score", `${Math.min(100, score)}/100`],
@@ -479,7 +483,7 @@ function RedirectTool() {
         <Field label="URL to check" value={url} onChange={setUrl} type="text" />
       </div>
       <div className="mt-6 p-4 rounded-lg bg-slate-50 border border-slate-200">
-        <p className="text-sm text-slate-600">Ideal: 0 redirects (direct URL). Max: 1–2 hops. Chains > 2 waste crawl budget.</p>
+        <p className="text-sm text-slate-600">Ideal: 0 redirects (direct URL). Max: 1–2 hops. Chains &gt; 2 waste crawl budget.</p>
         <p className="text-xs text-slate-500 mt-2">Use OMNI-RANK's full platform to crawl and trace redirect chains.</p>
       </div>
     </div>
