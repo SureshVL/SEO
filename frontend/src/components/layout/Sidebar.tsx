@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BarChart3, Bot, Braces, Calendar, ClipboardList, Coins, Eye, FileText, GitPullRequest, Grid3x3, Home, LayoutDashboard, Lightbulb, Link2, LogOut, Palette, Rocket, Search, Settings, Shield, ShoppingCart, Sparkles, Zap } from "lucide-react";
+import { BarChart3, Bot, Braces, Calendar, ClipboardList, Coins, Eye, FileText, GitPullRequest, Grid3x3, Home, LayoutDashboard, Lightbulb, Link2, LogOut, MousePointerClick, Palette, Rocket, Search, Settings, Shield, Smartphone, ShoppingCart, Sparkles, Zap } from "lucide-react";
 import { ThemeToggle } from "../ui/ThemeToggle";
 import { ProjectPicker } from "./ProjectPicker";
 
@@ -22,6 +22,8 @@ const navSections = [
   ]},
   { label: "Execute", items: [
     { href: "/dashboard/audit", label: "Technical Audit", icon: Shield, color: "#A3E635" },
+    { href: "/dashboard/cro", label: "CRO Audit", icon: MousePointerClick, color: "#F43F5E" },
+    { href: "/dashboard/aso", label: "App Store (ASO)", icon: Smartphone, color: "#2DD4BF" },
     { href: "/dashboard/schema", label: "Schema Markup", icon: Braces, color: "#8B5CF6" },
     { href: "/dashboard/brief", label: "Content Brief", icon: Lightbulb, color: "#F97316" },
     { href: "/dashboard/content", label: "Content Studio", icon: FileText, color: "#818CF8" },
