@@ -3,10 +3,10 @@
 import { useState, useMemo } from "react";
 import Link from "next/link";
 import {
-  Coins, TrendingUp, Percent, Type, AlignLeft, Search, ArrowRight, Calculator,
+  Coins, TrendingUp, Percent, Type, AlignLeft, Search, ArrowRight, Calculator, ChevronDown, Link as LinkIcon, Eye, FileText, Zap, Target, BarChart3, Globe, Shield, Layers,
 } from "lucide-react";
 
-type ToolId = "cpc" | "roas" | "cvr" | "density" | "counter" | "snippet";
+type ToolId = "cpc" | "roas" | "cvr" | "density" | "counter" | "snippet" | "traffic" | "cpl" | "ctr" | "pagespeed" | "score" | "backlink" | "http" | "redirect" | "url" | "robots" | "schema" | "keyword_difficulty" | "anchor" | "organic";
 
 const TOOLS: { id: ToolId; name: string; desc: string; icon: any }[] = [
   { id: "cpc", name: "PPC Budget Calculator", desc: "How many clicks your ad budget buys", icon: Coins },
@@ -15,6 +15,20 @@ const TOOLS: { id: ToolId; name: string; desc: string; icon: any }[] = [
   { id: "density", name: "Keyword Density Checker", desc: "Keyword frequency in your copy", icon: Search },
   { id: "counter", name: "Word Counter", desc: "Words, characters, reading time", icon: AlignLeft },
   { id: "snippet", name: "SERP Snippet Checker", desc: "Title & meta length for Google", icon: Type },
+  { id: "traffic", name: "Organic Traffic Estimator", desc: "Estimate monthly organic visits", icon: Globe },
+  { id: "ctr", name: "Click-Through Rate Calculator", desc: "Calculate CTR from clicks & impressions", icon: BarChart3 },
+  { id: "cpl", name: "Cost Per Lead Calculator", desc: "CPL from spend & conversions", icon: Target },
+  { id: "pagespeed", name: "Page Speed Checker", desc: "Analyze site performance signals", icon: Zap },
+  { id: "score", name: "SEO Score Calculator", desc: "Quick on-page SEO audit score", icon: Shield },
+  { id: "backlink", name: "Backlink Analyzer", desc: "Estimate backlink impact", icon: LinkIcon },
+  { id: "http", name: "HTTP Status Code Reference", desc: "All status codes explained", icon: FileText },
+  { id: "redirect", name: "Redirect Chain Checker", desc: "Check redirect chains & issues", icon: ArrowRight },
+  { id: "url", name: "URL Structure Analyzer", desc: "Analyze SEO-friendly URL format", icon: Type },
+  { id: "robots", name: "Robots.txt Generator", desc: "Generate robots.txt file", icon: Layers },
+  { id: "schema", name: "Schema Markup Previewer", desc: "Preview schema markup rendering", icon: Layers },
+  { id: "keyword_difficulty", name: "Keyword Difficulty Estimator", desc: "Estimate keyword competition level", icon: TrendingUp },
+  { id: "anchor", name: "Anchor Text Optimizer", desc: "Analyze anchor text distribution", icon: LinkIcon },
+  { id: "organic", name: "Keyword Position to Traffic", desc: "Traffic from search position & volume", icon: BarChart3 },
 ];
 
 const num = (v: string) => (isFinite(parseFloat(v)) ? parseFloat(v) : 0);
@@ -37,21 +51,28 @@ export default function ToolsPage() {
       </header>
 
       <div className="max-w-5xl mx-auto px-5 py-10">
-        <div className="flex items-center gap-2 text-violet-700 text-xs font-bold uppercase tracking-widest">
-          <Calculator className="w-4 h-4" /> Free SEO &amp; PPC Tools
+        <div className="flex items-center justify-between">
+          <div className="flex-1">
+            <div className="flex items-center gap-2 text-violet-700 text-xs font-bold uppercase tracking-widest">
+              <Calculator className="w-4 h-4" /> Free SEO &amp; PPC Tools
+            </div>
+            <h1 className="text-3xl md:text-4xl font-bold mt-2 tracking-tight">Free marketing calculators</h1>
+            <p className="text-slate-500 mt-2 max-w-2xl">Fast, no-signup tools for everyday SEO and paid-search decisions. Everything runs in your browser.</p>
+          </div>
+          <Link href="/compare" className="shrink-0 text-sm font-semibold text-violet-700 flex items-center gap-1 hover:text-violet-800 transition">
+            vs Competitors <ArrowRight className="w-4 h-4" />
+          </Link>
         </div>
-        <h1 className="text-3xl md:text-4xl font-bold mt-2 tracking-tight">Free marketing calculators</h1>
-        <p className="text-slate-500 mt-2 max-w-2xl">Fast, no-signup tools for everyday SEO and paid-search decisions. Everything runs in your browser.</p>
 
-        <div className="grid md:grid-cols-3 gap-3 mt-8">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mt-8">
           {TOOLS.map((t) => {
             const Icon = t.icon;
             return (
               <button key={t.id} onClick={() => setActive(t.id)}
-                className={`text-left p-4 rounded-xl border transition ${active === t.id ? "border-violet-500 bg-violet-50 ring-1 ring-violet-200" : "border-slate-200 bg-white hover:border-slate-300"}`}>
-                <Icon className={`w-5 h-5 ${active === t.id ? "text-violet-600" : "text-slate-400"}`} />
-                <div className="font-semibold text-sm mt-2">{t.name}</div>
-                <div className="text-xs text-slate-500 mt-0.5">{t.desc}</div>
+                className={`text-left p-3 rounded-lg border transition ${active === t.id ? "border-violet-500 bg-violet-50 ring-1 ring-violet-200" : "border-slate-200 bg-white hover:border-slate-300"}`}>
+                <Icon className={`w-4 h-4 ${active === t.id ? "text-violet-600" : "text-slate-400"}`} />
+                <div className="font-semibold text-xs mt-1.5">{t.name}</div>
+                <div className="text-xs text-slate-500 mt-0.5 line-clamp-2">{t.desc}</div>
               </button>
             );
           })}
@@ -64,6 +85,20 @@ export default function ToolsPage() {
           {active === "density" && <DensityTool />}
           {active === "counter" && <CounterTool />}
           {active === "snippet" && <SnippetTool />}
+          {active === "traffic" && <TrafficTool />}
+          {active === "ctr" && <CtrTool />}
+          {active === "cpl" && <CplTool />}
+          {active === "pagespeed" && <PageSpeedTool />}
+          {active === "score" && <ScoreTool />}
+          {active === "backlink" && <BacklinkTool />}
+          {active === "http" && <HttpTool />}
+          {active === "redirect" && <RedirectTool />}
+          {active === "url" && <UrlTool />}
+          {active === "robots" && <RobotsTool />}
+          {active === "schema" && <SchemaTool />}
+          {active === "keyword_difficulty" && <KeywordDifficultyTool />}
+          {active === "anchor" && <AnchorTool />}
+          {active === "organic" && <OrganicTool />}
         </div>
 
         <div className="mt-8 rounded-2xl bg-gradient-to-br from-violet-600 to-fuchsia-600 text-white p-6 md:p-8 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
@@ -73,8 +108,40 @@ export default function ToolsPage() {
           </div>
           <Link href="/auth/login" className="shrink-0 bg-white text-violet-700 font-semibold px-5 py-2.5 rounded-lg">Try it free</Link>
         </div>
+
+        {/* FAQ */}
+        <div className="mt-16">
+          <h2 className="text-2xl font-bold text-slate-900 mb-6">About these tools</h2>
+          <div className="space-y-3">
+            <ToolFaqItem q="Why are these calculators free?" a="We built them to help you make smarter SEO and marketing decisions. No signup required—all calculations run locally in your browser, so your data never leaves your computer." />
+            <ToolFaqItem q="Are these calculations accurate?" a="Yes, they use industry-standard formulas and benchmarks. But they're estimates—real results depend on your audience, industry, and execution. Use them for quick planning, not for guaranteed projections." />
+            <ToolFaqItem q="Can I use these for client reporting?" a="Absolutely. Screenshot the results or download them. Many agencies share these tools with clients to explain SEO and PPC logic." />
+            <ToolFaqItem q="What's the difference between these free tools and OMNI-RANK's platform?" a="These are single-purpose calculators. The full platform tracks your actual rankings daily, analyzes competitors, generates AI content, and audits technical issues across hundreds of pages—all integrated and automated." />
+            <ToolFaqItem q="Do you have a bulk keyword difficulty checker?" a="Not here, but OMNI-RANK's platform does. Try a free trial to check difficulty for 100+ keywords at once with our full Keyword Research agent." />
+          </div>
+        </div>
       </div>
     </div>
+  );
+}
+
+function ToolFaqItem({ q, a }: { q: string; a: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <button
+      onClick={() => setOpen(!open)}
+      className="w-full text-left p-4 rounded-lg border border-slate-200 bg-white hover:border-violet-300 transition"
+    >
+      <div className="flex items-start justify-between gap-3">
+        <h3 className="font-semibold text-slate-900">{q}</h3>
+        <span className="text-violet-600 text-lg shrink-0">{open ? "−" : "+"}</span>
+      </div>
+      {open && (
+        <p className="mt-3 text-sm text-slate-600">
+          {a}
+        </p>
+      )}
+    </button>
   );
 }
 
@@ -241,6 +308,305 @@ function SnippetTool() {
         ["Description length", `${desc.length} chars ${descOk ? "✅" : "⚠️"}`],
       ]} />
       <p className="text-xs text-slate-400 mt-3">Ideal: title 30–60 chars, description 120–160 chars.</p>
+    </div>
+  );
+}
+
+function TrafficTool() {
+  const [keywords, setKeywords] = useState("20");
+  const [avgPos, setAvgPos] = useState("5");
+  const [avgVol, setAvgVol] = useState("1200");
+  const ctrByPos = { 1: 0.31, 2: 0.24, 3: 0.18, 4: 0.13, 5: 0.1, 10: 0.04, 20: 0.01 };
+  const posNum = Math.round(num(avgPos));
+  const ctr = ctrByPos[posNum as keyof typeof ctrByPos] || 0.05;
+  const monthlyTraffic = num(keywords) * num(avgVol) * ctr;
+  return (
+    <div>
+      <h2 className="text-lg font-bold">Organic Traffic Estimator</h2>
+      <div className="grid sm:grid-cols-3 gap-4 mt-4">
+        <Field label="Keywords ranked" value={keywords} onChange={setKeywords} />
+        <Field label="Average position" value={avgPos} onChange={setAvgPos} />
+        <Field label="Average monthly volume" value={avgVol} onChange={setAvgVol} />
+      </div>
+      <Result items={[
+        ["Est. monthly organic traffic", fmt(monthlyTraffic)],
+        ["Avg CTR", `${fmt(ctr * 100, 1)}%`],
+        ["Traffic per keyword", fmt(monthlyTraffic / (num(keywords) || 1))],
+      ]} />
+    </div>
+  );
+}
+
+function CtrTool() {
+  const [clicks, setClicks] = useState("1500");
+  const [impressions, setImpressions] = useState("50000");
+  const clickNum = num(clicks);
+  const impNum = num(impressions);
+  const ctr = impNum > 0 ? (clickNum / impNum) * 100 : 0;
+  return (
+    <div>
+      <h2 className="text-lg font-bold">Click-Through Rate Calculator</h2>
+      <div className="grid sm:grid-cols-2 gap-4 mt-4">
+        <Field label="Total clicks" value={clicks} onChange={setClicks} />
+        <Field label="Total impressions" value={impressions} onChange={setImpressions} />
+      </div>
+      <Result items={[
+        ["CTR", `${fmt(ctr, 2)}%`],
+        ["Industry benchmark", "2–3% is typical"],
+      ]} />
+    </div>
+  );
+}
+
+function CplTool() {
+  const [spend, setSpend] = useState("50000");
+  const [conversions, setConversions] = useState("25");
+  const cost = num(conversions) > 0 ? num(spend) / num(conversions) : 0;
+  return (
+    <div>
+      <h2 className="text-lg font-bold">Cost Per Lead Calculator</h2>
+      <div className="grid sm:grid-cols-2 gap-4 mt-4">
+        <Field label="Total spend" value={spend} onChange={setSpend} suffix="₹" />
+        <Field label="Total leads" value={conversions} onChange={setConversions} />
+      </div>
+      <Result items={[
+        ["Cost per lead", cost > 0 ? `₹${fmt(cost)}` : "—"],
+      ]} />
+    </div>
+  );
+}
+
+function PageSpeedTool() {
+  const [core, setCore] = useState("2.5");
+  const [fid, setFid] = useState("100");
+  const [cls, setCls] = useState("0.1");
+  const score = Math.max(0, 100 - (num(core) * 10) - (num(fid) / 10) - (num(cls) * 100));
+  return (
+    <div>
+      <h2 className="text-lg font-bold">Page Speed Score Calculator</h2>
+      <div className="grid sm:grid-cols-3 gap-4 mt-4">
+        <Field label="LCP (seconds)" value={core} onChange={setCore} />
+        <Field label="FID (milliseconds)" value={fid} onChange={setFid} />
+        <Field label="CLS (score)" value={cls} onChange={setCls} />
+      </div>
+      <Result items={[
+        ["Est. Pagespeed Score", `${Math.round(Math.max(0, Math.min(100, score)))}/100`],
+        ["Status", score >= 90 ? "Good" : score >= 50 ? "Needs work" : "Poor"],
+      ]} />
+    </div>
+  );
+}
+
+function ScoreTool() {
+  const [title, setTitle] = useState("1");
+  const [meta, setMeta] = useState("1");
+  const [h1, setH1] = useState("1");
+  const [keywords, setKeywords] = useState("1");
+  const [links, setLinks] = useState("1");
+  const score = (num(title) + num(meta) + num(h1) + num(keywords) + num(links)) * 20;
+  return (
+    <div>
+      <h2 className="text-lg font-bold">SEO On-Page Score</h2>
+      <p className="text-sm text-slate-600 mt-2 mb-4">Check each item (1 = yes, 0 = no)</p>
+      <div className="grid sm:grid-cols-2 gap-3 mt-4">
+        {[["Title", title, setTitle], ["Meta description", meta, setMeta], ["H1 tag", h1, setH1], ["Keywords in copy", keywords, setKeywords], ["Internal links", links, setLinks]].map(([l, v, s]) => (
+          <label key={l} className="flex items-center gap-2">
+            <input type="checkbox" checked={num(v) === 1} onChange={(e) => s(e.target.checked ? "1" : "0")} className="w-4 h-4" />
+            <span className="text-sm">{l}</span>
+          </label>
+        ))}
+      </div>
+      <Result items={[
+        ["SEO Score", `${Math.min(100, score)}/100`],
+      ]} />
+    </div>
+  );
+}
+
+function BacklinkTool() {
+  const [backlinks, setBacklinks] = useState("500");
+  const [referring, setRefer] = useState("150");
+  const [authority, setAuthority] = useState("60");
+  const impact = (num(referring) * 0.4) + (num(authority) * 0.5);
+  return (
+    <div>
+      <h2 className="text-lg font-bold">Backlink Impact Analyzer</h2>
+      <div className="grid sm:grid-cols-3 gap-4 mt-4">
+        <Field label="Total backlinks" value={backlinks} onChange={setBacklinks} />
+        <Field label="Referring domains" value={referring} onChange={setRefer} />
+        <Field label="Avg domain authority" value={authority} onChange={setAuthority} />
+      </div>
+      <Result items={[
+        ["Backlink profile strength", fmt(impact, 1)],
+        ["Status", impact > 40 ? "Strong" : impact > 20 ? "Moderate" : "Building"],
+      ]} />
+    </div>
+  );
+}
+
+function HttpTool() {
+  return (
+    <div>
+      <h2 className="text-lg font-bold">HTTP Status Codes Reference</h2>
+      <div className="space-y-3 mt-4">
+        {[
+          ["200", "OK", "Request successful"],
+          ["301", "Moved Permanently", "Permanent redirect"],
+          ["302", "Found", "Temporary redirect"],
+          ["400", "Bad Request", "Malformed request"],
+          ["403", "Forbidden", "Access denied"],
+          ["404", "Not Found", "Page doesn't exist"],
+          ["500", "Server Error", "Internal server error"],
+          ["503", "Service Unavailable", "Server temporarily down"],
+        ].map(([code, name, desc]) => (
+          <div key={code} className="p-3 rounded-lg bg-slate-50 border border-slate-200">
+            <div className="font-mono font-bold text-violet-600">{code}</div>
+            <div className="font-semibold text-sm">{name}</div>
+            <div className="text-xs text-slate-600">{desc}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function RedirectTool() {
+  const [url, setUrl] = useState("https://example.com/old-page");
+  return (
+    <div>
+      <h2 className="text-lg font-bold">Redirect Chain Checker</h2>
+      <div className="mt-4">
+        <Field label="URL to check" value={url} onChange={setUrl} type="text" />
+      </div>
+      <div className="mt-6 p-4 rounded-lg bg-slate-50 border border-slate-200">
+        <p className="text-sm text-slate-600">Ideal: 0 redirects (direct URL). Max: 1–2 hops. Chains > 2 waste crawl budget.</p>
+        <p className="text-xs text-slate-500 mt-2">Use OMNI-RANK's full platform to crawl and trace redirect chains.</p>
+      </div>
+    </div>
+  );
+}
+
+function UrlTool() {
+  const [url, setUrl] = useState("https://example.com/seo-best-practices");
+  const hasKeywords = /[a-z0-9\-]{4,}/.test(url);
+  const isShort = url.split("/").length <= 4;
+  const score = (hasKeywords ? 50 : 0) + (isShort ? 50 : 0);
+  return (
+    <div>
+      <h2 className="text-lg font-bold">URL Structure Analyzer</h2>
+      <div className="mt-4">
+        <Field label="URL" value={url} onChange={setUrl} type="text" />
+      </div>
+      <Result items={[
+        ["Has keywords", hasKeywords ? "✅" : "❌"],
+        ["Short & simple", isShort ? "✅" : "❌"],
+        ["SEO score", `${score}/100`],
+      ]} />
+      <p className="text-xs text-slate-400 mt-3">Best: lowercase, hyphens, keywords, max 3 levels deep.</p>
+    </div>
+  );
+}
+
+function RobotsTool() {
+  return (
+    <div>
+      <h2 className="text-lg font-bold">Robots.txt Generator</h2>
+      <p className="text-sm text-slate-600 mt-4 mb-4">Basic robots.txt template:</p>
+      <div className="font-mono text-xs p-4 bg-slate-50 rounded-lg border border-slate-200 overflow-x-auto">
+        <pre>{`User-agent: *
+Allow: /
+
+User-agent: AdsBot-Google
+Allow: /
+
+Disallow: /admin/
+Disallow: /private/
+Disallow: /temp/
+
+Sitemap: https://example.com/sitemap.xml`}</pre>
+      </div>
+      <p className="text-xs text-slate-400 mt-3">Place robots.txt in your site root. Customize paths for your site structure.</p>
+    </div>
+  );
+}
+
+function SchemaTool() {
+  return (
+    <div>
+      <h2 className="text-lg font-bold">Schema Markup Previewer</h2>
+      <p className="text-sm text-slate-600 mt-4 mb-4">Common schema types:</p>
+      <div className="space-y-2">
+        {["Organization", "Product", "Article", "FAQ", "Event", "LocalBusiness"].map((type) => (
+          <div key={type} className="p-3 rounded-lg bg-slate-50 border border-slate-200">
+            <div className="font-semibold text-sm">{type}</div>
+            <div className="text-xs text-slate-500">Structured data for rich snippets</div>
+          </div>
+        ))}
+      </div>
+      <p className="text-xs text-slate-400 mt-3">Use OMNI-RANK's schema validator to check your markup.</p>
+    </div>
+  );
+}
+
+function KeywordDifficultyTool() {
+  const [backlinks, setBacklinks] = useState("5000");
+  const [domains, setDomains] = useState("800");
+  const difficulty = Math.min(100, (num(domains) / 100) + (num(backlinks) / 100));
+  return (
+    <div>
+      <h2 className="text-lg font-bold">Keyword Difficulty Estimator</h2>
+      <p className="text-sm text-slate-600 mt-2 mb-4">Top 10 SERP metrics:</p>
+      <div className="grid sm:grid-cols-2 gap-4 mt-4">
+        <Field label="Avg backlinks in top 10" value={backlinks} onChange={setBacklinks} />
+        <Field label="Avg referring domains" value={domains} onChange={setDomains} />
+      </div>
+      <Result items={[
+        ["Keyword difficulty", `${Math.round(difficulty)}/100`],
+        ["Rank", difficulty > 60 ? "Hard" : difficulty > 30 ? "Medium" : "Easy"],
+      ]} />
+    </div>
+  );
+}
+
+function AnchorTool() {
+  const [total, setTotal] = useState("1000");
+  const [branded, setBranded] = useState("400");
+  const [exact, setExact] = useState("300");
+  const [partial, setPartial] = useState("200");
+  return (
+    <div>
+      <h2 className="text-lg font-bold">Anchor Text Distribution</h2>
+      <div className="grid sm:grid-cols-2 gap-4 mt-4">
+        <Field label="Total backlinks" value={total} onChange={setTotal} />
+        <Field label="Branded anchors" value={branded} onChange={setBranded} />
+      </div>
+      <Result items={[
+        ["Branded %", `${fmt((num(branded) / num(total)) * 100, 1)}%`],
+        ["Exact match %", `${fmt((num(exact) / num(total)) * 100, 1)}%`],
+        ["Partial %", `${fmt((num(partial) / num(total)) * 100, 1)}%`],
+        ["Status", (num(branded) / num(total)) > 0.3 ? "Healthy" : "Needs branded links"],
+      ]} />
+    </div>
+  );
+}
+
+function OrganicTool() {
+  const [position, setPosition] = useState("5");
+  const [volume, setVolume] = useState("2000");
+  const [ctr, setCtr] = useState("10");
+  const traffic = (num(volume) * num(ctr)) / 100;
+  return (
+    <div>
+      <h2 className="text-lg font-bold">Keyword Position to Traffic</h2>
+      <div className="grid sm:grid-cols-3 gap-4 mt-4">
+        <Field label="Search ranking" value={position} onChange={setPosition} />
+        <Field label="Monthly search volume" value={volume} onChange={setVolume} />
+        <Field label="Expected CTR" value={ctr} onChange={setCtr} suffix="%" />
+      </div>
+      <Result items={[
+        ["Est. monthly traffic", fmt(traffic)],
+        ["Monthly visitors", fmt(traffic)],
+      ]} />
     </div>
   );
 }

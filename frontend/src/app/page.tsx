@@ -59,6 +59,8 @@ export default function LandingPage() {
           <div className="hidden md:flex items-center gap-8 text-sm font-sans" style={{ color: "rgba(200, 180, 150, 0.5)" }}>
             <a href="#features" className="hover:text-amber-200 transition-colors">Features</a>
             <a href="#pricing" className="hover:text-amber-200 transition-colors">Pricing</a>
+            <Link href="/compare" className="hover:text-amber-200 transition-colors">Compare</Link>
+            <Link href="/tools" className="hover:text-amber-200 transition-colors">Free Tools</Link>
           </div>
           <div className="flex items-center gap-3">
             <Link href="/auth/login" className="btn-ghost text-sm">Log in</Link>
@@ -187,6 +189,54 @@ export default function LandingPage() {
         </div>
       </section>
 
+      {/* FAQ */}
+      <section id="faq" className="max-w-4xl mx-auto px-6 py-28">
+        <p className="font-sans text-xs uppercase tracking-[0.2em] mb-4 text-center" style={{ color: "var(--copper)" }}>FAQ</p>
+        <h2 className="font-serif text-4xl text-center mb-16" style={{ color: "#e8e0d4" }}>Frequently asked questions</h2>
+        <div className="space-y-3">
+          <FaqItem
+            q="What's the difference between AI Agents and SERP/day limit?"
+            a="AI Agents are specialized bots: Research, Keyword Strategy, Competitor Analysis, Content Writer, Technical Auditor, and Ranking Agent. SERP/day is how many times per day you can check search rankings. Both scale with your tier."
+          />
+          <FaqItem
+            q="Can I upgrade mid-month?"
+            a="Yes. Upgrades are prorated. If you're on Starter (₹1,999) and upgrade to Growth (₹4,999) on day 15, you'll pay the difference for the remaining days, then renew at the Growth price next month."
+          />
+          <FaqItem
+            q="Do you offer annual discounts?"
+            a="Yes, 20% off all paid tiers when you commit to annual billing. Growth goes from ₹4,999/mo to ₹3,999/mo when billed yearly."
+          />
+          <FaqItem
+            q="Is there a free trial?"
+            a="Yes. All paid plans include a 14-day free trial. Free tier users get 25 SERP checks/day forever, no trial needed."
+          />
+          <FaqItem
+            q="What if I hit my SERP/day limit?"
+            a="Your SERP quota resets daily at midnight IST. You can track up to your tier's limit each day. To do more, upgrade to the next tier."
+          />
+          <FaqItem
+            q="Can I use Omni-Rank for multiple websites?"
+            a="Yes, depending on your tier. Free: 1 project, Starter: 1, Growth: 5, Pro: 12, Agency: 25 projects. Each project tracks its own keywords, competitors, and audits."
+          />
+          <FaqItem
+            q="Do you have an API?"
+            a="Yes, available on Growth tier and above. Use our REST API to build custom integrations with your CRM, dashboard, or internal tools."
+          />
+          <FaqItem
+            q="Is there a white-label option?"
+            a="Yes, on Growth tier and above. Rebrand reports, dashboards, and emails with your company colors and logo."
+          />
+          <FaqItem
+            q="How often is ranking data updated?"
+            a="Daily (or up to your SERP/day budget). We check rankings overnight IST and display results by morning. Set frequency per keyword."
+          />
+          <FaqItem
+            q="Do I need Google Search Console or GA4 to start?"
+            a="No. Omni-Rank works standalone. But connecting GSC and GA4 unlocks query insights and click data, making strategy more accurate."
+          />
+        </div>
+      </section>
+
       {/* Footer */}
       <footer style={{ borderTop: "1px solid rgba(200, 180, 150, 0.06)" }} className="py-12">
         <div className="max-w-6xl mx-auto px-6 flex flex-col md:flex-row items-center justify-between gap-4">
@@ -202,5 +252,31 @@ export default function LandingPage() {
         </div>
       </footer>
     </div>
+  );
+}
+
+function FaqItem({ q, a }: { q: string; a: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <button
+      onClick={() => setOpen(!open)}
+      className="w-full text-left p-4 rounded-lg border transition"
+      style={{
+        borderColor: open ? "rgba(200, 121, 65, 0.3)" : "rgba(200, 180, 150, 0.06)",
+        background: open ? "rgba(200, 121, 65, 0.05)" : "rgba(200, 180, 150, 0.02)",
+      }}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <h3 className="font-semibold" style={{ color: "#e8e0d4" }}>{q}</h3>
+        <span style={{ color: "var(--copper)", marginTop: "2px" }}>
+          {open ? "−" : "+"}
+        </span>
+      </div>
+      {open && (
+        <p className="mt-3 text-sm" style={{ color: "rgba(200, 180, 150, 0.65)" }}>
+          {a}
+        </p>
+      )}
+    </button>
   );
 }
