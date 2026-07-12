@@ -976,7 +976,7 @@ def schema_inject_batch(
     # Fallback: use first project for testing
     projects = _get_scoped_projects()
     if not projects:
-        raise HTTPException(status_code=400, detail="No projects found")
+        raise HTTPException(status_code=400, detail="No project yet. Create a project first (Projects -> New) so this tool has a site to analyze.")
 
     project_id = projects[0]["id"] if isinstance(projects, list) else projects.get("id")
 
@@ -1032,7 +1032,7 @@ def save_cms_credentials(
     # Get first project for now (in production, use project_id from request)
     projects = _get_scoped_projects()
     if not projects:
-        raise HTTPException(status_code=400, detail="No projects found")
+        raise HTTPException(status_code=400, detail="No project yet. Create a project first (Projects -> New) so this tool has a site to analyze.")
 
     project_id = projects[0]["id"] if isinstance(projects, list) else projects.get("id")
 
@@ -1083,7 +1083,7 @@ def get_cms_credentials(
     """Get saved CMS credentials for a platform."""
     projects = _get_scoped_projects()
     if not projects:
-        raise HTTPException(status_code=400, detail="No projects found")
+        raise HTTPException(status_code=400, detail="No project yet. Create a project first (Projects -> New) so this tool has a site to analyze.")
 
     project_id = projects[0]["id"] if isinstance(projects, list) else projects.get("id")
 
@@ -1117,7 +1117,7 @@ def delete_cms_credentials(
     """Delete saved CMS credentials for a platform."""
     projects = _get_scoped_projects()
     if not projects:
-        raise HTTPException(status_code=400, detail="No projects found")
+        raise HTTPException(status_code=400, detail="No project yet. Create a project first (Projects -> New) so this tool has a site to analyze.")
 
     project_id = projects[0]["id"] if isinstance(projects, list) else projects.get("id")
 
@@ -1147,7 +1147,7 @@ def create_bulk_content_job(
 
     projects = _get_scoped_projects()
     if not projects:
-        raise HTTPException(status_code=400, detail="No projects found")
+        raise HTTPException(status_code=400, detail="No project yet. Create a project first (Projects -> New) so this tool has a site to analyze.")
 
     project_id = projects[0]["id"] if isinstance(projects, list) else projects.get("id")
 
@@ -1279,7 +1279,7 @@ def schedule_article(
 
     projects = _get_scoped_projects()
     if not projects:
-        raise HTTPException(status_code=400, detail="No projects found")
+        raise HTTPException(status_code=400, detail="No project yet. Create a project first (Projects -> New) so this tool has a site to analyze.")
 
     project_id = projects[0]["id"] if isinstance(projects, list) else projects.get("id")
 
@@ -1324,7 +1324,7 @@ def get_calendar(
 
     projects = _get_scoped_projects()
     if not projects:
-        raise HTTPException(status_code=400, detail="No projects found")
+        raise HTTPException(status_code=400, detail="No project yet. Create a project first (Projects -> New) so this tool has a site to analyze.")
 
     project_id = projects[0]["id"] if isinstance(projects, list) else projects.get("id")
 
@@ -1451,7 +1451,7 @@ def add_competitor(
 
     projects = _get_scoped_projects()
     if not projects:
-        raise HTTPException(status_code=400, detail="No projects found")
+        raise HTTPException(status_code=400, detail="No project yet. Create a project first (Projects -> New) so this tool has a site to analyze.")
 
     project_id = projects[0]["id"] if isinstance(projects, list) else projects.get("id")
 
@@ -1486,7 +1486,7 @@ def get_competitors(
 
     projects = _get_scoped_projects()
     if not projects:
-        raise HTTPException(status_code=400, detail="No projects found")
+        raise HTTPException(status_code=400, detail="No project yet. Create a project first (Projects -> New) so this tool has a site to analyze.")
 
     project_id = projects[0]["id"] if isinstance(projects, list) else projects.get("id")
 
@@ -1595,7 +1595,7 @@ async def generate_strategies(
 
     projects = _get_scoped_projects()
     if not projects:
-        raise HTTPException(status_code=400, detail="No projects found")
+        raise HTTPException(status_code=400, detail="No project yet. Create a project first (Projects -> New) so this tool has a site to analyze.")
 
     project_id = projects[0]["id"] if isinstance(projects, list) else projects.get("id")
 
@@ -1630,7 +1630,7 @@ def get_strategies(
 
     projects = _get_scoped_projects()
     if not projects:
-        raise HTTPException(status_code=400, detail="No projects found")
+        raise HTTPException(status_code=400, detail="No project yet. Create a project first (Projects -> New) so this tool has a site to analyze.")
 
     project_id = projects[0]["id"] if isinstance(projects, list) else projects.get("id")
 
@@ -1689,7 +1689,7 @@ def add_site_page(
 
     projects = _get_scoped_projects()
     if not projects:
-        raise HTTPException(status_code=400, detail="No projects found")
+        raise HTTPException(status_code=400, detail="No project yet. Create a project first (Projects -> New) so this tool has a site to analyze.")
 
     project_id = projects[0]["id"] if isinstance(projects, list) else projects.get("id")
 
@@ -1723,7 +1723,7 @@ async def analyze_site(
 
     projects = _get_scoped_projects()
     if not projects:
-        raise HTTPException(status_code=400, detail="No projects found")
+        raise HTTPException(status_code=400, detail="No project yet. Create a project first (Projects -> New) so this tool has a site to analyze.")
 
     project_id = projects[0]["id"] if isinstance(projects, list) else projects.get("id")
 
@@ -1751,7 +1751,7 @@ async def find_opportunities(
 
     projects = _get_scoped_projects()
     if not projects:
-        raise HTTPException(status_code=400, detail="No projects found")
+        raise HTTPException(status_code=400, detail="No project yet. Create a project first (Projects -> New) so this tool has a site to analyze.")
 
     project_id = projects[0]["id"] if isinstance(projects, list) else projects.get("id")
 
@@ -1784,7 +1784,7 @@ def get_opportunities(
 
     projects = _get_scoped_projects()
     if not projects:
-        raise HTTPException(status_code=400, detail="No projects found")
+        raise HTTPException(status_code=400, detail="No project yet. Create a project first (Projects -> New) so this tool has a site to analyze.")
 
     project_id = projects[0]["id"] if isinstance(projects, list) else projects.get("id")
 
@@ -1848,7 +1848,7 @@ async def identify_orphans(
 
     projects = _get_scoped_projects()
     if not projects:
-        raise HTTPException(status_code=400, detail="No projects found")
+        raise HTTPException(status_code=400, detail="No project yet. Create a project first (Projects -> New) so this tool has a site to analyze.")
 
     project_id = projects[0]["id"] if isinstance(projects, list) else projects.get("id")
 
@@ -1886,7 +1886,7 @@ def import_keywords(
 
     projects = _get_scoped_projects()
     if not projects:
-        raise HTTPException(status_code=400, detail="No projects found")
+        raise HTTPException(status_code=400, detail="No project yet. Create a project first (Projects -> New) so this tool has a site to analyze.")
 
     project_id = projects[0]["id"] if isinstance(projects, list) else projects.get("id")
 
@@ -1918,7 +1918,7 @@ async def cluster_keywords(
 
     projects = _get_scoped_projects()
     if not projects:
-        raise HTTPException(status_code=400, detail="No projects found")
+        raise HTTPException(status_code=400, detail="No project yet. Create a project first (Projects -> New) so this tool has a site to analyze.")
 
     project_id = projects[0]["id"] if isinstance(projects, list) else projects.get("id")
 
@@ -1946,7 +1946,7 @@ async def assign_keywords(
 
     projects = _get_scoped_projects()
     if not projects:
-        raise HTTPException(status_code=400, detail="No projects found")
+        raise HTTPException(status_code=400, detail="No project yet. Create a project first (Projects -> New) so this tool has a site to analyze.")
 
     project_id = projects[0]["id"] if isinstance(projects, list) else projects.get("id")
 
@@ -1973,7 +1973,7 @@ def get_clusters(
 
     projects = _get_scoped_projects()
     if not projects:
-        raise HTTPException(status_code=400, detail="No projects found")
+        raise HTTPException(status_code=400, detail="No project yet. Create a project first (Projects -> New) so this tool has a site to analyze.")
 
     project_id = projects[0]["id"] if isinstance(projects, list) else projects.get("id")
 
@@ -2002,7 +2002,7 @@ def get_mappings(
 
     projects = _get_scoped_projects()
     if not projects:
-        raise HTTPException(status_code=400, detail="No projects found")
+        raise HTTPException(status_code=400, detail="No project yet. Create a project first (Projects -> New) so this tool has a site to analyze.")
 
     project_id = projects[0]["id"] if isinstance(projects, list) else projects.get("id")
 
@@ -2032,7 +2032,7 @@ def get_gaps(
     """Read stored keyword gaps. (POST /keywords/gaps/identify runs the analysis.)"""
     projects = _get_scoped_projects()
     if not projects:
-        raise HTTPException(status_code=400, detail="No projects found")
+        raise HTTPException(status_code=400, detail="No project yet. Create a project first (Projects -> New) so this tool has a site to analyze.")
 
     project_id = projects[0]["id"] if isinstance(projects, list) else projects.get("id")
 
@@ -2062,7 +2062,7 @@ async def identify_gaps(
 
     projects = _get_scoped_projects()
     if not projects:
-        raise HTTPException(status_code=400, detail="No projects found")
+        raise HTTPException(status_code=400, detail="No project yet. Create a project first (Projects -> New) so this tool has a site to analyze.")
 
     project_id = projects[0]["id"] if isinstance(projects, list) else projects.get("id")
 
@@ -2117,7 +2117,7 @@ def add_language(
 
     projects = _get_scoped_projects()
     if not projects:
-        raise HTTPException(status_code=400, detail="No projects found")
+        raise HTTPException(status_code=400, detail="No project yet. Create a project first (Projects -> New) so this tool has a site to analyze.")
 
     project_id = projects[0]["id"] if isinstance(projects, list) else projects.get("id")
 
@@ -2151,7 +2151,7 @@ def get_languages(
 
     projects = _get_scoped_projects()
     if not projects:
-        raise HTTPException(status_code=400, detail="No projects found")
+        raise HTTPException(status_code=400, detail="No project yet. Create a project first (Projects -> New) so this tool has a site to analyze.")
 
     project_id = projects[0]["id"] if isinstance(projects, list) else projects.get("id")
 
@@ -2179,7 +2179,7 @@ async def localize_content(
 
     projects = _get_scoped_projects()
     if not projects:
-        raise HTTPException(status_code=400, detail="No projects found")
+        raise HTTPException(status_code=400, detail="No project yet. Create a project first (Projects -> New) so this tool has a site to analyze.")
 
     project_id = projects[0]["id"] if isinstance(projects, list) else projects.get("id")
 
@@ -2216,7 +2216,7 @@ async def generate_hreflang(
 
     projects = _get_scoped_projects()
     if not projects:
-        raise HTTPException(status_code=400, detail="No projects found")
+        raise HTTPException(status_code=400, detail="No project yet. Create a project first (Projects -> New) so this tool has a site to analyze.")
 
     project_id = projects[0]["id"] if isinstance(projects, list) else projects.get("id")
 
@@ -2248,7 +2248,7 @@ def get_hreflang_config(
 
     projects = _get_scoped_projects()
     if not projects:
-        raise HTTPException(status_code=400, detail="No projects found")
+        raise HTTPException(status_code=400, detail="No project yet. Create a project first (Projects -> New) so this tool has a site to analyze.")
 
     project_id = projects[0]["id"] if isinstance(projects, list) else projects.get("id")
 
@@ -2280,7 +2280,7 @@ async def identify_regional_opportunities(
 
     projects = _get_scoped_projects()
     if not projects:
-        raise HTTPException(status_code=400, detail="No projects found")
+        raise HTTPException(status_code=400, detail="No project yet. Create a project first (Projects -> New) so this tool has a site to analyze.")
 
     project_id = projects[0]["id"] if isinstance(projects, list) else projects.get("id")
 
@@ -2313,7 +2313,7 @@ def get_regional_targeting(
 
     projects = _get_scoped_projects()
     if not projects:
-        raise HTTPException(status_code=400, detail="No projects found")
+        raise HTTPException(status_code=400, detail="No project yet. Create a project first (Projects -> New) so this tool has a site to analyze.")
 
     project_id = projects[0]["id"] if isinstance(projects, list) else projects.get("id")
 
@@ -2346,7 +2346,7 @@ def get_localized_content(
 
     projects = _get_scoped_projects()
     if not projects:
-        raise HTTPException(status_code=400, detail="No projects found")
+        raise HTTPException(status_code=400, detail="No project yet. Create a project first (Projects -> New) so this tool has a site to analyze.")
 
     project_id = projects[0]["id"] if isinstance(projects, list) else projects.get("id")
 
@@ -2378,7 +2378,7 @@ async def analyze_multilingual_seo(
 
     projects = _get_scoped_projects()
     if not projects:
-        raise HTTPException(status_code=400, detail="No projects found")
+        raise HTTPException(status_code=400, detail="No project yet. Create a project first (Projects -> New) so this tool has a site to analyze.")
 
     project_id = projects[0]["id"] if isinstance(projects, list) else projects.get("id")
 
@@ -3380,7 +3380,7 @@ def create_audit_schedule(
 
     projects = _get_scoped_projects()
     if not projects:
-        raise HTTPException(status_code=400, detail="No projects found")
+        raise HTTPException(status_code=400, detail="No project yet. Create a project first (Projects -> New) so this tool has a site to analyze.")
 
     project_id = projects[0]["id"] if isinstance(projects, list) else projects.get("id")
 
@@ -3413,7 +3413,7 @@ def get_audit_schedules(
 
     projects = _get_scoped_projects()
     if not projects:
-        raise HTTPException(status_code=400, detail="No projects found")
+        raise HTTPException(status_code=400, detail="No project yet. Create a project first (Projects -> New) so this tool has a site to analyze.")
 
     project_id = projects[0]["id"] if isinstance(projects, list) else projects.get("id")
 
@@ -3464,7 +3464,7 @@ async def run_audit(
 
     projects = _get_scoped_projects()
     if not projects:
-        raise HTTPException(status_code=400, detail="No projects found")
+        raise HTTPException(status_code=400, detail="No project yet. Create a project first (Projects -> New) so this tool has a site to analyze.")
 
     project = projects[0] if isinstance(projects, list) else projects
     project_id = project["id"]
@@ -3720,7 +3720,7 @@ def create_edge_site(
 
     projects = _get_scoped_projects()
     if not projects:
-        raise HTTPException(status_code=400, detail="No projects found")
+        raise HTTPException(status_code=400, detail="No project yet. Create a project first (Projects -> New) so this tool has a site to analyze.")
     project_id = projects[0]["id"] if isinstance(projects, list) else projects["id"]
 
     try:
@@ -3742,7 +3742,7 @@ def list_edge_sites(
 
     projects = _get_scoped_projects()
     if not projects:
-        raise HTTPException(status_code=400, detail="No projects found")
+        raise HTTPException(status_code=400, detail="No project yet. Create a project first (Projects -> New) so this tool has a site to analyze.")
     project_id = projects[0]["id"] if isinstance(projects, list) else projects["id"]
 
     sites = EdgeService().get_sites(project_id, _supabase_rest)
@@ -3759,7 +3759,7 @@ async def verify_edge_site(
 
     projects = _get_scoped_projects()
     if not projects:
-        raise HTTPException(status_code=400, detail="No projects found")
+        raise HTTPException(status_code=400, detail="No project yet. Create a project first (Projects -> New) so this tool has a site to analyze.")
     project_id = projects[0]["id"] if isinstance(projects, list) else projects["id"]
 
     sites = _supabase_rest("get", "edge_sites", params=f"id=eq.{site_id}&project_id=eq.{project_id}")
@@ -3781,7 +3781,7 @@ def create_edge_rule(
 
     projects = _get_scoped_projects()
     if not projects:
-        raise HTTPException(status_code=400, detail="No projects found")
+        raise HTTPException(status_code=400, detail="No project yet. Create a project first (Projects -> New) so this tool has a site to analyze.")
     project_id = projects[0]["id"] if isinstance(projects, list) else projects["id"]
 
     try:
@@ -3815,7 +3815,7 @@ def list_edge_rules(
 
     projects = _get_scoped_projects()
     if not projects:
-        raise HTTPException(status_code=400, detail="No projects found")
+        raise HTTPException(status_code=400, detail="No project yet. Create a project first (Projects -> New) so this tool has a site to analyze.")
     project_id = projects[0]["id"] if isinstance(projects, list) else projects["id"]
 
     rules = EdgeService().get_rules(project_id, site_id=site_id or None, db_fn=_supabase_rest)
@@ -3833,7 +3833,7 @@ def update_edge_rule(
 
     projects = _get_scoped_projects()
     if not projects:
-        raise HTTPException(status_code=400, detail="No projects found")
+        raise HTTPException(status_code=400, detail="No project yet. Create a project first (Projects -> New) so this tool has a site to analyze.")
     project_id = projects[0]["id"] if isinstance(projects, list) else projects["id"]
 
     changes = {k: v for k, v in body.model_dump().items() if v is not None}
@@ -3853,7 +3853,7 @@ def delete_edge_rule(
 
     projects = _get_scoped_projects()
     if not projects:
-        raise HTTPException(status_code=400, detail="No projects found")
+        raise HTTPException(status_code=400, detail="No project yet. Create a project first (Projects -> New) so this tool has a site to analyze.")
     project_id = projects[0]["id"] if isinstance(projects, list) else projects["id"]
 
     EdgeService().delete_rule(rule_id, _supabase_rest, project_id=project_id)
@@ -3893,7 +3893,7 @@ def connect_git_repo(
 
     projects = _get_scoped_projects()
     if not projects:
-        raise HTTPException(status_code=400, detail="No projects found")
+        raise HTTPException(status_code=400, detail="No project yet. Create a project first (Projects -> New) so this tool has a site to analyze.")
     project_id = projects[0]["id"] if isinstance(projects, list) else projects["id"]
 
     try:
@@ -3921,7 +3921,7 @@ def list_git_connections(
 
     projects = _get_scoped_projects()
     if not projects:
-        raise HTTPException(status_code=400, detail="No projects found")
+        raise HTTPException(status_code=400, detail="No project yet. Create a project first (Projects -> New) so this tool has a site to analyze.")
     project_id = projects[0]["id"] if isinstance(projects, list) else projects["id"]
 
     conns = GitWritebackService().get_connections(project_id, _supabase_rest)
@@ -3938,7 +3938,7 @@ def delete_git_connection(
 
     projects = _get_scoped_projects()
     if not projects:
-        raise HTTPException(status_code=400, detail="No projects found")
+        raise HTTPException(status_code=400, detail="No project yet. Create a project first (Projects -> New) so this tool has a site to analyze.")
     project_id = projects[0]["id"] if isinstance(projects, list) else projects["id"]
 
     GitWritebackService().delete_connection(connection_id, _supabase_rest, project_id=project_id)
@@ -3956,7 +3956,7 @@ def open_fix_pr(
 
     projects = _get_scoped_projects()
     if not projects:
-        raise HTTPException(status_code=400, detail="No projects found")
+        raise HTTPException(status_code=400, detail="No project yet. Create a project first (Projects -> New) so this tool has a site to analyze.")
     project_id = projects[0]["id"] if isinstance(projects, list) else projects["id"]
 
     try:
@@ -3989,7 +3989,7 @@ def list_fix_prs(
 
     projects = _get_scoped_projects()
     if not projects:
-        raise HTTPException(status_code=400, detail="No projects found")
+        raise HTTPException(status_code=400, detail="No project yet. Create a project first (Projects -> New) so this tool has a site to analyze.")
     project_id = projects[0]["id"] if isinstance(projects, list) else projects["id"]
 
     prs = GitWritebackService().list_prs(project_id, _supabase_rest)
@@ -4015,7 +4015,7 @@ async def import_product_feed(
 
     projects = _get_scoped_projects()
     if not projects:
-        raise HTTPException(status_code=400, detail="No projects found")
+        raise HTTPException(status_code=400, detail="No project yet. Create a project first (Projects -> New) so this tool has a site to analyze.")
     project_id = projects[0]["id"] if isinstance(projects, list) else projects["id"]
 
     try:
@@ -4041,7 +4041,7 @@ def list_product_feeds(
 
     projects = _get_scoped_projects()
     if not projects:
-        raise HTTPException(status_code=400, detail="No projects found")
+        raise HTTPException(status_code=400, detail="No project yet. Create a project first (Projects -> New) so this tool has a site to analyze.")
     project_id = projects[0]["id"] if isinstance(projects, list) else projects["id"]
 
     feeds = FeedService().get_feeds(project_id, _supabase_rest)
@@ -4061,7 +4061,7 @@ def list_feed_products(
 
     projects = _get_scoped_projects()
     if not projects:
-        raise HTTPException(status_code=400, detail="No projects found")
+        raise HTTPException(status_code=400, detail="No project yet. Create a project first (Projects -> New) so this tool has a site to analyze.")
     project_id = projects[0]["id"] if isinstance(projects, list) else projects["id"]
 
     products = FeedService().get_products(
@@ -4076,7 +4076,7 @@ def _require_feed_in_project(feed_id: int) -> str:
     """404 unless the feed belongs to the scoped project. Returns project_id."""
     projects = _get_scoped_projects()
     if not projects:
-        raise HTTPException(status_code=400, detail="No projects found")
+        raise HTTPException(status_code=400, detail="No project yet. Create a project first (Projects -> New) so this tool has a site to analyze.")
     project_id = projects[0]["id"] if isinstance(projects, list) else projects["id"]
     rows = _supabase_rest(
         "get", "product_feeds", params=f"id=eq.{feed_id}&project_id=eq.{project_id}&select=id"
@@ -4155,7 +4155,7 @@ def get_audit_runs(
 
     projects = _get_scoped_projects()
     if not projects:
-        raise HTTPException(status_code=400, detail="No projects found")
+        raise HTTPException(status_code=400, detail="No project yet. Create a project first (Projects -> New) so this tool has a site to analyze.")
 
     project_id = projects[0]["id"] if isinstance(projects, list) else projects.get("id")
 
@@ -4190,7 +4190,7 @@ def get_audit_issues(
 
     projects = _get_scoped_projects()
     if not projects:
-        raise HTTPException(status_code=400, detail="No projects found")
+        raise HTTPException(status_code=400, detail="No project yet. Create a project first (Projects -> New) so this tool has a site to analyze.")
 
     project_id = projects[0]["id"] if isinstance(projects, list) else projects.get("id")
 
@@ -4224,7 +4224,7 @@ def update_issue(
 
     projects = _get_scoped_projects()
     if not projects:
-        raise HTTPException(status_code=400, detail="No projects found")
+        raise HTTPException(status_code=400, detail="No project yet. Create a project first (Projects -> New) so this tool has a site to analyze.")
     project_id = projects[0]["id"] if isinstance(projects, list) else projects["id"]
 
     try:
@@ -4255,7 +4255,7 @@ def resolve_issue(
 
     projects = _get_scoped_projects()
     if not projects:
-        raise HTTPException(status_code=400, detail="No projects found")
+        raise HTTPException(status_code=400, detail="No project yet. Create a project first (Projects -> New) so this tool has a site to analyze.")
     project_id = projects[0]["id"] if isinstance(projects, list) else projects["id"]
 
     try:
@@ -4292,7 +4292,7 @@ def get_audit_summary(
 
     projects = _get_scoped_projects()
     if not projects:
-        raise HTTPException(status_code=400, detail="No projects found")
+        raise HTTPException(status_code=400, detail="No project yet. Create a project first (Projects -> New) so this tool has a site to analyze.")
 
     project_id = projects[0]["id"] if isinstance(projects, list) else projects.get("id")
 
@@ -4335,6 +4335,33 @@ def generate_report(
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
     project = project[0]
+
+    # Enforce the plan's monthly report quota (was previously unchecked, so usage
+    # could exceed the limit, e.g. "7/5"). Fail closed with a clear upgrade path.
+    try:
+        from app.services.billing import PLANS
+        from datetime import datetime, timezone
+        plan = "starter"
+        org_id = project.get("org_id")
+        if org_id:
+            orgs = _supabase_rest("get", "organizations", params=f"id=eq.{org_id}&select=plan")
+            if orgs:
+                plan = (orgs[0].get("plan") or "starter").lower()
+        limit = PLANS.get(plan, PLANS["starter"]).get("max_reports_per_month", 5)
+        month_start = datetime.now(timezone.utc).replace(
+            day=1, hour=0, minute=0, second=0, microsecond=0).isoformat()
+        used_rows = _supabase_rest(
+            "get", "reports",
+            params=f"project_id=eq.{project_id}&created_at=gte.{month_start}&select=id")
+        used = len(used_rows) if isinstance(used_rows, list) else 0
+        if used >= limit:
+            raise HTTPException(
+                status_code=402,
+                detail=f"Monthly report limit reached ({used}/{limit} on the {plan} plan). Upgrade to generate more.")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.warning("Report quota check skipped (non-fatal): %s", exc)
 
     keywords = _supabase_rest("get", "keywords", params=f"project_id=eq.{project_id}&limit=50")
     audits = _supabase_rest("get", "site_audits", params=f"project_id=eq.{project_id}&order=created_at.desc&limit=1")
@@ -4654,11 +4681,22 @@ def get_wins_summary(
     """Value delivered to the client in the window - powers the dashboard ROI counter."""
     from app.services.wins_service import WinsService
 
+    empty_summary = {
+        "project_id": None, "period_days": max(1, min(days, 365)),
+        "stats": {}, "total_actions": 0, "value_inr": 0, "value_usd": 0,
+        "empty": True,
+    }
     if not project_id:
-        projects = _get_scoped_projects()
+        # This tile loads on every dashboard render; a fresh account with no
+        # project (or a transient lookup failure) is a normal empty state, not an
+        # error — return a zeroed summary rather than 400/500.
+        try:
+            projects = _get_scoped_projects()
+        except Exception:
+            return empty_summary
         projects = projects if isinstance(projects, list) else [projects] if projects else []
         if not projects:
-            raise HTTPException(status_code=400, detail="No projects found")
+            return empty_summary
         project_id = projects[0]["id"]
 
     svc = WinsService()

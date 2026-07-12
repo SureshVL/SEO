@@ -26,6 +26,39 @@ STOPWORDS = {
     "such","only","very","just",
 }
 
+# Common UI-chrome / navigation phrases scraped from pages that must never be
+# surfaced as SEO "entities" (lowercased, exact-match after collapsing spaces).
+UI_CHROME = frozenset({
+    "view profile","read more","read less","learn more","see more","see all",
+    "view more","view all","view details","show more","show less","load more",
+    "sign in","sign up","log in","log out","get started","start free","try free",
+    "contact us","about us","follow us","privacy policy","terms of service",
+    "terms conditions","cookie policy","add to cart","buy now","shop now",
+    "book now","get quote","quick view","free shipping","back to top",
+    "skip to content","watch video","subscribe now","download now","menu close",
+    "search results","get in touch","find out","click here","new arrivals",
+    "my account","order now","join now","see details","explore more",
+    "shop women","shop men","shop all","shop now","shop kids","quick add",
+    "add to bag","view cart","best sellers","new in","gift cards",
+})
+
+
+def _clean_entities(raw: list[str], limit: int = 25) -> list[str]:
+    """Drop scraped UI/navigation labels so they aren't surfaced as entities."""
+    out: list[str] = []
+    for e in raw:
+        # entities spanning line breaks are scraping artifacts (two elements
+        # captured together), not real named entities — drop them.
+        if "\n" in e or "\r" in e or "\t" in e:
+            continue
+        key = re.sub(r"\s+", " ", e).strip().lower()
+        if key in UI_CHROME or len(key) < 4 or key.startswith("shop "):
+            continue
+        out.append(e)
+        if len(out) >= limit:
+            break
+    return out
+
 
 def _extract_domain(url):
     parsed = urlparse(url)
@@ -57,7 +90,7 @@ def _extract_from_html(html):
     text = re.sub(r'<[^>]+>', ' ', text)
     text = re.sub(r'\s+', ' ', text).strip()
     words = [w for w in re.findall(r'[A-Za-z][A-Za-z\-\']+', text.lower()) if w not in STOPWORDS and len(w) > 2]
-    entities = [e for e, _ in Counter(re.findall(r'\b([A-Z][a-z]+(?:\s+[A-Z][a-z0-9&]+)+)\b', text)).most_common(25)]
+    entities = _clean_entities([e for e, _ in Counter(re.findall(r'\b([A-Z][a-z]+(?:\s+[A-Z][a-z0-9&]+)+)\b', text)).most_common(40)])
     questions = [q.strip() for q in re.findall(r'([^.!?]{20,180}\?)', text) if q.isprintable()][:12]
     return {"title": title, "h1": h1, "h2s": h2s, "word_count": len(words), "entities": entities, "questions": questions, "words": words}
 
@@ -339,7 +372,7 @@ Heading gaps: {', '.join(gap.heading_gaps[:5])}"""
                 if pos <= 3: score += 20
                 elif pos <= 10: score += 10
                 break
-        return max(5, min(100, round(score, 2)))
+        return max(5, min(100, round(score)))
 
     def _basic_recs(self, client_bl, serp, features, client_domain, gap, client, comps):
         recs = []
@@ -386,8 +419,8 @@ Heading gaps: {', '.join(gap.heading_gaps[:5])}"""
         for c in profiles: ce.update(c.top_entities); cq.update(c.top_questions); ch.update(c.h2)
         gap = GapAnalysis(missing_entities=[e for e,_ in ce.most_common(30) if e not in client_p.top_entities][:12], missing_questions=[q for q in cq if q not in client_p.top_questions][:12], heading_gaps=[h for h in ch if h not in client_p.h2][:12], density_gap=round(sum(c.keyword_density for c in profiles)/max(len(profiles),1)-client_p.keyword_density,3))
         aw=sum(c.word_count for c in profiles)/max(len(profiles),1)
-        score = round(min(100, min(35,(client_p.word_count/max(aw,1))*35)+max(0,30-len(gap.missing_entities)*2.2)),2)
+        score = round(min(100, min(35,(client_p.word_count/max(aw,1))*35)+max(0,30-len(gap.missing_entities)*2.2)))
         recs = []
-        if client_p.word_count<aw: recs.append(f"Expand content by ~{int(aw-client_p.word_count)} words")
+        if client_p.word_count<aw: recs.append(f"Expand content by ~{int(round((aw-client_p.word_count)/50.0)*50)} words")
         if gap.missing_entities: recs.append("Add entities: "+", ".join(gap.missing_entities[:6]))
         return ResearchResponse(seo_score=score, competitor_profiles=profiles, client_profile=client_p, gap_analysis=gap, recommendations=recs or ["Aligned"], raw_metrics={"ai_usage": {"total_input_tokens": self.usage.total_input_tokens, "total_output_tokens": self.usage.total_output_tokens, "total_cost_usd": self.usage.total_cost_usd}})
