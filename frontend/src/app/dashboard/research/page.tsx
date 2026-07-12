@@ -30,6 +30,29 @@ export default function ResearchPage() {
     }
   }, [businessProfile]);
 
+  // Deep-link: /dashboard/research?job=<id> opens that job's report (from the
+  // "View" link on the dashboard's Recent Jobs) instead of a blank form.
+  useEffect(() => {
+    const jobId = new URLSearchParams(window.location.search).get("job");
+    if (!jobId) return;
+    setLoading(true);
+    setLogs(["Loading job report…"]);
+    getJob(jobId, apiKey)
+      .then((job) => {
+        setLogs((job.logs ?? []).map((l: any) => l.message ?? String(l)));
+        if (job.status === "completed" && job.result) {
+          setResult(job.result);
+        } else if (job.status === "failed") {
+          toast.error(job.error || "This job failed.");
+        } else {
+          toast.message("This job is still running — check back shortly.");
+        }
+      })
+      .catch(() => toast.error("Could not load that job."))
+      .finally(() => setLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const profileContext = businessProfile
     ? `${businessProfile.city ? businessProfile.city + " · " : ""}${businessProfile.businessTypeLabel}`
     : null;

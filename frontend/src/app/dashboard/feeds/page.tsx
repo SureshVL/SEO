@@ -43,7 +43,6 @@ export default function FeedsPage() {
   const [importForm, setImportForm] = useState({ name: "", source_url: "", csv_text: "" });
 
   const fetchFeeds = async () => {
-    if (!apiKey) return;
     try {
       const res = await apiFetch(`/feeds`);
       if (res.ok) setFeeds((await res.json()).feeds || []);

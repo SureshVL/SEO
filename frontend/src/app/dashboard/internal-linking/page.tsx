@@ -45,7 +45,6 @@ export default function InternalLinkingPage() {
   });
 
   const fetchAnalysis = async () => {
-    if (!apiKey) return;
     setAnalyzing(true);
     try {
       const res = await apiFetch(`/linking/analyze`, {
@@ -64,7 +63,6 @@ export default function InternalLinkingPage() {
   };
 
   const fetchOpportunities = async () => {
-    if (!apiKey) return;
     setLoading(true);
     try {
       const res = await apiFetch(`/linking/opportunities`, {
@@ -124,7 +122,6 @@ export default function InternalLinkingPage() {
   };
 
   const handleApproveOpportunity = async (opportunityId: number) => {
-    if (!apiKey) return;
     try {
       const res = await apiFetch(`/linking/opportunities/${opportunityId}?status=approved`, {
         method: "PATCH",

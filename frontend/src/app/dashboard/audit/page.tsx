@@ -61,7 +61,6 @@ export default function AuditPage() {
   ];
 
   const fetchSummary = async () => {
-    if (!apiKey) return;
     try {
       const res = await apiFetch(`/audits/summary`, {
         headers: { "X-API-KEY": apiKey },
@@ -73,7 +72,6 @@ export default function AuditPage() {
   };
 
   const fetchIssues = async () => {
-    if (!apiKey) return;
     try {
       const res = await apiFetch(`/audits/issues`, {
         headers: { "X-API-KEY": apiKey },
@@ -88,7 +86,6 @@ export default function AuditPage() {
   };
 
   const fetchRuns = async () => {
-    if (!apiKey) return;
     try {
       const res = await apiFetch(`/audits/runs`, {
         headers: { "X-API-KEY": apiKey },
@@ -109,7 +106,6 @@ export default function AuditPage() {
   }, [tab, apiKey]);
 
   const handleRunAudit = async (auditType: string) => {
-    if (!apiKey) return;
     setRunning(auditType);
     try {
       const res = await apiFetch(`/audits/run`, {
@@ -131,7 +127,6 @@ export default function AuditPage() {
   };
 
   const handleUpdateIssueStatus = async (issueId: number, status: string) => {
-    if (!apiKey) return;
     try {
       const res = await apiFetch(`/audits/issues/${issueId}`, {
         method: "PATCH",

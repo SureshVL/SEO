@@ -57,7 +57,6 @@ export default function CompetitorsPage() {
   });
 
   const fetchCompetitors = async () => {
-    if (!apiKey) return;
     setLoading(true);
     try {
       const res = await apiFetch(`/competitors`, {
@@ -75,7 +74,6 @@ export default function CompetitorsPage() {
   };
 
   const fetchAnalysis = async (competitorId: number) => {
-    if (!apiKey) return;
     try {
       const res = await apiFetch(`/competitors/${competitorId}/analysis`, {
         headers: { "X-API-KEY": apiKey },
@@ -90,7 +88,6 @@ export default function CompetitorsPage() {
   };
 
   const fetchStrategies = async (competitorId: number) => {
-    if (!apiKey) return;
     try {
       const res = await apiFetch(`/competitors/strategies?competitor_id=${competitorId}`, {
         headers: { "X-API-KEY": apiKey },

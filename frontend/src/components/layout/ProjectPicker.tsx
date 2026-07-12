@@ -12,11 +12,13 @@ interface ProjectRow {
 }
 
 export function ProjectPicker() {
-  const { apiKey, currentProject, setCurrentProject } = useAppStore();
+  const { user, apiKey, currentProject, setCurrentProject } = useAppStore();
   const [projects, setProjects] = useState<ProjectRow[]>([]);
 
   useEffect(() => {
-    if (!apiKey) return;
+    // Auth is via the Supabase JWT (apiFetch attaches it); fetch once the user
+    // session is available. (Previously gated on a now-removed API key, which
+    // left the picker empty and blocked every project-scoped tool.)
     listProjects(apiKey)
       .then((rows) => {
         setProjects(rows);
@@ -27,7 +29,7 @@ export function ProjectPicker() {
       })
       .catch(() => setProjects([]));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [apiKey]);
+  }, [user]);
 
   if (projects.length === 0) return null;
 
