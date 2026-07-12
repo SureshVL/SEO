@@ -55,7 +55,6 @@ export default function CalendarPage() {
 
   // Fetch calendar events
   const fetchCalendar = async () => {
-    if (!apiKey) return;
 
     setLoading(true);
     try {
@@ -81,7 +80,6 @@ export default function CalendarPage() {
   };
 
   const fetchPublishLogs = async (eventId: number) => {
-    if (!apiKey) return;
 
     try {
       const res = await fetch(`${API}/calendar/${eventId}/logs`, {
@@ -170,7 +168,6 @@ export default function CalendarPage() {
   };
 
   const handleReschedule = async (eventId: number, newDate: string) => {
-    if (!apiKey) return;
 
     try {
       const res = await fetch(`${API}/calendar/${eventId}?new_date=${newDate}`, {

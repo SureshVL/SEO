@@ -62,7 +62,6 @@ export default function KeywordMappingPage() {
   const [uploadText, setUploadText] = useState("");
 
   const fetchClusters = async () => {
-    if (!apiKey) return;
     setLoading(true);
     try {
       const res = await apiFetch(`/keywords/clusters`, {
@@ -80,7 +79,6 @@ export default function KeywordMappingPage() {
   };
 
   const fetchMappings = async () => {
-    if (!apiKey) return;
     setLoading(true);
     try {
       const res = await apiFetch(`/keywords/mappings`, {
@@ -98,7 +96,6 @@ export default function KeywordMappingPage() {
   };
 
   const fetchGaps = async () => {
-    if (!apiKey) return;
     setLoading(true);
     try {
       // run the AI analysis (stores results), then read them back
@@ -173,7 +170,6 @@ export default function KeywordMappingPage() {
   };
 
   const handleClusterKeywords = async () => {
-    if (!apiKey) return;
     setClustering(true);
     try {
       const res = await apiFetch(`/keywords/cluster`, {
@@ -196,7 +192,6 @@ export default function KeywordMappingPage() {
   };
 
   const handleAssignKeywords = async () => {
-    if (!apiKey) return;
     setAssigning(true);
     try {
       const res = await apiFetch(`/keywords/assign`, {

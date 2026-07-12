@@ -109,7 +109,6 @@ export default function MultilingualPage() {
   ];
 
   const fetchLanguages = async () => {
-    if (!apiKey) return;
     setLoading(true);
     try {
       const res = await apiFetch(`/multilingual/languages`, {
@@ -127,7 +126,6 @@ export default function MultilingualPage() {
   };
 
   const fetchLocalizedContent = async () => {
-    if (!apiKey) return;
     setLoading(true);
     try {
       const res = await apiFetch(`/multilingual/content`, {
@@ -145,7 +143,6 @@ export default function MultilingualPage() {
   };
 
   const fetchHreflangConfig = async () => {
-    if (!apiKey) return;
     setLoading(true);
     try {
       const res = await apiFetch(`/multilingual/hreflang`, {
@@ -163,7 +160,6 @@ export default function MultilingualPage() {
   };
 
   const fetchRegionalTargeting = async () => {
-    if (!apiKey) return;
     setLoading(true);
     try {
       const res = await apiFetch(`/multilingual/regional-targeting`, {
@@ -181,7 +177,6 @@ export default function MultilingualPage() {
   };
 
   const fetchHealthAnalysis = async () => {
-    if (!apiKey) return;
     setAnalyzing(true);
     try {
       const res = await apiFetch(`/multilingual/analyze`, {

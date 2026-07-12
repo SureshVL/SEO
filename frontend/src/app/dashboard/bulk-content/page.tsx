@@ -152,7 +152,6 @@ export default function BulkContentPage() {
 
   const pollJobStatus = async (jobId: string) => {
     const poll = async () => {
-      if (!apiKey) return;
 
       try {
         const res = await fetch(`${API}/bulk/jobs/${jobId}`, {
@@ -187,7 +186,6 @@ export default function BulkContentPage() {
   };
 
   const fetchArticles = async (jobId: string) => {
-    if (!apiKey) return;
 
     try {
       const res = await fetch(`${API}/bulk/jobs/${jobId}/articles?limit=100`, {

@@ -49,7 +49,6 @@ export default function GitWritebackPage() {
   });
 
   const fetchConnections = async () => {
-    if (!apiKey) return;
     try {
       const res = await apiFetch(`/git/connections`);
       if (res.ok) setConnections((await res.json()).connections || []);
@@ -57,7 +56,6 @@ export default function GitWritebackPage() {
   };
 
   const fetchPrs = async () => {
-    if (!apiKey) return;
     try {
       const res = await apiFetch(`/git/prs`);
       if (res.ok) setPrs((await res.json()).pull_requests || []);

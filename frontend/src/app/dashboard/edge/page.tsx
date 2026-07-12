@@ -62,7 +62,6 @@ export default function EdgeDeployPage() {
   });
 
   const fetchSites = async () => {
-    if (!apiKey) return;
     try {
       const res = await apiFetch(`/edge/sites`);
       if (res.ok) {
@@ -73,7 +72,6 @@ export default function EdgeDeployPage() {
   };
 
   const fetchRules = async () => {
-    if (!apiKey) return;
     try {
       const res = await apiFetch(`/edge/rules`);
       if (res.ok) {
