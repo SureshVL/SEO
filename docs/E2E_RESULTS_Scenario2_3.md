@@ -30,7 +30,7 @@ off on the same key.
 
 | # | Feature | Endpoint | Result | Time | Real output |
 |---|---|---|---|---|---|
-| 1 | Technical Audit | `POST /audit/technical` | ⚠️ **PARTIAL** | 15–26s | `200` but **empty** — scores null because PageSpeed API returned **429** (keyless). **Needs a free `PAGESPEED_API_KEY`** (and optionally DataForSEO for on-page crawl). |
+| 1 | Technical Audit | `POST /audit/technical` | ✅ **PASS** (with PageSpeed key) | 53s | Lighthouse scores — Performance **43**, Accessibility **95**, SEO **100**, Best Practices **96**; Core Web Vitals (LCP 20.0s, FCP 7.3s, TBT 521ms, CLS 0); **19 prioritized actions** (reduce JS execution, unused JS, LCP discovery…). *Empty until a `PAGESPEED_API_KEY` is set — keyless requests 429.* |
 | 2 | Schema Detect | `POST /schema/detect` | ✅ **PASS** | 0.8s | Correctly reported **0 JSON-LD blocks** on the notion.so homepage (crawl-based detection). |
 | 3 | Schema Generate | `POST /schema/generate` | ✅ **PASS** | instant | **3 valid JSON-LD blocks** (Organization, FAQPage, SoftwareApplication) with `@context`/`@type`. |
 | 4 | Content Brief | `POST /content/brief` | ✅ **PASS** | 10s | Meta title *"Best Team Wiki Software for Knowledge Sharing (2024)"*, **8 headings** (incl. domain-aware "Why Notion Is the Ultimate Team Wiki Solution"), **10 must-cover entities**, **5 PAA questions**, 1,500-word target. |
