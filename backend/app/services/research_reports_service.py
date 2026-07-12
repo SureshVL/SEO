@@ -75,7 +75,13 @@ class ResearchReportsService:
                 "updated_at": datetime.utcnow().isoformat(),
             })
 
-            report_id = db_result.get("id") if isinstance(db_result, dict) else db_result[0].get("id")
+            if isinstance(db_result, dict):
+                report_id = db_result.get("id")
+            elif isinstance(db_result, list) and len(db_result) > 0:
+                report_id = db_result[0].get("id")
+            else:
+                raise ValueError(f"Unexpected db_result format: {db_result}")
+
             logger.info(f"Generated research report {report_id} for {req.vertical}/{req.month}")
 
             return ResearchReport(

@@ -17,7 +17,7 @@ const caseStudies = [
     company: "ShopFlow",
     vertical: "ecommerce",
     slug: "shopflow-revenue-increase",
-    metrics: { before: "12%", after: "28%", improvement: "+16%", timeframe: "4 months" },
+    metrics: { before: 12, after: 28, improvement: "+16%", timeframe: "4 months" },
     description: "Product page optimization with schema markup increased organic revenue contribution.",
   },
   {
@@ -41,7 +41,7 @@ const caseStudies = [
     company: "CloudTech Inc",
     vertical: "b2b",
     slug: "cloudtech-persona-segmentation",
-    metrics: { before: "18%", after: "52%", improvement: "+34%", timeframe: "7 months" },
+    metrics: { before: 18, after: 52, improvement: "+34%", timeframe: "7 months" },
     description: "Buyer persona segmentation aligned keyword strategy to sales cycle stages.",
   },
   {
@@ -81,7 +81,7 @@ const caseStudies = [
     company: "Strategic Advisors Inc",
     vertical: "consulting",
     slug: "strategic-advisors-pipeline",
-    metrics: { before: "22%", after: "85%", improvement: "+63%", timeframe: "8 months" },
+    metrics: { before: 22, after: 85, improvement: "+63%", timeframe: "8 months" },
     description: "Executive content strategy positioned firm as thought leader for enterprise clients.",
   },
   {
@@ -105,7 +105,7 @@ const caseStudies = [
     company: "Hope Foundation",
     vertical: "nonprofit",
     slug: "hope-foundation-donors",
-    metrics: { before: "2.1%", after: "5.4%", improvement: "156%", timeframe: "6 months" },
+    metrics: { before: 2.1, after: 5.4, improvement: "156%", timeframe: "6 months" },
     description: "Impact storytelling + donor intent keywords increased qualified donation inquiries.",
   },
   {
@@ -117,7 +117,7 @@ const caseStudies = [
     description: "Technical keyword + buyer journey mapping unified demand generation.",
   },
   {
-    title: "Healthcare Tech: 298% Lead Quality Improvement",
+    title: "Healthcare Tech: 394% Lead Quality Improvement",
     company: "CareConnect Solutions",
     vertical: "healthcare",
     slug: "careconnect-lead-quality",

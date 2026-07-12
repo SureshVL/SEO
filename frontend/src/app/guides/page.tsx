@@ -70,10 +70,13 @@ export default function GuidesPage() {
         }),
       });
 
+      const blob = new Blob(["PDF Guide: " + guide.title], { type: "application/pdf" });
+      const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
-      link.href = "#";
+      link.href = url;
       link.download = `${guide.title.replace(/\s+/g, "-").toLowerCase()}.pdf`;
       link.click();
+      URL.revokeObjectURL(url);
 
       setSubmitted(true);
       setTimeout(() => {
