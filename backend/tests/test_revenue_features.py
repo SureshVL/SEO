@@ -25,8 +25,11 @@ class TestCrawlBudgets:
         assert crawl_budget_for("enterprise", "active") == 10000
 
     def test_all_plans_have_usd_pricing(self):
-        for plan in PLANS.values():
-            assert plan.get("price_usd"), "international pricing missing"
+        for plan_id, plan in PLANS.items():
+            if plan_id == "free":
+                assert plan.get("price_usd") == 0
+            else:
+                assert plan.get("price_usd"), "international pricing missing"
 
 
 class TestStripeWebhookSignature:

@@ -39,7 +39,13 @@ def test_plans_have_required_fields():
         assert "price_inr" in plan
         assert "max_projects" in plan
         assert "max_keywords" in plan
-        assert plan["price_inr"] > 0
+        assert "ai_agents" in plan
+        assert "serp_checks_per_day" in plan
+        # free is $0; every paid tier must have a positive price
+        if plan_id == "free":
+            assert plan["price_inr"] == 0
+        else:
+            assert plan["price_inr"] > 0
 
 
 def test_plan_hierarchy():

@@ -90,15 +90,19 @@ class TestContentSchema:
 class TestBillingService:
     def test_plans_defined(self):
         from app.services.billing import PLANS
-        assert "starter" in PLANS
-        assert "growth" in PLANS
-        assert "agency" in PLANS
+        for tier in ("free", "starter", "growth", "pro", "agency"):
+            assert tier in PLANS
 
     def test_plan_prices(self):
-        from app.services.billing import PLANS
+        from app.services.billing import PLANS, annual_price_inr
+        assert PLANS["free"]["price_inr"] == 0
         assert PLANS["starter"]["price_inr"] == 1999
         assert PLANS["growth"]["price_inr"] == 4999
-        assert PLANS["agency"]["price_inr"] == 14999
+        assert PLANS["pro"]["price_inr"] == 9999
+        assert PLANS["agency"]["price_inr"] == 19999
+        # annual = monthly * 12 * 0.8 (20% off)
+        assert annual_price_inr("growth") == round(4999 * 12 * 0.8)
+        assert annual_price_inr("free") == 0
 
     def test_razorpay_client_disabled_without_keys(self):
         from app.services.billing import RazorpayClient

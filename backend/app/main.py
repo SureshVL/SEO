@@ -4606,14 +4606,26 @@ def create_subscription(
     plan: str,
     email: str,
     name: str = "",
+    interval: str = "month",
     _auth: None = Depends(require_api_key),
 ):
     from app.services.billing import PLANS, RazorpayClient
     if plan not in PLANS:
         raise HTTPException(status_code=400, detail=f"Invalid plan. Choose: {', '.join(PLANS.keys())}")
+    if plan == "free":
+        # Free tier has no checkout - activate directly (idempotent).
+        projects = _get_scoped_projects()
+        projects = projects if isinstance(projects, list) else [projects] if projects else []
+        org_id = projects[0].get("org_id", "") if projects else ""
+        if org_id:
+            _supabase_rest("patch", f"organizations?id=eq.{org_id}",
+                           {"plan": "free", "plan_status": "active"})
+        return {"subscription_id": "", "checkout_url": "", "status": "active", "plan": "free"}
 
     plan_info = PLANS[plan]
-    if not plan_info.get("razorpay_plan_id"):
+    plan_id_key = "razorpay_plan_id_annual" if interval == "year" else "razorpay_plan_id"
+    razorpay_plan_id = plan_info.get(plan_id_key) or plan_info.get("razorpay_plan_id")
+    if not razorpay_plan_id:
         raise HTTPException(status_code=400, detail="Razorpay plan ID not configured for this plan.")
 
     client = RazorpayClient()
@@ -4624,17 +4636,21 @@ def create_subscription(
     projects = projects if isinstance(projects, list) else [projects] if projects else []
     org_id = projects[0].get("org_id", "") if projects else ""
 
+    # annual = 1 charge/yr for 5 yrs, monthly = 12 charges/yr for 1 yr (Razorpay total_count semantics)
+    total_count = 5 if interval == "year" else 12
     result = client.create_subscription(
-        plan_id=plan_info["razorpay_plan_id"],
+        plan_id=razorpay_plan_id,
         customer_email=email,
         customer_name=name,
         org_id=org_id,
         plan_name=plan,
+        total_count=total_count,
     )
     return {
         "subscription_id": result.subscription_id,
         "checkout_url": result.short_url,
         "status": result.status,
+        "interval": interval,
     }
 
 
@@ -4745,8 +4761,13 @@ async def razorpay_webhook(request: Request):
 @app.get("/billing/plans")
 def list_plans():
     """Public plan catalog with INR + USD pricing for the pricing page."""
-    from app.services.billing import PLANS, stripe_price_id_for
-    from app.services.billing import RazorpayClient, StripeClient
+    from app.services.billing import (
+        ANNUAL_DISCOUNT,
+        PLANS,
+        RazorpayClient,
+        StripeClient,
+        annual_price_inr,
+    )
 
     return {
         "plans": [
@@ -4755,11 +4776,15 @@ def list_plans():
                 "name": p["name"],
                 "price_inr": p["price_inr"],
                 "price_usd": p.get("price_usd"),
+                "price_inr_annual": annual_price_inr(key),
                 "max_projects": p["max_projects"],
                 "max_keywords": p["max_keywords"],
+                "serp_checks_per_day": p.get("serp_checks_per_day", 0),
+                "ai_agents": p.get("ai_agents", 0),
             }
             for key, p in PLANS.items()
         ],
+        "annual_discount": ANNUAL_DISCOUNT,
         "rails": {
             "razorpay": RazorpayClient().enabled,
             "stripe": StripeClient().enabled,
@@ -4772,6 +4797,7 @@ def create_stripe_checkout(
     plan: str,
     email: str = "",
     org_id: str = "",
+    interval: str = "month",
     _auth: None = Depends(require_api_key),
 ):
     """Create a Stripe Checkout session (international payments)."""
@@ -4779,6 +4805,16 @@ def create_stripe_checkout(
 
     if plan not in PLANS:
         raise HTTPException(status_code=400, detail=f"Invalid plan. Choose: {', '.join(PLANS.keys())}")
+    if plan == "free":
+        # Free tier has no checkout - activate directly (idempotent).
+        if not org_id:
+            projects = _get_scoped_projects()
+            projects = projects if isinstance(projects, list) else [projects] if projects else []
+            org_id = projects[0].get("org_id", "") if projects else ""
+        if org_id:
+            _supabase_rest("patch", f"organizations?id=eq.{org_id}",
+                           {"plan": "free", "plan_status": "active"})
+        return {"checkout_url": "", "session_id": "", "plan": "free"}
 
     client = StripeClient()
     if not client.enabled:
@@ -4794,7 +4830,7 @@ def create_stripe_checkout(
         raise HTTPException(status_code=400, detail="No organization found for this project")
 
     try:
-        result = client.create_checkout_session(plan, org_id, customer_email=email)
+        result = client.create_checkout_session(plan, org_id, customer_email=email, interval=interval)
         return result
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))

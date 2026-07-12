@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Check, CreditCard, Loader2, TrendingUp, Zap } from "lucide-react";
+import { Check, CreditCard, Loader2, TrendingUp, Zap, Bot } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/lib/store";
 import { listProjects, listProjectKeywords, listJobs } from "@/lib/api";
@@ -10,18 +10,46 @@ import { toast } from "sonner";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
-const PLANS = [
+type Interval = "month" | "year";
+
+type Plan = {
+  id: string;
+  name: string;
+  priceMonthly: number;      // INR
+  agents: number;
+  serpPerDay: number;
+  features: string[];
+  popular?: boolean;
+  cta?: string;
+};
+
+const PLANS: Plan[] = [
+  {
+    id: "free",
+    name: "Free",
+    priceMonthly: 0,
+    agents: 2,
+    serpPerDay: 25,
+    features: [
+      "1 project",
+      "10 keywords tracked",
+      "1 AI report / month",
+      "Research + Keyword agents",
+      "Community support",
+    ],
+    cta: "Start free",
+  },
   {
     id: "starter",
     name: "Starter",
-    price: "₹1,999",
-    priceNum: 1999,
-    period: "/month",
+    priceMonthly: 1999,
+    agents: 3,
+    serpPerDay: 250,
     features: [
       "1 project",
       "50 keywords tracked",
-      "5 AI reports/month",
-      "Basic rank tracking",
+      "5 AI reports / month",
+      "Daily rank tracking",
       "PDF report export",
       "Email support",
     ],
@@ -29,9 +57,9 @@ const PLANS = [
   {
     id: "growth",
     name: "Growth",
-    price: "₹4,999",
-    priceNum: 4999,
-    period: "/month",
+    priceMonthly: 4999,
+    agents: 6,
+    serpPerDay: 1000,
     popular: true,
     features: [
       "5 projects",
@@ -45,34 +73,68 @@ const PLANS = [
     ],
   },
   {
+    id: "pro",
+    name: "Pro",
+    priceMonthly: 9999,
+    agents: 9,
+    serpPerDay: 2500,
+    features: [
+      "12 projects",
+      "800 keywords tracked",
+      "Google AI Mode analysis",
+      "Automated SEO audits",
+      "Programmatic SEO engine",
+      "CRO + ASO audits",
+      "Priority pipeline",
+      "Chat + email support",
+    ],
+  },
+  {
     id: "agency",
     name: "Agency",
-    price: "₹14,999",
-    priceNum: 14999,
-    period: "/month",
+    priceMonthly: 19999,
+    agents: 12,
+    serpPerDay: 5000,
     features: [
       "25 projects",
       "2,000 keywords tracked",
       "White-label reports",
-      "API access",
+      "REST API access",
       "10 team seats",
       "Revenue attribution",
       "Custom integrations",
-      "Dedicated support",
+      "Dedicated success manager",
     ],
   },
 ];
 
 const LIMITS: Record<string, { projects: number; keywords: number; reports: number }> = {
+  free: { projects: 1, keywords: 10, reports: 1 },
   starter: { projects: 1, keywords: 50, reports: 5 },
   growth: { projects: 5, keywords: 300, reports: 999 },
+  pro: { projects: 12, keywords: 800, reports: 999 },
   agency: { projects: 25, keywords: 2000, reports: 999 },
 };
 
+const ANNUAL_DISCOUNT = 0.20;
+
+function inr(n: number) {
+  return n === 0 ? "Free" : `₹${n.toLocaleString("en-IN")}`;
+}
+
+function priceForInterval(plan: Plan, interval: Interval): { display: string; note: string } {
+  if (plan.priceMonthly === 0) return { display: "Free", note: "forever" };
+  if (interval === "month") return { display: `${inr(plan.priceMonthly)}`, note: "/month" };
+  const annual = Math.round(plan.priceMonthly * 12 * (1 - ANNUAL_DISCOUNT));
+  const perMonth = Math.round(annual / 12);
+  return { display: `${inr(perMonth)}`, note: `/mo · billed ${inr(annual)} yearly` };
+}
+
 export default function BillingPage() {
   const { apiKey, businessProfile } = useAppStore();
+  const [interval, setInterval] = useState<Interval>("month");
   const [upgrading, setUpgrading] = useState<string | null>(null);
-  const [currentPlan] = useState("starter"); // comes from org in prod
+  const [currentPlan] = useState("free"); // TODO: fetch from org
   const [usage, setUsage] = useState({ projects: 0, keywords: 0, reports: 0 });
   const [loadingUsage, setLoadingUsage] = useState(true);
 
@@ -104,15 +166,14 @@ export default function BillingPage() {
     setUpgrading(planId);
     const email = encodeURIComponent(businessProfile?.websiteUrl || "user@example.com");
     try {
-      // Try Razorpay (India) first, fall back to Stripe (international)
       let res = await fetch(
-        `${API}/billing/subscribe?plan=${planId}&email=${email}`,
+        `${API}/billing/subscribe?plan=${planId}&email=${email}&interval=${interval}`,
         { method: "POST", headers: { "X-API-KEY": apiKey } },
       );
       let provider = "Razorpay";
       if (!res.ok) {
         res = await fetch(
-          `${API}/billing/stripe/checkout?plan=${planId}&email=${email}`,
+          `${API}/billing/stripe/checkout?plan=${planId}&email=${email}&interval=${interval}`,
           { method: "POST", headers: { "X-API-KEY": apiKey } },
         );
         provider = "Stripe";
@@ -122,7 +183,9 @@ export default function BillingPage() {
         throw new Error(err.detail || "Failed to start checkout");
       }
       const data = await res.json();
-      if (data.checkout_url) {
+      if (planId === "free") {
+        toast.success("Free plan activated. Enjoy!");
+      } else if (data.checkout_url) {
         window.open(data.checkout_url, "_blank");
         toast.success(`Redirecting to ${provider}…`);
       } else {
@@ -133,7 +196,7 @@ export default function BillingPage() {
     } finally { setUpgrading(null); }
   }
 
-  const limits = LIMITS[currentPlan];
+  const limits = LIMITS[currentPlan] || LIMITS.free;
 
   function UsageBar({ used, limit, label }: { used: number; limit: number; label: string }) {
     const pct = limit >= 999 ? 10 : Math.min((used / limit) * 100, 100);
@@ -160,7 +223,7 @@ export default function BillingPage() {
     <div className="animate-fade-in">
       <PageHeader
         title="Billing & Plans"
-        subtitle="Manage your subscription. Prices in INR, billed monthly via Razorpay."
+        subtitle="Choose a plan. Switch monthly or save 20% with annual billing."
         icon={Zap}
         accent="#FACC15"
       />
@@ -173,11 +236,15 @@ export default function BillingPage() {
           </h3>
           <div className="flex items-baseline gap-2 mb-1">
             <span className="text-3xl font-bold font-serif text-brand-400 capitalize">{currentPlan}</span>
-            <span className="text-zinc-500 text-sm">{PLANS.find(p => p.id === currentPlan)?.price}/month</span>
+            <span className="text-zinc-500 text-sm">
+              {PLANS.find(p => p.id === currentPlan)
+                ? priceForInterval(PLANS.find(p => p.id === currentPlan)!, "month").display + "/month"
+                : ""}
+            </span>
           </div>
-          <p className="text-xs text-zinc-500 mb-4">Trial active · Renews automatically</p>
+          <p className="text-xs text-zinc-500 mb-4">Active</p>
           <div className="text-xs text-zinc-600 bg-zinc-900/40 rounded-lg px-3 py-2">
-            Billed via Razorpay · Cancel anytime
+            Cancel anytime · Payments via Razorpay (IN) or Stripe (intl)
           </div>
         </div>
 
@@ -199,44 +266,83 @@ export default function BillingPage() {
         </div>
       </div>
 
+      {/* Interval toggle */}
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-sm font-semibold text-zinc-500 uppercase tracking-wider">Plans</h2>
+        <div className="inline-flex items-center gap-1 rounded-full border border-zinc-800 bg-zinc-900/50 p-1 text-xs">
+          <button
+            onClick={() => setInterval("month")}
+            className={cn(
+              "px-3 py-1.5 rounded-full transition-colors",
+              interval === "month" ? "bg-brand-600 text-white" : "text-zinc-400 hover:text-zinc-200",
+            )}
+          >
+            Monthly
+          </button>
+          <button
+            onClick={() => setInterval("year")}
+            className={cn(
+              "px-3 py-1.5 rounded-full transition-colors flex items-center gap-1.5",
+              interval === "year" ? "bg-brand-600 text-white" : "text-zinc-400 hover:text-zinc-200",
+            )}
+          >
+            Annual
+            <span className={cn(
+              "text-[10px] font-bold px-1.5 py-0.5 rounded",
+              interval === "year" ? "bg-white/20 text-white" : "bg-emerald-500/20 text-emerald-400",
+            )}>
+              -20%
+            </span>
+          </button>
+        </div>
+      </div>
+
       {/* Plan cards */}
-      <h2 className="text-sm font-semibold text-zinc-500 uppercase tracking-wider mb-4">Plans</h2>
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
         {PLANS.map(plan => {
           const isCurrent = plan.id === currentPlan;
+          const { display, note } = priceForInterval(plan, interval);
           return (
             <div
               key={plan.id}
               className={cn(
-                "card p-6 flex flex-col relative",
+                "card p-5 flex flex-col relative",
                 plan.popular ? "border-brand-500/40 bg-brand-500/5" : "",
                 isCurrent ? "border-emerald-500/30" : "",
               )}
             >
               {plan.popular && (
-                <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-brand-600 text-white text-[10px] font-bold uppercase tracking-wider px-3 py-1 rounded-full">
+                <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-brand-600 text-white text-[10px] font-bold uppercase tracking-wider px-3 py-1 rounded-full whitespace-nowrap">
                   Most popular
                 </div>
               )}
               {isCurrent && (
-                <div className="absolute -top-3 right-4 bg-emerald-600 text-white text-[10px] font-bold uppercase tracking-wider px-3 py-1 rounded-full">
+                <div className="absolute -top-3 right-3 bg-emerald-600 text-white text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-full">
                   Current
                 </div>
               )}
 
-              <div className="mb-5">
-                <h3 className="font-bold text-lg mb-1">{plan.name}</h3>
-                <div className="flex items-baseline gap-1">
-                  <span className="text-3xl font-bold font-serif">{plan.price}</span>
-                  <span className="text-zinc-500 text-sm">{plan.period}</span>
+              <div className="mb-4">
+                <h3 className="font-bold text-base mb-1">{plan.name}</h3>
+                <div className="flex items-baseline gap-1 min-h-[36px]">
+                  <span className="text-2xl font-bold font-serif">{display}</span>
+                </div>
+                <div className="text-[11px] text-zinc-500 min-h-[16px]">{note}</div>
+              </div>
+
+              <div className="flex items-center gap-3 mb-4 p-2.5 rounded-lg bg-zinc-900/50 border border-zinc-800/50">
+                <Bot className="w-4 h-4 text-brand-400 shrink-0" />
+                <div className="text-xs">
+                  <div className="font-semibold text-zinc-200">{plan.agents} AI Agents</div>
+                  <div className="text-zinc-500">{plan.serpPerDay.toLocaleString()} SERP checks/day</div>
                 </div>
               </div>
 
-              <ul className="space-y-2.5 flex-1 mb-6">
+              <ul className="space-y-2 flex-1 mb-5">
                 {plan.features.map(f => (
-                  <li key={f} className="flex items-center gap-2.5 text-sm text-zinc-300">
-                    <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                    {f}
+                  <li key={f} className="flex items-start gap-2 text-xs text-zinc-300">
+                    <Check className="w-3 h-3 text-emerald-400 shrink-0 mt-0.5" />
+                    <span>{f}</span>
                   </li>
                 ))}
               </ul>
@@ -245,7 +351,7 @@ export default function BillingPage() {
                 onClick={() => handleUpgrade(plan.id)}
                 disabled={isCurrent || upgrading === plan.id}
                 className={cn(
-                  "w-full py-2.5 rounded-lg text-sm font-medium flex items-center justify-center gap-2 transition-all",
+                  "w-full py-2 rounded-lg text-xs font-medium flex items-center justify-center gap-2 transition-all",
                   isCurrent
                     ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 cursor-default"
                     : plan.popular
@@ -254,11 +360,13 @@ export default function BillingPage() {
                 )}
               >
                 {upgrading === plan.id ? (
-                  <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Processing…</>
+                  <><Loader2 className="w-3 h-3 animate-spin" /> Processing…</>
                 ) : isCurrent ? (
-                  <><Check className="w-3.5 h-3.5" /> Current plan</>
+                  <><Check className="w-3 h-3" /> Current</>
+                ) : plan.id === "free" ? (
+                  "Start free"
                 ) : (
-                  `Upgrade to ${plan.name}`
+                  `Choose ${plan.name}`
                 )}
               </button>
             </div>
@@ -266,12 +374,12 @@ export default function BillingPage() {
         })}
       </div>
 
-      {/* Razorpay note */}
+      {/* Payment rails note */}
       <div className="mt-8 p-4 rounded-xl bg-zinc-900/40 border border-zinc-800/40 text-xs text-zinc-500 flex items-start gap-3">
         <CreditCard className="w-4 h-4 shrink-0 mt-0.5" />
         <div>
-          <p>Payments processed securely via <strong className="text-zinc-400">Razorpay</strong>. All amounts in INR including GST.</p>
-          <p className="mt-1">Configure Razorpay plan IDs in your backend <code className="text-brand-400">.env</code> — set <code className="text-brand-400">RAZORPAY_KEY_ID</code>, <code className="text-brand-400">RAZORPAY_KEY_SECRET</code>, and plan-specific <code className="text-brand-400">RAZORPAY_PLAN_ID_*</code> vars.</p>
+          <p>India: <strong className="text-zinc-400">Razorpay</strong> (INR, incl. GST). International: <strong className="text-zinc-400">Stripe</strong> (USD).</p>
+          <p className="mt-1">Annual billing saves 20% vs monthly. Cancel anytime — no lock-in.</p>
         </div>
       </div>
     </div>

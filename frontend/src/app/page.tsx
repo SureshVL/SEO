@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useState } from "react";
 import { ArrowRight, BarChart3, Bot, Globe, Search, Shield, Zap } from "lucide-react";
 
 const features = [
@@ -12,13 +13,40 @@ const features = [
   { icon: Zap, title: "Content Studio", desc: "AI writes SEO content with entity coverage, FAQ blocks, and E-E-A-T signals — calibrated against real SERP data." },
 ];
 
-const plans = [
-  { name: "Starter", price: "\u20B91,999", features: ["1 project", "50 keywords", "5 AI reports/mo", "Daily rank tracking"], cta: "Start free trial" },
-  { name: "Growth", price: "\u20B94,999", features: ["5 projects", "300 keywords", "Unlimited reports", "Backlink monitoring", "Content studio", "Competitor alerts"], cta: "Start free trial", popular: true },
-  { name: "Agency", price: "\u20B914,999", features: ["25 projects", "2,000 keywords", "White-label reports", "API access", "Team seats (10)", "Priority support"], cta: "Contact sales" },
+type LandingPlan = {
+  name: string;
+  priceMonthly: number;
+  agents: number;
+  serpPerDay: number;
+  features: string[];
+  cta: string;
+  popular?: boolean;
+};
+
+const plans: LandingPlan[] = [
+  { name: "Free", priceMonthly: 0, agents: 2, serpPerDay: 25,
+    features: ["1 project", "10 keywords", "1 AI report/mo", "Research + Keyword agents"], cta: "Start free" },
+  { name: "Starter", priceMonthly: 1999, agents: 3, serpPerDay: 250,
+    features: ["1 project", "50 keywords", "5 AI reports/mo", "Daily rank tracking"], cta: "Start free trial" },
+  { name: "Growth", priceMonthly: 4999, agents: 6, serpPerDay: 1000,
+    features: ["5 projects", "300 keywords", "Unlimited reports", "Content studio", "Competitor alerts"], cta: "Start free trial", popular: true },
+  { name: "Pro", priceMonthly: 9999, agents: 9, serpPerDay: 2500,
+    features: ["12 projects", "800 keywords", "Google AI Mode", "Automated audits", "Programmatic SEO"], cta: "Start free trial" },
+  { name: "Agency", priceMonthly: 19999, agents: 12, serpPerDay: 5000,
+    features: ["25 projects", "2,000 keywords", "White-label", "API access", "10 team seats"], cta: "Contact sales" },
 ];
 
+const ANNUAL_DISCOUNT = 0.20;
+
+function priceLabel(plan: LandingPlan, interval: "month" | "year"): { display: string; note: string } {
+  if (plan.priceMonthly === 0) return { display: "Free", note: "forever" };
+  if (interval === "month") return { display: `\u20B9${plan.priceMonthly.toLocaleString("en-IN")}`, note: "/mo" };
+  const perMonth = Math.round(plan.priceMonthly * (1 - ANNUAL_DISCOUNT));
+  return { display: `\u20B9${perMonth.toLocaleString("en-IN")}`, note: "/mo, billed yearly" };
+}
+
 export default function LandingPage() {
+  const [interval, setInterval] = useState<"month" | "year">("month");
   return (
     <div className="min-h-screen grain" style={{ background: "#110f0d" }}>
       {/* Nav */}
@@ -86,39 +114,76 @@ export default function LandingPage() {
       </section>
 
       {/* Pricing */}
-      <section id="pricing" className="max-w-5xl mx-auto px-6 py-28">
+      <section id="pricing" className="max-w-6xl mx-auto px-6 py-28">
         <p className="font-sans text-xs uppercase tracking-[0.2em] mb-4 text-center" style={{ color: "var(--copper)" }}>Pricing</p>
         <h2 className="font-serif text-4xl text-center mb-4" style={{ color: "#e8e0d4" }}>Transparent. Simple.</h2>
-        <p className="font-sans text-center mb-16" style={{ color: "rgba(200, 180, 150, 0.45)" }}>Start free, scale as you grow. Built for Indian businesses.</p>
-        <div className="grid md:grid-cols-3 gap-5">
-          {plans.map((plan) => (
-            <div
-              key={plan.name}
-              className="card p-7 relative"
-              style={plan.popular ? { borderColor: "rgba(200, 121, 65, 0.3)" } : {}}
+        <p className="font-sans text-center mb-8" style={{ color: "rgba(200, 180, 150, 0.45)" }}>Start free, scale as you grow. Save 20% with annual billing.</p>
+
+        <div className="flex justify-center mb-12">
+          <div className="inline-flex items-center gap-1 rounded-full p-1 text-xs font-sans" style={{ background: "rgba(200, 180, 150, 0.06)", border: "1px solid rgba(200, 180, 150, 0.1)" }}>
+            <button
+              onClick={() => setInterval("month")}
+              className="px-4 py-1.5 rounded-full transition-colors"
+              style={interval === "month"
+                ? { background: "var(--copper)", color: "#110f0d", fontWeight: 600 }
+                : { color: "rgba(200, 180, 150, 0.5)" }}
             >
-              {plan.popular && (
-                <div className="absolute -top-3 left-1/2 -translate-x-1/2 text-xs px-3 py-0.5 rounded-full font-sans font-medium" style={{ background: "rgba(200, 121, 65, 0.15)", color: "var(--copper-light)", border: "1px solid rgba(200, 121, 65, 0.2)" }}>
-                  Most popular
+              Monthly
+            </button>
+            <button
+              onClick={() => setInterval("year")}
+              className="px-4 py-1.5 rounded-full transition-colors flex items-center gap-1.5"
+              style={interval === "year"
+                ? { background: "var(--copper)", color: "#110f0d", fontWeight: 600 }
+                : { color: "rgba(200, 180, 150, 0.5)" }}
+            >
+              Annual
+              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: "rgba(107, 143, 113, 0.25)", color: "var(--sage)" }}>-20%</span>
+            </button>
+          </div>
+        </div>
+
+        <div className="grid md:grid-cols-2 lg:grid-cols-5 gap-4">
+          {plans.map((plan) => {
+            const { display, note } = priceLabel(plan, interval);
+            return (
+              <div
+                key={plan.name}
+                className="card p-5 relative flex flex-col"
+                style={plan.popular ? { borderColor: "rgba(200, 121, 65, 0.3)" } : {}}
+              >
+                {plan.popular && (
+                  <div className="absolute -top-3 left-1/2 -translate-x-1/2 text-[10px] px-3 py-0.5 rounded-full font-sans font-medium whitespace-nowrap" style={{ background: "rgba(200, 121, 65, 0.15)", color: "var(--copper-light)", border: "1px solid rgba(200, 121, 65, 0.2)" }}>
+                    Most popular
+                  </div>
+                )}
+                <h3 className="font-serif text-xl mb-1" style={{ color: "#e8e0d4" }}>{plan.name}</h3>
+                <div className="flex items-baseline gap-1 min-h-[36px]">
+                  <span className="font-serif text-2xl" style={{ color: plan.popular ? "var(--copper-light)" : "#e8e0d4" }}>{display}</span>
                 </div>
-              )}
-              <h3 className="font-serif text-2xl mb-1" style={{ color: "#e8e0d4" }}>{plan.name}</h3>
-              <div className="flex items-baseline gap-1 mb-7">
-                <span className="font-serif text-3xl" style={{ color: plan.popular ? "var(--copper-light)" : "#e8e0d4" }}>{plan.price}</span>
-                <span className="text-sm font-sans" style={{ color: "rgba(200, 180, 150, 0.35)" }}>/mo</span>
+                <div className="text-[11px] font-sans mb-4 min-h-[16px]" style={{ color: "rgba(200, 180, 150, 0.35)" }}>{note}</div>
+
+                <div className="mb-4 p-2.5 rounded-lg flex items-center gap-2" style={{ background: "rgba(200, 180, 150, 0.04)", border: "1px solid rgba(200, 180, 150, 0.06)" }}>
+                  <Bot className="w-3.5 h-3.5" style={{ color: "var(--copper)" }} />
+                  <div className="text-[11px] font-sans leading-tight">
+                    <div style={{ color: "#e8e0d4", fontWeight: 600 }}>{plan.agents} AI Agents</div>
+                    <div style={{ color: "rgba(200, 180, 150, 0.45)" }}>{plan.serpPerDay.toLocaleString()} SERP/day</div>
+                  </div>
+                </div>
+
+                <ul className="space-y-2 flex-1 mb-5">
+                  {plan.features.map((f) => (
+                    <li key={f} className="flex items-start gap-2 text-xs font-sans" style={{ color: "rgba(200, 180, 150, 0.6)" }}>
+                      <span style={{ color: "var(--sage)" }}>&#10003;</span> <span>{f}</span>
+                    </li>
+                  ))}
+                </ul>
+                <Link href="/auth/signup" className={plan.popular ? "btn-primary w-full text-center block text-xs py-2" : "btn-secondary w-full text-center block text-xs py-2"}>
+                  {plan.cta}
+                </Link>
               </div>
-              <ul className="space-y-3 mb-8">
-                {plan.features.map((f) => (
-                  <li key={f} className="flex items-start gap-2 text-sm font-sans" style={{ color: "rgba(200, 180, 150, 0.6)" }}>
-                    <span style={{ color: "var(--sage)" }}>&#10003;</span> {f}
-                  </li>
-                ))}
-              </ul>
-              <Link href="/auth/signup" className={plan.popular ? "btn-primary w-full text-center block" : "btn-secondary w-full text-center block"}>
-                {plan.cta}
-              </Link>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </section>
 

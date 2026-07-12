@@ -74,8 +74,15 @@ class TestPublicEndpoints:
         r = client.get("/billing/plans")
         assert r.status_code == 200
         data = r.json()
-        assert {p["id"] for p in data["plans"]} == {"starter", "growth", "agency"}
-        assert all(p["price_usd"] for p in data["plans"])
+        assert {p["id"] for p in data["plans"]} == {"free", "starter", "growth", "pro", "agency"}
+        # every plan advertises an annual price + AI agent count + per-day serp
+        # allowance - these back the marketing/toggle UI
+        paid = [p for p in data["plans"] if p["id"] != "free"]
+        assert all(p["price_usd"] for p in paid)
+        assert all(p["price_inr_annual"] > 0 for p in paid)
+        assert all(p["ai_agents"] > 0 for p in data["plans"])
+        assert all(p["serp_checks_per_day"] > 0 for p in data["plans"])
+        assert 0 < data["annual_discount"] < 1
         assert "razorpay" in data["rails"] and "stripe" in data["rails"]
 
     def test_stripe_webhook_rejects_unsigned(self):

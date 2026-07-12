@@ -19,7 +19,25 @@ from app.core.config import settings
 
 logger = logging.getLogger("omnirank.billing")
 
+# Annual discount applied to the marketing price. Kept as a single knob so
+# checkout, /billing/plans, and the UI stay in sync.
+ANNUAL_DISCOUNT = 0.20
+
 PLANS = {
+    "free": {
+        "name": "Free",
+        "price_inr": 0,
+        "price_paise": 0,
+        "price_usd": 0,
+        "currency": "INR",
+        "max_projects": 1,
+        "max_keywords": 10,
+        "max_reports_per_month": 1,
+        "serp_checks_per_day": 25,
+        "ai_agents": 2,             # Research + Keyword only
+        "razorpay_plan_id": "",     # free = no checkout
+        "razorpay_plan_id_annual": "",
+    },
     "starter": {
         "name": "Starter",
         "price_inr": 1999,          # rupees (display + test)
@@ -29,7 +47,10 @@ PLANS = {
         "max_projects": 1,
         "max_keywords": 50,
         "max_reports_per_month": 5,
-        "razorpay_plan_id": "",     # set via env
+        "serp_checks_per_day": 250,
+        "ai_agents": 3,
+        "razorpay_plan_id": "",
+        "razorpay_plan_id_annual": "",
     },
     "growth": {
         "name": "Growth",
@@ -40,20 +61,48 @@ PLANS = {
         "max_projects": 5,
         "max_keywords": 300,
         "max_reports_per_month": 999,
+        "serp_checks_per_day": 1000,
+        "ai_agents": 6,
         "razorpay_plan_id": "",
+        "razorpay_plan_id_annual": "",
+    },
+    "pro": {
+        "name": "Pro",
+        "price_inr": 9999,
+        "price_paise": 999900,
+        "price_usd": 149,
+        "currency": "INR",
+        "max_projects": 12,
+        "max_keywords": 800,
+        "max_reports_per_month": 999,
+        "serp_checks_per_day": 2500,
+        "ai_agents": 9,             # + AI Mode, Automated Audits, Programmatic
+        "razorpay_plan_id": "",
+        "razorpay_plan_id_annual": "",
     },
     "agency": {
         "name": "Agency",
-        "price_inr": 14999,
-        "price_paise": 1499900,
-        "price_usd": 199,
+        "price_inr": 19999,
+        "price_paise": 1999900,
+        "price_usd": 299,
         "currency": "INR",
         "max_projects": 25,
         "max_keywords": 2000,
         "max_reports_per_month": 999,
+        "serp_checks_per_day": 5000,
+        "ai_agents": 12,            # all agents + white-label + API + team
         "razorpay_plan_id": "",
+        "razorpay_plan_id_annual": "",
     },
 }
+
+
+def annual_price_inr(plan_key: str) -> int:
+    """Marketing annual price in INR (monthly * 12 * (1 - discount)), rounded."""
+    p = PLANS.get(plan_key)
+    if not p or not p["price_inr"]:
+        return 0
+    return round(p["price_inr"] * 12 * (1 - ANNUAL_DISCOUNT))
 
 
 @dataclass
@@ -171,13 +220,26 @@ def crawl_budget_for(plan: str | None, plan_status: str | None) -> int:
     return CRAWL_BUDGETS.get(plan or "", CRAWL_BUDGETS["trial"])
 
 
-def stripe_price_id_for(plan: str) -> str:
-    """Stripe recurring Price ID for a plan, configured via env."""
-    return {
+def stripe_price_id_for(plan: str, interval: str = "month") -> str:
+    """Stripe recurring Price ID for a plan/interval, configured via env.
+
+    Two interval families: 'month' (default) and 'year' (20% off marketing).
+    Free plan has no price id — checkout is skipped upstream.
+    """
+    interval = "year" if interval == "year" else "month"
+    monthly = {
         "starter": settings.stripe_price_starter,
         "growth": settings.stripe_price_growth,
+        "pro": settings.stripe_price_pro,
         "agency": settings.stripe_price_agency,
-    }.get(plan, "")
+    }
+    annual = {
+        "starter": settings.stripe_price_starter_annual,
+        "growth": settings.stripe_price_growth_annual,
+        "pro": settings.stripe_price_pro_annual,
+        "agency": settings.stripe_price_agency_annual,
+    }
+    return (annual if interval == "year" else monthly).get(plan, "")
 
 
 class StripeClient:
@@ -198,12 +260,13 @@ class StripeClient:
         plan: str,
         org_id: str,
         customer_email: str = "",
+        interval: str = "month",
     ) -> dict:
         """Create a Stripe Checkout session for a subscription plan."""
         if not self.enabled:
             raise RuntimeError("Stripe not configured")
 
-        price_id = stripe_price_id_for(plan)
+        price_id = stripe_price_id_for(plan, interval)
         if not price_id:
             raise ValueError(f"Stripe price ID not configured for plan '{plan}'")
 
@@ -216,8 +279,10 @@ class StripeClient:
             "cancel_url": f"{base}/dashboard/billing?status=cancelled",
             "metadata[org_id]": org_id,
             "metadata[plan]": plan,
+            "metadata[interval]": interval,
             "subscription_data[metadata][org_id]": org_id,
             "subscription_data[metadata][plan]": plan,
+            "subscription_data[metadata][interval]": interval,
             "allow_promotion_codes": "true",
         }
         if customer_email:
