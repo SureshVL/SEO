@@ -9,6 +9,9 @@ class Settings(BaseSettings):
     llm_provider: str = "auto"
     anthropic_api_key: Optional[str] = None
     gemini_api_key: Optional[str] = None
+    # Comma-separated fallback Gemini keys; rotated to when the primary key hits
+    # its quota (429). Lets a fleet of free-tier keys act as one higher quota.
+    gemini_api_keys: str = ""
     groq_api_key: Optional[str] = None
     openai_api_key: Optional[str] = None
     perplexity_api_key: Optional[str] = None
@@ -48,6 +51,16 @@ class Settings(BaseSettings):
     wordpress_deploy_webhook: str = ""
     shopify_deploy_webhook: str = ""
     appstore_deploy_webhook: str = ""
+
+    def gemini_api_key_list(self) -> list[str]:
+        """Primary Gemini key followed by any comma-separated fallback keys,
+        de-duplicated, empties dropped. Used for quota-based key rotation."""
+        keys: list[str] = []
+        for raw in [self.gemini_api_key or ""] + self.gemini_api_keys.split(","):
+            k = raw.strip()
+            if k and k not in keys:
+                keys.append(k)
+        return keys
 
     class Config:
         env_file = ".env"
