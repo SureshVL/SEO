@@ -697,6 +697,77 @@ def optimised_keywords(
     return _build_optimised_keywords(body)
 
 
+# ── CRO audit (conversion-rate optimization for a landing page) ─────
+
+class CroAuditRequest(BaseModel):
+    url: str
+    goal: str = ""  # e.g. "sign up", "book a demo", "purchase"
+
+
+@app.post("/cro/audit")
+def cro_audit(
+    body: CroAuditRequest,
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """Audit a landing page for conversion issues (CTA, trust, copy, forms…)."""
+    import re as _re
+    from app.core.ssrf import validate_public_url, guarded_client, SSRFError
+
+    try:
+        validate_public_url(body.url)
+    except SSRFError:
+        raise HTTPException(status_code=400, detail="URL must be a public http(s) address.")
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid URL.")
+
+    try:
+        with guarded_client(timeout=20, follow_redirects=True) as client:
+            resp = client.get(body.url, headers={"User-Agent": "Mozilla/5.0 (OmniRank-CRO)"})
+            html = resp.text[:200_000]
+    except Exception:
+        raise HTTPException(status_code=502, detail="Could not fetch that page.")
+
+    ctas = [_re.sub(r"<[^>]+>", "", c).strip()
+            for c in _re.findall(r"<(?:button|a)[^>]*>(.*?)</(?:button|a)>", html, _re.I | _re.S)]
+    ctas = [c for c in ctas if 2 <= len(c) <= 40][:20]
+    title_m = _re.search(r"<title[^>]*>(.*?)</title>", html, _re.I | _re.S)
+    title = (title_m.group(1).strip() if title_m else "")
+    text = _re.sub(r"<(script|style)[^>]*>.*?</\1>", "", html, flags=_re.I | _re.S)
+    text = _re.sub(r"\s+", " ", _re.sub(r"<[^>]+>", " ", text)).strip()[:4000]
+
+    llm = _get_llm_client()
+    system = (
+        "You are a senior CRO (conversion-rate optimization) consultant. Audit a landing "
+        "page and respond ONLY as JSON: {\"score\":<0-100>,\"summary\":\"1-2 sentences\","
+        "\"issues\":[{\"category\":\"CTA|Trust|Copy|Form|Mobile|Value Prop|Social Proof|Urgency\","
+        "\"severity\":\"high|medium|low\",\"finding\":\"...\",\"fix\":\"...\"}],"
+        "\"quick_wins\":[\"...\"]}. Give 6-10 concrete, specific issues."
+    )
+    user = (
+        f"URL: {body.url}\nConversion goal: {body.goal or 'primary conversion'}\n"
+        f"Page title: {title}\nCTAs detected: {', '.join(ctas) or 'none found'}\n"
+        f"Page copy excerpt: {text}"
+    )
+    parsed, _ = llm.complete_json(
+        messages=[{"role": "user", "content": user}], system=system,
+        max_tokens=3000, temperature=0.3,
+    )
+    parsed = parsed if isinstance(parsed, dict) else {}
+    score = parsed.get("score")
+    try:
+        score = round(float(score)) if score is not None else None
+    except Exception:
+        score = None
+    return {
+        "url": body.url, "goal": body.goal, "score": score,
+        "summary": parsed.get("summary", ""),
+        "issues": parsed.get("issues", []),
+        "quick_wins": parsed.get("quick_wins", []),
+        "ctas_detected": ctas[:12],
+    }
+
+
 # ── Technical Audit (NEW) ──────────────────────────────────────────
 
 def _build_technical_agent() -> TechnicalAgent:

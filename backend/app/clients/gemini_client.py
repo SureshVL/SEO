@@ -137,10 +137,11 @@ class GeminiClient:
         }
 
         model_id = GEMINI_MODELS.get(model, model)
-        # 2.5 models "think" by default, which consumes the output-token budget
-        # and can truncate/empty the JSON we ask for. Disable it for deterministic
-        # structured output.
-        if "2.5" in model_id:
+        # 2.5 models (including the "-latest" aliases, which currently resolve to
+        # gemini-2.5-flash) "think" by default, which consumes the output-token
+        # budget and can truncate/empty the JSON we ask for. Disable it for
+        # deterministic structured output.
+        if "2.5" in model_id or "latest" in model_id:
             payload["generationConfig"]["thinkingConfig"] = {"thinkingBudget": 0}
         start = time.time()
         last_error: Exception | None = None

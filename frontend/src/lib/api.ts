@@ -151,6 +151,29 @@ export async function optimisedKeywords(payload: {
   );
 }
 
+export interface CroIssue {
+  category: string;
+  severity: "high" | "medium" | "low";
+  finding: string;
+  fix: string;
+}
+export interface CroAuditResult {
+  url: string;
+  goal: string;
+  score: number | null;
+  summary: string;
+  issues: CroIssue[];
+  quick_wins: string[];
+  ctas_detected: string[];
+}
+export async function croAudit(payload: { url: string; goal?: string }, apiKey: string) {
+  return request<CroAuditResult>(
+    "/cro/audit",
+    { method: "POST", body: JSON.stringify(payload) },
+    apiKey
+  );
+}
+
 export async function getJob(jobId: string, apiKey: string) {
   return request<{
     job_id: string;
