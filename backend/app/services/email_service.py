@@ -134,29 +134,39 @@ def get_email_service() -> EmailService:
 
 # Subscription management
 class SubscriptionManager:
-    """Handle email subscription state and nurture sequence."""
+    """Handle email subscription state and nurture sequence.
 
-    def __init__(self, supabase_client):
-        self.db = supabase_client
+    Takes the app's Supabase REST helper (main._supabase_rest) instead of the
+    supabase-py client, which is not a project dependency.
+    """
+
+    def __init__(self, db_fn):
+        # db_fn(method, path, payload=None, params="") -> dict | list
+        self.db = db_fn
 
     def subscribe(
         self, email: str, vertical: str, source: str = "research_report"
     ) -> bool:
         """Add subscriber and initialize nurture sequence."""
         try:
-            # Insert subscriber
-            self.db.table("email_subscribers").insert(
-                {
-                    "email": email,
-                    "vertical": vertical,
-                    "source": source,
-                    "subscribed_at": datetime.utcnow().isoformat(),
+            existing = self.db("get", "email_subscribers", params=f"email=eq.{email}")
+            if existing:
+                # Re-subscribe: clear any previous unsubscribe
+                self.db("patch", f"email_subscribers?email=eq.{email}", {
                     "unsubscribed_at": None,
-                    "nurture_sequence": 0,
-                    "last_email_sent": None,
-                    "email_count": 0,
-                }
-            ).execute()
+                    "vertical": vertical,
+                })
+                return True
+            self.db("post", "email_subscribers", {
+                "email": email,
+                "vertical": vertical,
+                "source": source,
+                "subscribed_at": datetime.utcnow().isoformat(),
+                "unsubscribed_at": None,
+                "nurture_sequence": 0,
+                "last_email_sent": None,
+                "email_count": 0,
+            })
             return True
         except Exception as e:
             print(f"Subscription error: {e}")
@@ -165,9 +175,9 @@ class SubscriptionManager:
     def unsubscribe(self, email: str) -> bool:
         """Unsubscribe email address."""
         try:
-            self.db.table("email_subscribers").update(
-                {"unsubscribed_at": datetime.utcnow().isoformat()}
-            ).eq("email", email).execute()
+            self.db("patch", f"email_subscribers?email=eq.{email}", {
+                "unsubscribed_at": datetime.utcnow().isoformat(),
+            })
             return True
         except Exception as e:
             print(f"Unsubscribe error: {e}")
@@ -176,10 +186,10 @@ class SubscriptionManager:
     def get_active_subscribers(self, limit: int = 100) -> list:
         """Get subscribers ready for nurture emails."""
         try:
-            result = self.db.table("email_subscribers").select(
-                "*"
-            ).is_("unsubscribed_at", "null").limit(limit).execute()
-            return result.data or []
+            return self.db(
+                "get", "email_subscribers",
+                params=f"unsubscribed_at=is.null&limit={limit}",
+            ) or []
         except Exception as e:
             print(f"Query error: {e}")
             return []
@@ -189,12 +199,10 @@ class SubscriptionManager:
     ) -> bool:
         """Update subscriber after sending nurture email."""
         try:
-            self.db.table("email_subscribers").update(
-                {
-                    "nurture_sequence": sequence,
-                    "last_email_sent": last_sent,
-                }
-            ).eq("email", email).execute()
+            self.db("patch", f"email_subscribers?email=eq.{email}", {
+                "nurture_sequence": sequence,
+                "last_email_sent": last_sent,
+            })
             return True
         except Exception as e:
             print(f"Update error: {e}")

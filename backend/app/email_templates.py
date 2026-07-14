@@ -183,7 +183,7 @@ def nurture_email_2(subscriber_email: str, vertical: str, unsubscribe_link: str)
 
 def nurture_email_3(subscriber_email: str, unsubscribe_link: str) -> tuple[str, str]:
     """Email 3 in nurture sequence: Case study social proof."""
-    subject = "How [Company] increased organic revenue by 186%"
+    subject = "The framework behind 186% organic revenue growth"
 
     html = f"""
     <!DOCTYPE html>
@@ -198,7 +198,8 @@ def nurture_email_3(subscriber_email: str, unsubscribe_link: str) -> tuple[str, 
     </head>
     <body>
         <div class="container">
-            <h2>How Acme CRM increased organic revenue by 186%</h2>
+            <h2>The framework behind 186% organic revenue growth</h2>
+            <p style="font-size: 12px; color: #9ca3af;">An illustrative scenario from our SaaS strategy playbook.</p>
 
             <div class="stat">
                 <strong>47 → 207 keywords ranking</strong><br/>
@@ -207,12 +208,12 @@ def nurture_email_3(subscriber_email: str, unsubscribe_link: str) -> tuple[str, 
 
             <div class="stat">
                 <strong>$1.2M → $3.3M ARR from organic</strong><br/>
-                Real numbers from a real SaaS company
+                An illustrative scenario from our SaaS strategy playbook
             </div>
 
-            <p>They used one simple framework: keyword clustering by buyer persona instead of features.</p>
+            <p>The framework is simple: keyword clustering by buyer persona instead of features.</p>
 
-            <p>Read the full case study to see exactly what they did (and how you can repeat it):</p>
+            <p>Read the full playbook to see exactly how it works (and how to apply it):</p>
 
             <div style="text-align: center; margin: 30px 0;">
                 <a href="https://omni-rank.com/case-studies" class="button">See All Case Studies</a>

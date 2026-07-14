@@ -140,9 +140,12 @@ export default function CaseStudiesPage() {
 
       <section className="bg-gradient-to-br from-slate-50 via-violet-50 to-blue-50 py-20">
         <div className="max-w-4xl mx-auto px-6 text-center">
-          <h1 className="text-4xl md:text-5xl font-bold text-slate-900 mb-6">15 Real Results. 15 Different Industries.</h1>
-          <p className="text-lg text-slate-600 max-w-2xl mx-auto">
-            How companies across every vertical used OMNI-RANK to dominate AI search and traditional rankings.
+          <h1 className="text-4xl md:text-5xl font-bold text-slate-900 mb-6">15 Strategy Playbooks. 15 Different Industries.</h1>
+          <p className="text-lg text-slate-600 max-w-2xl mx-auto mb-6">
+            Illustrative scenarios showing how OMNI-RANK strategies play out across every vertical — the tactics, the timeline, and the metrics that move.
+          </p>
+          <p className="text-xs text-slate-500 max-w-2xl mx-auto bg-white/70 border border-slate-200 rounded-lg px-4 py-3">
+            These are illustrative example scenarios with fictional company names, based on typical outcomes for each strategy — not client testimonials. Real client case studies will be published here with written permission as they complete.
           </p>
         </div>
       </section>

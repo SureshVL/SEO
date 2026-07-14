@@ -42,6 +42,20 @@ interface ResearchReport {
 export default function ResearchPage() {
   const [reports, setReports] = useState<Record<string, ResearchReport[]>>({});
   const [loading, setLoading] = useState(true);
+  const [subEmail, setSubEmail] = useState("");
+  const [subState, setSubState] = useState<"idle" | "done" | "error">("idle");
+
+  async function subscribe(e: React.FormEvent) {
+    e.preventDefault();
+    try {
+      const base = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+      const qs = new URLSearchParams({ email: subEmail, vertical: "general" });
+      const res = await fetch(`${base}/email/subscribe?${qs}`, { method: "POST" });
+      setSubState(res.ok ? "done" : "error");
+    } catch {
+      setSubState("error");
+    }
+  }
 
   useEffect(() => {
     const fetchReports = async () => {
@@ -160,22 +174,34 @@ export default function ResearchPage() {
           <p className="text-lg text-slate-300 mb-8">
             Subscribe to our research reports and get AI visibility data before your competitors.
           </p>
-          <form className="flex gap-3 justify-center max-w-md mx-auto mb-6">
-            <input
-              type="email"
-              placeholder="your@email.com"
-              className="flex-1 px-4 py-3 rounded-lg text-slate-900 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-violet-500"
-              required
-            />
-            <button
-              type="submit"
-              className="bg-violet-600 text-white font-semibold px-8 py-3 rounded-lg hover:bg-violet-700 transition"
-            >
-              Subscribe
-            </button>
-          </form>
+          {subState === "done" ? (
+            <p className="text-emerald-300 font-semibold mb-6">
+              ✓ Subscribed — your first report arrives with the next monthly edition.
+            </p>
+          ) : (
+            <form onSubmit={subscribe} className="flex gap-3 justify-center max-w-md mx-auto mb-6">
+              <input
+                type="email"
+                value={subEmail}
+                onChange={(e) => setSubEmail(e.target.value)}
+                placeholder="your@email.com"
+                className="flex-1 px-4 py-3 rounded-lg text-slate-900 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-violet-500"
+                required
+              />
+              <button
+                type="submit"
+                className="bg-violet-600 text-white font-semibold px-8 py-3 rounded-lg hover:bg-violet-700 transition"
+              >
+                Subscribe
+              </button>
+            </form>
+          )}
+          {subState === "error" && (
+            <p className="text-rose-300 text-sm mb-4">Subscription failed — please try again.</p>
+          )}
           <p className="text-sm text-slate-400">
-            No spam. Monthly research reports only. Unsubscribe anytime.
+            No spam. Monthly research reports only. Unsubscribe anytime ·{" "}
+            <Link href="/privacy" className="underline">Privacy</Link>
           </p>
         </div>
       </section>

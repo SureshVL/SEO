@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from datetime import datetime
 
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -47,6 +48,15 @@ from app.services.persistence import (
 
 logging.basicConfig(level=getattr(logging, settings.log_level.upper(), logging.INFO))
 logger = logging.getLogger("omnirank")
+
+# Fail fast in prod when shipped with dev-default secrets — a default JWT
+# secret lets anyone forge tokens, and a default orchestrator key opens
+# every API-key-protected endpoint.
+if settings.environment.lower() == "prod":
+    if settings.jwt_secret == "change-this-to-a-strong-secret":
+        raise RuntimeError("JWT_SECRET is still the dev default — set a strong secret before running in prod")
+    if settings.orchestrator_api_key == "dev-orchestrator-key" and not settings.orchestrator_keys_json:
+        raise RuntimeError("ORCHESTRATOR_API_KEY is still the dev default — set a strong key before running in prod")
 
 app = FastAPI(
     title="OMNI-RANK OR-1 API",
@@ -5180,7 +5190,11 @@ def get_job_report(job_id: str):
 # ── Email & Subscription Management ──────────────────────────
 
 @app.post("/email/subscribe")
-def subscribe_to_research_report(email: str, vertical: str = "general"):
+def subscribe_to_research_report(
+    email: str,
+    vertical: str = "general",
+    _rate: None = Depends(enforce_rate_limit),
+):
     """Subscribe to monthly research report and nurture sequence."""
     # Validate email
     if not email or "@" not in email:
@@ -5188,16 +5202,9 @@ def subscribe_to_research_report(email: str, vertical: str = "general"):
 
     try:
         from app.services.email_service import SubscriptionManager, get_email_service
-        from supabase import create_client
-
-        # Create Supabase client for subscription manager
-        supabase = create_client(
-            settings.supabase_url,
-            settings.supabase_service_role_key,
-        )
 
         # Subscribe in database
-        manager = SubscriptionManager(supabase)
+        manager = SubscriptionManager(_supabase_rest)
         if not manager.subscribe(email, vertical, "research_report"):
             raise HTTPException(status_code=400, detail="Failed to subscribe")
 
@@ -5211,6 +5218,8 @@ def subscribe_to_research_report(email: str, vertical: str = "general"):
             "message": f"Successfully subscribed {email} to research reports",
             "email": email,
         }
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Subscription error: {e}")
         raise HTTPException(status_code=500, detail="Subscription failed")
@@ -5224,14 +5233,8 @@ def unsubscribe_from_emails(email: str):
 
     try:
         from app.services.email_service import SubscriptionManager
-        from supabase import create_client
 
-        supabase = create_client(
-            settings.supabase_url,
-            settings.supabase_service_role_key,
-        )
-
-        manager = SubscriptionManager(supabase)
+        manager = SubscriptionManager(_supabase_rest)
         manager.unsubscribe(email)
 
         return {
@@ -5244,18 +5247,15 @@ def unsubscribe_from_emails(email: str):
 
 
 @app.post("/cron/send-research-reports")
-def send_monthly_research_reports():
+def send_monthly_research_reports(_auth: None = Depends(require_api_key)):
     """Cron job endpoint: Send monthly research reports to all subscribers.
-    Run this monthly via external scheduler (GitHub Actions, AWS EventBridge, etc)."""
+    Run this monthly via external scheduler (GitHub Actions, AWS EventBridge, etc).
+    Requires the orchestrator API key — an open endpoint here would let anyone
+    trigger mass email sends."""
     try:
         from app.services.email_service import SubscriptionManager, get_email_service
-        from supabase import create_client
 
-        supabase = create_client(
-            settings.supabase_url,
-            settings.supabase_service_role_key,
-        )
-        manager = SubscriptionManager(supabase)
+        manager = SubscriptionManager(_supabase_rest)
         email_service = get_email_service()
 
         # Get all active subscribers
@@ -5289,19 +5289,14 @@ def send_monthly_research_reports():
 
 
 @app.post("/cron/send-nurture-sequence")
-def send_nurture_emails():
+def send_nurture_emails(_auth: None = Depends(require_api_key)):
     """Cron job endpoint: Send nurture emails to subscribers.
-    Run this weekly via external scheduler."""
+    Run this weekly via external scheduler. Requires the orchestrator API key."""
     try:
         from app.services.email_service import SubscriptionManager, get_email_service
         from datetime import datetime, timedelta
-        from supabase import create_client
 
-        supabase = create_client(
-            settings.supabase_url,
-            settings.supabase_service_role_key,
-        )
-        manager = SubscriptionManager(supabase)
+        manager = SubscriptionManager(_supabase_rest)
         email_service = get_email_service()
 
         # Get subscribers ready for next nurture email

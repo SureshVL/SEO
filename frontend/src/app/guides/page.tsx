@@ -55,37 +55,21 @@ export default function GuidesPage() {
   const [downloadEmail, setDownloadEmail] = useState("");
   const [submitted, setSubmitted] = useState(false);
 
-  const handleDownload = async (guide: Guide) => {
+  const handleRequest = async (guide: Guide) => {
     if (!downloadEmail || !downloadEmail.includes("@")) {
       alert("Please enter a valid email");
       return;
     }
 
     try {
-      await fetch("/email/subscribe", {
-        method: "POST",
-        body: JSON.stringify({
-          email: downloadEmail,
-          vertical: guide.vertical,
-        }),
-      });
-
-      const blob = new Blob(["PDF Guide: " + guide.title], { type: "application/pdf" });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `${guide.title.replace(/\s+/g, "-").toLowerCase()}.pdf`;
-      link.click();
-      URL.revokeObjectURL(url);
-
+      const base = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+      const qs = new URLSearchParams({ email: downloadEmail, vertical: guide.vertical });
+      const res = await fetch(`${base}/email/subscribe?${qs}`, { method: "POST" });
+      if (!res.ok) throw new Error(await res.text());
       setSubmitted(true);
-      setTimeout(() => {
-        setDownloadEmail("");
-        setSelectedGuide(null);
-        setSubmitted(false);
-      }, 3000);
     } catch (error) {
-      console.error("Error downloading guide:", error);
+      console.error("Error requesting guide:", error);
+      alert("Something went wrong — please try again.");
     }
   };
 
@@ -125,36 +109,53 @@ export default function GuidesPage() {
               <span className="text-sm font-medium text-slate-900">{selectedGuide.pages} pages</span>
             </div>
 
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                handleDownload(selectedGuide);
-              }}
-              className="space-y-4 mb-6"
-            >
-              <div>
-                <label className="block text-sm font-medium text-slate-900 mb-2">
-                  Email address
-                </label>
-                <input
-                  type="email"
-                  value={downloadEmail}
-                  onChange={(e) => setDownloadEmail(e.target.value)}
-                  placeholder="you@company.com"
-                  className="w-full px-4 py-2 border border-slate-300 rounded-lg"
-                  required
-                />
+            {submitted ? (
+              <div className="text-center p-6 bg-emerald-50 rounded-lg border border-emerald-200 mb-6">
+                <p className="text-emerald-800 font-semibold mb-1">✓ Request received!</p>
+                <p className="text-sm text-emerald-700">
+                  We&apos;ll email your guide to <strong>{downloadEmail}</strong> within 24 hours,
+                  along with our monthly AI search research.
+                </p>
               </div>
-              <button
-                type="submit"
-                className="w-full bg-violet-600 text-white font-semibold py-3 rounded-lg hover:bg-violet-700 flex items-center justify-center gap-2"
+            ) : (
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  handleRequest(selectedGuide);
+                }}
+                className="space-y-4 mb-6"
               >
-                <Download className="w-4 h-4" /> Download PDF
-              </button>
-            </form>
+                <div>
+                  <label className="block text-sm font-medium text-slate-900 mb-2">
+                    Email address
+                  </label>
+                  <input
+                    type="email"
+                    value={downloadEmail}
+                    onChange={(e) => setDownloadEmail(e.target.value)}
+                    placeholder="you@company.com"
+                    className="w-full px-4 py-2 border border-slate-300 rounded-lg"
+                    required
+                  />
+                </div>
+                <button
+                  type="submit"
+                  className="w-full bg-violet-600 text-white font-semibold py-3 rounded-lg hover:bg-violet-700 flex items-center justify-center gap-2"
+                >
+                  <Download className="w-4 h-4" /> Email me this guide
+                </button>
+                <p className="text-xs text-slate-500 text-center">
+                  Delivered by email. No spam — unsubscribe anytime.
+                </p>
+              </form>
+            )}
 
             <button
-              onClick={() => setSelectedGuide(null)}
+              onClick={() => {
+                setSelectedGuide(null);
+                setSubmitted(false);
+                setDownloadEmail("");
+              }}
               className="w-full text-slate-600 font-medium border-t border-slate-200 mt-6 pt-6"
             >
               Back
