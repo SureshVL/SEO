@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ArrowRight, BarChart3, Bot, Globe, Search, Shield, Zap } from "lucide-react";
 
 const features = [
@@ -13,9 +13,12 @@ const features = [
   { icon: Zap, title: "Content Studio", desc: "AI writes SEO content with entity coverage, FAQ blocks, and E-E-A-T signals — calibrated against real SERP data." },
 ];
 
+type Currency = "INR" | "USD";
+
 type LandingPlan = {
   name: string;
-  priceMonthly: number;
+  priceMonthly: number;      // INR
+  priceMonthlyUsd: number;   // USD (positioned price, not FX conversion)
   agents: number;
   serpPerDay: number;
   features: string[];
@@ -24,29 +27,45 @@ type LandingPlan = {
 };
 
 const plans: LandingPlan[] = [
-  { name: "Free", priceMonthly: 0, agents: 2, serpPerDay: 25,
+  { name: "Free", priceMonthly: 0, priceMonthlyUsd: 0, agents: 2, serpPerDay: 25,
     features: ["1 project", "10 keywords", "1 AI report/mo", "Research + Keyword agents"], cta: "Start free" },
-  { name: "Starter", priceMonthly: 1999, agents: 3, serpPerDay: 250,
+  { name: "Starter", priceMonthly: 1999, priceMonthlyUsd: 29, agents: 3, serpPerDay: 250,
     features: ["1 project", "50 keywords", "5 AI reports/mo", "Daily rank tracking"], cta: "Start free trial" },
-  { name: "Growth", priceMonthly: 4999, agents: 6, serpPerDay: 1000,
+  { name: "Growth", priceMonthly: 4999, priceMonthlyUsd: 69, agents: 6, serpPerDay: 1000,
     features: ["5 projects", "300 keywords", "Unlimited reports", "Content studio", "Competitor alerts"], cta: "Start free trial", popular: true },
-  { name: "Pro", priceMonthly: 9999, agents: 9, serpPerDay: 2500,
+  { name: "Pro", priceMonthly: 9999, priceMonthlyUsd: 129, agents: 9, serpPerDay: 2500,
     features: ["12 projects", "800 keywords", "Google AI Mode", "Automated audits", "Programmatic SEO"], cta: "Start free trial" },
-  { name: "Agency", priceMonthly: 19999, agents: 12, serpPerDay: 5000,
+  { name: "Agency", priceMonthly: 19999, priceMonthlyUsd: 249, agents: 12, serpPerDay: 5000,
     features: ["25 projects", "2,000 keywords", "White-label", "API access", "10 team seats"], cta: "Contact sales" },
 ];
 
 const ANNUAL_DISCOUNT = 0.20;
 
-function priceLabel(plan: LandingPlan, interval: "month" | "year"): { display: string; note: string } {
-  if (plan.priceMonthly === 0) return { display: "Free", note: "forever" };
-  if (interval === "month") return { display: `\u20B9${plan.priceMonthly.toLocaleString("en-IN")}`, note: "/mo" };
-  const perMonth = Math.round(plan.priceMonthly * (1 - ANNUAL_DISCOUNT));
-  return { display: `\u20B9${perMonth.toLocaleString("en-IN")}`, note: "/mo, billed yearly" };
+// India \u2192 INR (billed via Razorpay); everywhere else \u2192 USD (billed via Stripe).
+function detectCurrency(): Currency {
+  try {
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "";
+    if (tz === "Asia/Kolkata" || tz === "Asia/Calcutta") return "INR";
+    const langs = navigator.languages || [navigator.language];
+    if (langs.some(l => /-IN$/i.test(l))) return "INR";
+  } catch { /* SSR / old browsers */ }
+  return "USD";
+}
+
+function priceLabel(plan: LandingPlan, interval: "month" | "year", currency: Currency): { display: string; note: string } {
+  const base = currency === "INR" ? plan.priceMonthly : plan.priceMonthlyUsd;
+  if (base === 0) return { display: "Free", note: "forever" };
+  const amount = interval === "month" ? base : Math.round(base * (1 - ANNUAL_DISCOUNT));
+  const display = currency === "INR"
+    ? `\u20B9${amount.toLocaleString("en-IN")}`
+    : `$${amount.toLocaleString("en-US")}`;
+  return { display, note: interval === "month" ? "/mo" : "/mo, billed yearly" };
 }
 
 export default function LandingPage() {
   const [interval, setInterval] = useState<"month" | "year">("month");
+  const [currency, setCurrency] = useState<Currency>("USD");
+  useEffect(() => { setCurrency(detectCurrency()); }, []);
   return (
     <div className="min-h-screen grain" style={{ background: "#110f0d" }}>
       {/* Nav */}
@@ -143,11 +162,25 @@ export default function LandingPage() {
               <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: "rgba(107, 143, 113, 0.25)", color: "var(--sage)" }}>-20%</span>
             </button>
           </div>
+          <div className="inline-flex items-center gap-1 rounded-full p-1 text-xs font-sans ml-3" style={{ background: "rgba(200, 180, 150, 0.06)", border: "1px solid rgba(200, 180, 150, 0.1)" }}>
+            {(["USD", "INR"] as Currency[]).map((c) => (
+              <button
+                key={c}
+                onClick={() => setCurrency(c)}
+                className="px-3 py-1.5 rounded-full transition-colors"
+                style={currency === c
+                  ? { background: "var(--copper)", color: "#110f0d", fontWeight: 600 }
+                  : { color: "rgba(200, 180, 150, 0.5)" }}
+              >
+                {c === "USD" ? "$ USD" : "₹ INR"}
+              </button>
+            ))}
+          </div>
         </div>
 
         <div className="grid md:grid-cols-2 lg:grid-cols-5 gap-4">
           {plans.map((plan) => {
-            const { display, note } = priceLabel(plan, interval);
+            const { display, note } = priceLabel(plan, interval, currency);
             return (
               <div
                 key={plan.name}
