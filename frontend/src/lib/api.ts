@@ -1075,6 +1075,53 @@ export async function deleteSocialPost(postId: string, apiKey: string) {
   return request<{ deleted: boolean }>(`/social-posts/${postId}`, { method: "DELETE" }, apiKey);
 }
 
+export interface SocialMetrics {
+  platform: SocialPlatform;
+  month: string; // 'YYYY-MM'
+  reach: number;
+  impressions: number;
+  engagement: number;
+  followers: number;
+  website_clicks: number;
+  whatsapp_clicks: number;
+  enquiries: number;
+  posts_published: number;
+  notes?: string;
+}
+
+export async function upsertSocialMetrics(
+  projectId: string,
+  payload: SocialMetrics,
+  apiKey: string,
+) {
+  return request<SocialMetrics>(
+    `/projects/${projectId}/social-metrics`,
+    { method: "PUT", body: JSON.stringify(payload) },
+    apiKey,
+  );
+}
+
+export async function listSocialMetrics(projectId: string, month: string, apiKey: string) {
+  return request<SocialMetrics[]>(
+    `/projects/${projectId}/social-metrics?month=${month}`,
+    {},
+    apiKey,
+  );
+}
+
+export async function getSocialReportHtml(
+  projectId: string,
+  month: string,
+  apiKey: string,
+): Promise<string> {
+  const res = await fetch(
+    `${API_BASE}/projects/${projectId}/social-report/${month}`,
+    { headers: { "X-API-KEY": apiKey } },
+  );
+  if (!res.ok) throw new ApiError(res.status, await res.text());
+  return res.text();
+}
+
 // ── Monthly workflow (Week 1-4 cadence) ──────────────────────────
 
 export interface WorkflowSchedule {

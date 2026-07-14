@@ -25,6 +25,27 @@ create table if not exists social_posts (
 create index if not exists idx_social_posts_project on social_posts (project_id, scheduled_date);
 create index if not exists idx_social_posts_status on social_posts (project_id, status);
 
+-- ── Social monthly metrics (manual entry / CSV until platform APIs land) ──
+create table if not exists social_metrics (
+  id uuid primary key default gen_random_uuid(),
+  project_id uuid not null,
+  platform text not null check (platform in ('instagram','facebook','tiktok','youtube','linkedin')),
+  month text not null, -- 'YYYY-MM'
+  reach bigint not null default 0,
+  impressions bigint not null default 0,
+  engagement bigint not null default 0, -- likes + comments + shares + saves
+  followers bigint not null default 0,  -- end-of-month follower count
+  website_clicks bigint not null default 0,
+  whatsapp_clicks bigint not null default 0,
+  enquiries bigint not null default 0,
+  posts_published int not null default 0,
+  notes text default '',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (project_id, platform, month)
+);
+create index if not exists idx_social_metrics_project on social_metrics (project_id, month);
+
 -- ── Email subscribers (research report + nurture sequence) ────────
 create table if not exists email_subscribers (
   id uuid primary key default gen_random_uuid(),

@@ -1,12 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Share2, Loader2, Sparkles, Copy, CalendarPlus, Check, RotateCcw, Trash2, Send, Pencil } from "lucide-react";
+import { Share2, Loader2, Sparkles, Copy, CalendarPlus, Check, RotateCcw, Trash2, Send, Pencil, BarChart3, FileText } from "lucide-react";
 import { useAppStore } from "@/lib/store";
 import {
   generateSocialPosts, listSocialPosts, createSocialPost, updateSocialPost,
   approveSocialPost, requestSocialRevision, deleteSocialPost,
-  type SocialGenerateResult, type SocialPlatform, type SocialPost,
+  upsertSocialMetrics, listSocialMetrics, getSocialReportHtml,
+  type SocialGenerateResult, type SocialPlatform, type SocialPost, type SocialMetrics,
 } from "@/lib/api";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { toast } from "sonner";
@@ -22,6 +23,22 @@ const PLATFORMS: { id: SocialPlatform; label: string }[] = [
 
 const GOALS = ["educational", "promotional", "engagement", "brand_awareness"];
 const TONES = ["friendly", "professional", "playful", "bold", "inspirational"];
+
+const METRIC_INPUTS: { key: keyof SocialMetrics; label: string }[] = [
+  { key: "reach", label: "Reach" },
+  { key: "impressions", label: "Impressions" },
+  { key: "engagement", label: "Engagement" },
+  { key: "followers", label: "Followers (EOM)" },
+  { key: "website_clicks", label: "Website clicks" },
+  { key: "whatsapp_clicks", label: "WhatsApp clicks" },
+  { key: "enquiries", label: "Enquiries" },
+  { key: "posts_published", label: "Posts published" },
+];
+
+const emptyMetrics = (platform: SocialPlatform, month: string): SocialMetrics => ({
+  platform, month, reach: 0, impressions: 0, engagement: 0, followers: 0,
+  website_clicks: 0, whatsapp_clicks: 0, enquiries: 0, posts_published: 0,
+});
 
 const statusStyle: Record<string, string> = {
   draft: "text-zinc-300 bg-zinc-500/10",
@@ -50,6 +67,13 @@ export default function SocialStudioPage() {
   const [loadingPosts, setLoadingPosts] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editCaption, setEditCaption] = useState("");
+
+  // Metrics & report state
+  const [metricsMonth, setMetricsMonth] = useState(() => new Date().toISOString().slice(0, 7));
+  const [metricsPlatform, setMetricsPlatform] = useState<SocialPlatform>("instagram");
+  const [metrics, setMetrics] = useState<SocialMetrics>(() => emptyMetrics("instagram", new Date().toISOString().slice(0, 7)));
+  const [savingMetrics, setSavingMetrics] = useState(false);
+  const [openingReport, setOpeningReport] = useState(false);
 
   const loadPosts = useCallback(async () => {
     if (!projectId) return;
@@ -131,6 +155,50 @@ export default function SocialStudioPage() {
   function copyText(block: { caption: string; hashtags: string[] }) {
     navigator.clipboard.writeText(`${block.caption}\n\n${block.hashtags.join(" ")}`);
     toast.success("Copied caption + hashtags");
+  }
+
+  // Load stored metrics whenever month/platform selection changes
+  useEffect(() => {
+    if (!projectId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const rows = await listSocialMetrics(projectId, metricsMonth, apiKey);
+        if (cancelled) return;
+        const existing = rows.find(r => r.platform === metricsPlatform);
+        setMetrics(existing ?? emptyMetrics(metricsPlatform, metricsMonth));
+      } catch {
+        if (!cancelled) setMetrics(emptyMetrics(metricsPlatform, metricsMonth));
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [projectId, metricsMonth, metricsPlatform, apiKey]);
+
+  async function saveMetrics() {
+    if (!projectId) { toast.error("Select a project first."); return; }
+    setSavingMetrics(true);
+    try {
+      await upsertSocialMetrics(projectId, { ...metrics, platform: metricsPlatform, month: metricsMonth }, apiKey);
+      toast.success(`${metricsPlatform} metrics saved for ${metricsMonth}`);
+    } catch (err: any) {
+      toast.error(err?.message || "Save failed — did you run the social_metrics migration?");
+    } finally {
+      setSavingMetrics(false);
+    }
+  }
+
+  async function openReport() {
+    if (!projectId) { toast.error("Select a project first."); return; }
+    setOpeningReport(true);
+    try {
+      const htmlDoc = await getSocialReportHtml(projectId, metricsMonth, apiKey);
+      const win = window.open("", "_blank");
+      if (win) { win.document.write(htmlDoc); win.document.close(); }
+    } catch (err: any) {
+      toast.error(err?.message || "Report failed");
+    } finally {
+      setOpeningReport(false);
+    }
   }
 
   return (
@@ -301,6 +369,59 @@ export default function SocialStudioPage() {
             ))}
           </div>
         )}
+      </div>
+
+      {/* ── Monthly metrics & client report ── */}
+      <div className="card p-6 mt-6">
+        <div className="flex flex-wrap items-center gap-3 mb-4">
+          <h3 className="font-semibold text-zinc-100 flex items-center gap-2">
+            <BarChart3 className="w-4 h-4 text-pink-300" /> Monthly metrics &amp; client report
+          </h3>
+          <span className="text-[11px] text-zinc-500">
+            Enter numbers from Meta Business Suite / platform exports — the report computes MoM growth.
+          </span>
+        </div>
+
+        <div className="flex flex-wrap gap-3 mb-4">
+          <label className="block">
+            <span className="text-[11px] uppercase tracking-wider text-zinc-500 font-semibold">Month</span>
+            <input type="month" value={metricsMonth} onChange={e => setMetricsMonth(e.target.value)}
+              className="mt-1 block bg-zinc-800/50 border border-zinc-700 rounded-lg px-3 py-2 text-sm outline-none" />
+          </label>
+          <label className="block">
+            <span className="text-[11px] uppercase tracking-wider text-zinc-500 font-semibold">Platform</span>
+            <select value={metricsPlatform} onChange={e => setMetricsPlatform(e.target.value as SocialPlatform)}
+              className="mt-1 block bg-zinc-800/50 border border-zinc-700 rounded-lg px-3 py-2 text-sm outline-none">
+              {PLATFORMS.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
+            </select>
+          </label>
+        </div>
+
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          {METRIC_INPUTS.map(({ key, label }) => (
+            <label key={key} className="block">
+              <span className="text-[11px] uppercase tracking-wider text-zinc-500 font-semibold">{label}</span>
+              <input type="number" min={0} value={Number(metrics[key] ?? 0)}
+                onChange={e => setMetrics(m => ({ ...m, [key]: Number(e.target.value) }))}
+                className="mt-1 w-full bg-zinc-800/50 border border-zinc-700 rounded-lg px-3 py-2 text-sm outline-none focus:border-pink-500/50" />
+            </label>
+          ))}
+        </div>
+
+        <div className="flex flex-wrap gap-3 mt-5">
+          <button onClick={saveMetrics} disabled={savingMetrics} className="btn-primary flex items-center gap-2 px-6 h-[42px]">
+            {savingMetrics ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+            Save {metricsPlatform} metrics
+          </button>
+          <button onClick={openReport} disabled={openingReport}
+            className="flex items-center gap-2 px-6 h-[42px] rounded-lg border border-pink-500/40 text-pink-200 hover:bg-pink-500/10 text-sm font-semibold">
+            {openingReport ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileText className="w-4 h-4" />}
+            View {metricsMonth} client report
+          </button>
+        </div>
+        <p className="text-[11px] text-zinc-500 mt-3">
+          The report opens in a new tab — use the browser&apos;s Print → Save as PDF to send it to the client.
+        </p>
       </div>
     </div>
   );

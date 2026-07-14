@@ -5544,6 +5544,79 @@ def delete_social_post(post_id: str, _auth: None = Depends(require_api_key)):
     return {"deleted": True}
 
 
+class SocialMetricsUpsert(_BaseModel):
+    platform: str
+    month: str  # 'YYYY-MM'
+    reach: int = 0
+    impressions: int = 0
+    engagement: int = 0
+    followers: int = 0
+    website_clicks: int = 0
+    whatsapp_clicks: int = 0
+    enquiries: int = 0
+    posts_published: int = 0
+    notes: str = ""
+
+
+@app.put("/projects/{project_id}/social-metrics")
+def upsert_social_metrics(
+    project_id: str,
+    body: SocialMetricsUpsert,
+    _auth: None = Depends(require_api_key),
+):
+    """Record (or update) one platform's metrics for a month."""
+    from app.services.social_media_service import SUPPORTED_PLATFORMS
+    from app.services.social_reports_service import SocialMetricsManager
+
+    platform = body.platform.lower()
+    if platform not in SUPPORTED_PLATFORMS:
+        raise HTTPException(status_code=400, detail=f"Invalid platform. Supported: {SUPPORTED_PLATFORMS}")
+    try:
+        return SocialMetricsManager(_supabase_rest).upsert(
+            project_id, platform, body.month, body.model_dump()
+        )
+    except ValueError:
+        raise HTTPException(status_code=400, detail="month must be 'YYYY-MM'")
+
+
+@app.get("/projects/{project_id}/social-metrics")
+def list_social_metrics(
+    project_id: str,
+    month: str,
+    _auth: None = Depends(require_api_key),
+):
+    from app.services.social_reports_service import SocialMetricsManager
+
+    return SocialMetricsManager(_supabase_rest).list_for_month(project_id, month)
+
+
+@app.get("/projects/{project_id}/social-report/{month}")
+def social_monthly_report(
+    project_id: str,
+    month: str,
+    _auth: None = Depends(require_api_key),
+):
+    """Branded monthly social performance report (HTML, print-to-PDF ready)."""
+    from fastapi.responses import HTMLResponse
+    from app.services.social_reports_service import generate_social_report_html
+
+    project_name = ""
+    try:
+        rows = _supabase_rest("get", "projects", params=f"id=eq.{project_id}&select=name")
+        if rows:
+            project_name = rows[0].get("name") or ""
+    except Exception:
+        pass
+
+    try:
+        html_out = generate_social_report_html(
+            _supabase_rest, llm_client, project_id, month, project_name=project_name
+        )
+    except ValueError:
+        raise HTTPException(status_code=400, detail="month must be 'YYYY-MM'")
+    return HTMLResponse(content=html_out)
+
+
 @app.get("/api/llm/status")
 def llm_status():
     return llm_client.get_status()
