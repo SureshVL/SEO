@@ -952,6 +952,129 @@ export async function generateProgrammaticPages(
   );
 }
 
+// ── Social Media Studio ──────────────────────────────────────────
+
+export type SocialPlatform = "instagram" | "facebook" | "tiktok" | "youtube" | "linkedin";
+
+export type SocialPostStatus =
+  | "draft"
+  | "pending_approval"
+  | "revision_requested"
+  | "approved"
+  | "scheduled"
+  | "published";
+
+export interface SocialGenerated {
+  hook: string;
+  caption: string;
+  hashtags: string[];
+  cta: string;
+  best_time_hint: string;
+  error?: string;
+}
+
+export interface SocialGenerateResult {
+  topic: string;
+  tone: string;
+  content_goal: string;
+  platforms: Record<string, SocialGenerated>;
+  model_used: string | null;
+}
+
+export interface SocialPost {
+  id: string;
+  project_id: string;
+  platform: SocialPlatform;
+  topic: string;
+  caption: string;
+  hashtags: string[];
+  content_goal: string;
+  media_notes: string;
+  scheduled_date: string | null;
+  status: SocialPostStatus;
+  revision_count: number;
+  revision_notes: Array<{ round: number; note: string; at: string }>;
+  created_at: string;
+  updated_at: string;
+}
+
+export async function generateSocialPosts(
+  payload: {
+    topic: string;
+    platforms: SocialPlatform[];
+    tone?: string;
+    business_context?: string;
+    content_goal?: string;
+  },
+  apiKey: string,
+) {
+  return request<SocialGenerateResult>(
+    "/social/generate",
+    { method: "POST", body: JSON.stringify(payload) },
+    apiKey,
+  );
+}
+
+export async function listSocialPosts(
+  projectId: string,
+  apiKey: string,
+  filters?: { status?: SocialPostStatus; platform?: SocialPlatform },
+) {
+  const qs = new URLSearchParams();
+  if (filters?.status) qs.set("status", filters.status);
+  if (filters?.platform) qs.set("platform", filters.platform);
+  const suffix = qs.toString() ? `?${qs}` : "";
+  return request<SocialPost[]>(`/projects/${projectId}/social-posts${suffix}`, {}, apiKey);
+}
+
+export async function createSocialPost(
+  projectId: string,
+  payload: {
+    platform: SocialPlatform;
+    topic?: string;
+    caption: string;
+    hashtags?: string[];
+    content_goal?: string;
+    media_notes?: string;
+    scheduled_date?: string | null;
+  },
+  apiKey: string,
+) {
+  return request<SocialPost>(
+    `/projects/${projectId}/social-posts`,
+    { method: "POST", body: JSON.stringify(payload) },
+    apiKey,
+  );
+}
+
+export async function updateSocialPost(
+  postId: string,
+  payload: Partial<Pick<SocialPost, "caption" | "hashtags" | "topic" | "content_goal" | "media_notes" | "scheduled_date" | "status" | "platform">>,
+  apiKey: string,
+) {
+  return request<SocialPost>(
+    `/social-posts/${postId}`,
+    { method: "PATCH", body: JSON.stringify(payload) },
+    apiKey,
+  );
+}
+
+export async function approveSocialPost(postId: string, apiKey: string) {
+  return request<SocialPost>(`/social-posts/${postId}/approve`, { method: "POST" }, apiKey);
+}
+
+export async function requestSocialRevision(postId: string, note: string, apiKey: string) {
+  return request<SocialPost>(
+    `/social-posts/${postId}/request-revision`,
+    { method: "POST", body: JSON.stringify({ note }) },
+    apiKey,
+  );
+}
+
+export async function deleteSocialPost(postId: string, apiKey: string) {
+  return request<{ deleted: boolean }>(`/social-posts/${postId}`, { method: "DELETE" }, apiKey);
+}
+
 // ── Monthly workflow (Week 1-4 cadence) ──────────────────────────
 
 export interface WorkflowSchedule {

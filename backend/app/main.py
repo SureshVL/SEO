@@ -5407,6 +5407,143 @@ def get_latest_reports():
     }
 
 
+# ── Social Media Studio (Phase 1: generate + calendar + approvals) ──
+
+from pydantic import BaseModel as _BaseModel
+
+
+class SocialGenerateRequest(_BaseModel):
+    topic: str
+    platforms: list[str] = ["instagram", "facebook", "linkedin"]
+    tone: str = "friendly"
+    business_context: str = ""
+    content_goal: str = "engagement"
+
+
+class SocialPostCreate(_BaseModel):
+    platform: str
+    topic: str = ""
+    caption: str
+    hashtags: list[str] = []
+    content_goal: str = "engagement"
+    media_notes: str = ""
+    scheduled_date: str | None = None
+
+
+class SocialPostUpdate(_BaseModel):
+    caption: str | None = None
+    hashtags: list[str] | None = None
+    topic: str | None = None
+    content_goal: str | None = None
+    media_notes: str | None = None
+    scheduled_date: str | None = None
+    status: str | None = None
+    platform: str | None = None
+
+
+class SocialRevisionRequest(_BaseModel):
+    note: str
+
+
+@app.post("/social/generate")
+def social_generate(
+    body: SocialGenerateRequest,
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """Generate platform-native captions + hashtags for a topic."""
+    from app.services.social_media_service import generate_social_posts
+
+    if not body.topic.strip():
+        raise HTTPException(status_code=400, detail="topic is required")
+    try:
+        return generate_social_posts(
+            llm_client,
+            topic=body.topic,
+            platforms=body.platforms,
+            tone=body.tone,
+            business_context=body.business_context,
+            content_goal=body.content_goal,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Social generation error: {e}")
+        raise HTTPException(status_code=500, detail="Generation failed")
+
+
+@app.get("/projects/{project_id}/social-posts")
+def list_social_posts(
+    project_id: str,
+    status: str | None = None,
+    platform: str | None = None,
+    _auth: None = Depends(require_api_key),
+):
+    from app.services.social_media_service import SocialPostManager
+
+    return SocialPostManager(_supabase_rest).list_posts(project_id, status, platform)
+
+
+@app.post("/projects/{project_id}/social-posts")
+def create_social_post(
+    project_id: str,
+    body: SocialPostCreate,
+    _auth: None = Depends(require_api_key),
+):
+    from app.services.social_media_service import SocialPostManager
+
+    try:
+        return SocialPostManager(_supabase_rest).create_post(project_id, body.model_dump())
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.patch("/social-posts/{post_id}")
+def update_social_post(
+    post_id: str,
+    body: SocialPostUpdate,
+    _auth: None = Depends(require_api_key),
+):
+    from app.services.social_media_service import SocialPostManager
+
+    try:
+        updates = {k: v for k, v in body.model_dump().items() if v is not None}
+        return SocialPostManager(_supabase_rest).update_post(post_id, updates)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/social-posts/{post_id}/approve")
+def approve_social_post(post_id: str, _auth: None = Depends(require_api_key)):
+    from app.services.social_media_service import SocialPostManager
+
+    return SocialPostManager(_supabase_rest).approve(post_id)
+
+
+@app.post("/social-posts/{post_id}/request-revision")
+def request_social_revision(
+    post_id: str,
+    body: SocialRevisionRequest,
+    _auth: None = Depends(require_api_key),
+):
+    from app.services.social_media_service import SocialPostManager
+
+    try:
+        return SocialPostManager(_supabase_rest).request_revision(post_id, body.note)
+    except LookupError:
+        raise HTTPException(status_code=404, detail="Post not found")
+    except PermissionError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+
+@app.delete("/social-posts/{post_id}")
+def delete_social_post(post_id: str, _auth: None = Depends(require_api_key)):
+    from app.services.social_media_service import SocialPostManager
+
+    SocialPostManager(_supabase_rest).delete_post(post_id)
+    return {"deleted": True}
+
+
 @app.get("/api/llm/status")
 def llm_status():
     return llm_client.get_status()
