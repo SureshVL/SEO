@@ -427,6 +427,23 @@ export async function listProjects(apiKey: string) {
   }>>("/projects", {}, apiKey);
 }
 
+export async function createProject(payload: {
+  name: string;
+  client_url: string;
+  target_niche?: string | null;
+  goal_keywords?: string[];
+}, apiKey: string) {
+  return request<{ id: string; name: string }>(
+    "/projects",
+    { method: "POST", body: JSON.stringify(payload) },
+    apiKey,
+  );
+}
+
+export async function deleteProject(projectId: string, apiKey: string) {
+  return request<{ deleted: boolean }>(`/projects/${projectId}`, { method: "DELETE" }, apiKey);
+}
+
 export async function getProject(projectId: string, apiKey: string) {
   return request<{
     id: string; name: string; client_url: string; domain: string | null;

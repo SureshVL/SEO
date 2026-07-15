@@ -3392,14 +3392,25 @@ def create_project(
     _rate: None = Depends(enforce_rate_limit),
 ):
     domain = body.domain or str(body.client_url).replace("https://", "").replace("http://", "").split("/")[0]
-    data = _supabase_rest("post", "projects", {
+    row = {
         "name": body.name,
         "client_url": str(body.client_url),
         "domain": domain,
         "target_niche": body.target_niche,
         "goal_keywords": body.goal_keywords,
         "settings": body.settings,
-    })
+    }
+    # Stamp the creator's org so org-scoped listing can see the project.
+    # Without this, a JWT user creates a project they can never list.
+    org_id = _scoped_org_id.get()
+    if org_id == "__none__":
+        raise HTTPException(
+            status_code=403,
+            detail="Your user is not attached to an organization yet — cannot create a project.",
+        )
+    if org_id:
+        row["org_id"] = org_id
+    data = _supabase_rest("post", "projects", row)
     return data[0] if isinstance(data, list) else data
 
 
