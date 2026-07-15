@@ -44,6 +44,19 @@ const navSections = [
 
 export function Sidebar() {
   const pathname = usePathname();
+
+  async function handleLogout() {
+    try {
+      const { createClient } = await import("@/lib/supabase");
+      await createClient().auth.signOut();
+    } catch {
+      /* proceed to login regardless */
+    }
+    // Clear persisted UI state so the next login doesn't inherit this
+    // session's project selection.
+    try { localStorage.removeItem("omnirank-store"); } catch { /* ignore */ }
+    window.location.href = "/auth/login";
+  }
   return (
     <aside
       className="w-64 h-screen fixed left-0 top-0 z-40 flex flex-col"
@@ -113,6 +126,7 @@ export function Sidebar() {
       <div className="px-3 py-3 space-y-1" style={{ borderTop: "1px solid var(--sidebar-border)" }}>
         <ThemeToggle />
         <button
+          onClick={handleLogout}
           className="flex items-center gap-3 px-3 py-2 rounded-xl text-[13px] font-sans font-medium w-full transition-colors hover:bg-[var(--sidebar-active-bg)]"
           style={{ color: "var(--sidebar-item)" }}
         >
