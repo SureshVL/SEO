@@ -256,6 +256,28 @@ def _get_claude_client():
     return llm_client
 
 
+def _llm_json(llm, *, messages, system=None, **kw):
+    """complete_json wrapper for request handlers: surfaces provider outages
+    as a clear 503 (rate limit) or 502 instead of an unexplained 500."""
+    try:
+        return llm.complete_json(messages=messages, system=system, **kw)
+    except HTTPException:
+        raise
+    except Exception as e:
+        err = str(e)
+        logger.error("LLM call failed: %s", err[:300])
+        if any(t in err.lower() for t in ("429", "rate", "quota", "exhausted", "resource")):
+            raise HTTPException(
+                status_code=503,
+                detail="The AI provider is rate-limited right now (free-tier quota). "
+                       "Wait a minute and retry, or add another provider API key in the backend .env.",
+            )
+        raise HTTPException(
+            status_code=502,
+            detail="AI analysis failed — the provider returned an error. Please try again shortly.",
+        )
+
+
 def _persistence_repo() -> PersistenceRepository:
     if settings.supabase_url and settings.supabase_service_role_key:
         return SupabaseRestRepository(
@@ -632,8 +654,8 @@ def _build_optimised_keywords(body: OptimisedKeywordsRequest) -> dict:
         f"{'Live SERP titles: ' + ' | '.join(serp_titles) if serp_titles else ''}\n"
         f"Monthly budget: INR {int(body.budget_inr)}. Bias toward keywords that fit this budget."
     )
-    parsed, _ = llm.complete_json(
-        messages=[{"role": "user", "content": user}],
+    parsed, _ = _llm_json(
+        llm, messages=[{"role": "user", "content": user}],
         system=system, max_tokens=4096, temperature=0.3,
     )
     cands = parsed.get("candidates", []) if isinstance(parsed, dict) else []
@@ -760,8 +782,8 @@ def cro_audit(
         f"Page title: {title}\nCTAs detected: {', '.join(ctas) or 'none found'}\n"
         f"Page copy excerpt: {text}"
     )
-    parsed, _ = llm.complete_json(
-        messages=[{"role": "user", "content": user}], system=system,
+    parsed, _ = _llm_json(
+        llm, messages=[{"role": "user", "content": user}], system=system,
         max_tokens=3000, temperature=0.3,
     )
     parsed = parsed if isinstance(parsed, dict) else {}
@@ -4713,8 +4735,8 @@ Recent audits: {len(audits)}
 Content drafts: {len(content)}
 Audit scores: {audits[0].get('results', {}) if audits else 'No audits yet'}"""
 
-    parsed, resp = claude.complete_json(
-        messages=[{"role": "user", "content": context}],
+    parsed, resp = _llm_json(
+        claude, messages=[{"role": "user", "content": context}],
         system=system, max_tokens=1500,
     )
 
