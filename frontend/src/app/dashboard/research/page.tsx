@@ -237,6 +237,37 @@ export default function ResearchPage() {
             ))}
           </div>
 
+          {/* Analyst summary — what this means in plain language */}
+          {(result.result?.analyst_summary ?? result.analyst_summary) && (
+            <div className="card p-6 border border-brand-500/25 bg-brand-500/5">
+              <h3 className="font-semibold mb-3 flex items-center gap-2">
+                <TrendingUp className="w-4 h-4 text-brand-400" /> What this means
+              </h3>
+              <p className="text-sm text-zinc-300 leading-relaxed">
+                {result.result?.analyst_summary ?? result.analyst_summary}
+              </p>
+            </div>
+          )}
+
+          {/* Who you're up against */}
+          {(result.result?.competitor_profiles ?? result.competitor_profiles ?? []).length > 0 && (
+            <div className="card p-6">
+              <h3 className="font-semibold mb-3 text-sm text-zinc-300">Pages currently ranking for this keyword</h3>
+              <div className="flex flex-wrap gap-2">
+                {(result.result?.competitor_profiles ?? result.competitor_profiles ?? []).map((c: any, i: number) => {
+                  let domain = c.url;
+                  try { domain = new URL(c.url).hostname.replace(/^www\./, ""); } catch { /* keep raw */ }
+                  return (
+                    <span key={i} className="px-3 py-1.5 rounded-full text-xs bg-zinc-800/60 border border-zinc-700 text-zinc-300">
+                      #{i + 1} {domain}
+                      <span className="text-zinc-500 ml-1.5">{c.word_count?.toLocaleString?.() ?? c.word_count} words</span>
+                    </span>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           {/* Recommendations */}
           {(result.result?.recommendations ?? result.recommendations ?? []).length > 0 && (
             <div className="card p-6">
@@ -244,12 +275,13 @@ export default function ResearchPage() {
               <div className="space-y-3">
                 {(result.result?.recommendations ?? result.recommendations ?? []).slice(0, 8).map((r: string, i: number) => {
                   const isCrit = r.includes("[CRITICAL]");
+                  const isWarn = r.includes("[WARNING]");
                   const isHigh = r.includes("[HIGH]");
-                  const clean = r.replace("[CRITICAL] ", "").replace("[HIGH] ", "").replace("[MEDIUM] ", "");
+                  const clean = r.replace("[CRITICAL] ", "").replace("[WARNING] ", "").replace("[HIGH] ", "").replace("[MEDIUM] ", "");
                   return (
-                    <div key={i} className={cn("p-3 rounded-lg border text-sm", isCrit ? "bg-red-500/5 border-red-500/20" : isHigh ? "bg-amber-500/5 border-amber-500/20" : "bg-zinc-800/30 border-zinc-700/30")}>
-                      <span className={cn("text-[10px] font-bold uppercase mr-2", isCrit ? "text-red-400" : isHigh ? "text-amber-400" : "text-blue-400")}>
-                        {isCrit ? "Critical" : isHigh ? "High" : "Medium"}
+                    <div key={i} className={cn("p-3 rounded-lg border text-sm", isCrit ? "bg-red-500/5 border-red-500/20" : isWarn ? "bg-orange-500/5 border-orange-500/20" : isHigh ? "bg-amber-500/5 border-amber-500/20" : "bg-zinc-800/30 border-zinc-700/30")}>
+                      <span className={cn("text-[10px] font-bold uppercase mr-2", isCrit ? "text-red-400" : isWarn ? "text-orange-400" : isHigh ? "text-amber-400" : "text-blue-400")}>
+                        {isCrit ? "Critical" : isWarn ? "Warning" : isHigh ? "High" : "Medium"}
                       </span>
                       {clean}
                     </div>

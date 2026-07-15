@@ -40,7 +40,40 @@ UI_CHROME = frozenset({
     "my account","order now","join now","see details","explore more",
     "shop women","shop men","shop all","shop now","shop kids","quick add",
     "add to bag","view cart","best sellers","new in","gift cards",
+    # cookie-banner / legal / footer boilerplate
+    "privacy statement","cookie consent","cookie consent manager","cookies details",
+    "cookie settings","cookie preferences","accept cookies","manage cookies",
+    "accept all","reject all","strictly necessary","functional cookies",
+    "performance cookies","targeting cookies","advertising cookies",
+    "terms of use","all rights reserved","legal notice","privacy notice",
+    "privacy choices","your privacy","do not sell","opt out",
+    # CTA / marketing chrome
+    "get started free","start free trial","free trial","request demo","request a demo",
+    "watch demo","book a demo","contact sales","talk to sales","start now",
+    "try it free","learn how","find out more","get the app","download app",
+    "sign into","create account","join free","subscribe today","get pricing",
+    # generic page furniture
+    "email address","phone number","first name","last name","zip code",
+    "united states","new york","san francisco","frequently asked","help center",
+    "customer stories","case studies","press releases","investor relations",
+    "media kit","site map","table of contents",
 })
+
+# Suffixes that mark an entity as some company's product/person page furniture
+# rather than a topical concept ("Sales Cloud", "Marketing Hub", "Acme Suite").
+_BRANDY_SUFFIXES = ("cloud", "hub", "suite", "labs", "inc", "llc", "ltd", "corp")
+
+
+def _looks_like_person(entity: str) -> bool:
+    """Heuristic: exactly two capitalised words, no digits/&, both alpha —
+    'Marc Benioff' yes; 'Fleet Management' also matches shape, so only used
+    together with the cross-competitor consensus filter (person names almost
+    never repeat across unrelated competitor pages, concepts do)."""
+    parts = entity.split()
+    return (
+        len(parts) == 2
+        and all(p[:1].isupper() and p[1:].islower() and p.isalpha() for p in parts)
+    )
 
 
 def _clean_entities(raw: list[str], limit: int = 25) -> list[str]:
@@ -54,10 +87,77 @@ def _clean_entities(raw: list[str], limit: int = 25) -> list[str]:
         key = re.sub(r"\s+", " ", e).strip().lower()
         if key in UI_CHROME or len(key) < 4 or key.startswith("shop "):
             continue
+        if any(key.endswith(" " + s) for s in _BRANDY_SUFFIXES):
+            continue
         out.append(e)
         if len(out) >= limit:
             break
     return out
+
+
+def _consensus_gap_entities(
+    ce: Counter, client_entities: list[str], n_competitors: int, limit: int = 12
+) -> list[str]:
+    """Missing entities the client should actually cover.
+
+    An entity mentioned by a single competitor is usually that company's own
+    product, person, or page furniture ('Sales Cloud', 'Marc Benioff') — only
+    concepts repeated across competitors are treated as topical gaps. Falls
+    back to single-source entities (still cleaned) when consensus yields
+    nothing, e.g. with only one scrapeable competitor.
+    """
+    client_set = set(client_entities)
+    min_count = 2 if n_competitors >= 2 else 1
+    # Consensus itself filters people/brands (they rarely repeat across
+    # unrelated competitors), so repeated entities pass without the person
+    # heuristic — otherwise it would kill concepts like "Machine Learning".
+    # With a single competitor there is no consensus signal, so the person
+    # heuristic applies there instead.
+    picks = [
+        e for e, c in ce.most_common(60)
+        if c >= min_count and e not in client_set
+        and (min_count >= 2 or not _looks_like_person(e))
+    ]
+    if not picks:
+        # Single-source fallback has no consensus signal, so apply the
+        # person-shape heuristic there to keep CEOs out of the gap list.
+        picks = [
+            e for e, _ in ce.most_common(60)
+            if e not in client_set and not _looks_like_person(e)
+        ]
+    return _clean_entities(picks, limit=limit)
+
+
+# A page with fewer visible words than this is effectively invisible to
+# crawlers — typical of client-side-rendered apps with an empty HTML shell.
+_THIN_PAGE_WORDS = 100
+
+
+def _site_health_recs(client_p, keyword: str) -> list[str]:
+    """Prepended findings that outrank everything else when they apply."""
+    recs: list[str] = []
+    title = (client_p.title or "").strip().lower()
+    if client_p.word_count < _THIN_PAGE_WORDS:
+        recs.append(
+            f"[CRITICAL] Your page exposes only ~{client_p.word_count} words of crawlable text"
+            " — search engines and AI assistants see an almost empty page. This usually means"
+            " the site renders via JavaScript (client-side React/Vue) with no server-side"
+            " rendering. Fix rendering (SSR or prerendering) and add real titles/meta first;"
+            " no other optimization matters until crawlers can read the site."
+        )
+    if title in {"react app", "vue app", "vite app", "untitled", "home", "index"}:
+        recs.append(
+            f'[CRITICAL] Your page title is "{client_p.title}" — a framework default.'
+            " The title tag is the single strongest on-page signal and your headline in"
+            " Google. Set a real title (e.g. brand + primary service)."
+        )
+    if client_p.word_count >= 200 and client_p.keyword_density == 0:
+        recs.append(
+            f'[WARNING] The keyword "{keyword}" does not appear anywhere on your page.'
+            " Either the page needs content for this topic, or this keyword does not match"
+            " your business — consider a keyword that reflects what the site actually offers."
+        )
+    return recs
 
 
 def _extract_domain(url):
@@ -306,14 +406,11 @@ class AlgorithmicReverseEngineerAgent:
             ce.update(c.top_entities); cq.update(c.top_questions); ch.update(c.h2)
 
         gap = GapAnalysis(
-            missing_entities=[e for e, _ in ce.most_common(30) if e not in client_profile.top_entities][:12],
+            missing_entities=_consensus_gap_entities(ce, client_profile.top_entities, len(competitor_profiles)),
             missing_questions=[q for q in cq if q not in client_profile.top_questions][:12],
             heading_gaps=[h for h in ch if h not in client_profile.h2][:12],
             density_gap=round(sum(c.keyword_density for c in competitor_profiles) / max(len(competitor_profiles), 1) - client_profile.keyword_density, 3),
         )
-        for f in features[:8]:
-            clean = f.replace("_", " ")
-            if clean not in gap.missing_entities: gap.missing_entities.append(clean)
 
         if self.claude:
             score, recs = self._ai_analyze(client_profile, competitor_profiles, gap, keyword, client_bl, features)
@@ -321,15 +418,51 @@ class AlgorithmicReverseEngineerAgent:
             score = self._calc_score(client_profile, competitor_profiles, gap, client_bl, serp, client_domain)
             recs = self._basic_recs(client_bl, serp, features, client_domain, gap, client_profile, competitor_profiles)
 
+        recs = _site_health_recs(client_profile, keyword) + recs
+        summary = self._narrative(keyword, client_profile, competitor_profiles, score, recs)
+
         return ResearchResponse(
             seo_score=score, competitor_profiles=competitor_profiles,
             client_profile=client_profile, gap_analysis=gap, recommendations=recs,
+            analyst_summary=summary,
             raw_metrics={
                 "serp_features": features,
                 "client_backlinks": {"total": client_bl.total_backlinks if client_bl else 0, "referring_domains": client_bl.referring_domains if client_bl else 0, "domain_rank": client_bl.domain_rank if client_bl else 0},
                 "dataforseo_cost": self.dfs.get_cost_summary(),
                 "ai_usage": {"total_input_tokens": self.usage.total_input_tokens, "total_output_tokens": self.usage.total_output_tokens, "total_cost_usd": self.usage.total_cost_usd},
             },
+        )
+
+    def _narrative(self, keyword, client_p, comps, score, recs) -> str:
+        """Plain-language 'what this means and what to do first' for the owner."""
+        avg_wc = int(sum(c.word_count for c in comps) / max(len(comps), 1))
+        comp_domains = ", ".join(_extract_domain(c.url) for c in comps[:5])
+        if self.claude:
+            try:
+                prompt = f"""You are an SEO analyst explaining results to a business owner in 3-5 plain sentences (no jargon, no fluff).
+DATA:
+- Their page: {client_p.word_count} words visible to crawlers, page title "{client_p.title}", keyword "{keyword}" appears at {client_p.keyword_density}% density
+- SEO score: {score}/100
+- Pages currently ranking for "{keyword}": {comp_domains} (average {avg_wc} words of content)
+- Top findings already identified: {recs[:4]}
+Explain: what the score means, the single most important problem, and the first thing to fix. Be direct and specific to THIS data.
+Return ONLY JSON: {{"summary": "<3-5 sentences>"}}"""
+                parsed, resp = self.claude.complete_json(
+                    messages=[{"role": "user", "content": prompt}], max_tokens=400, temperature=0.3
+                )
+                self.usage.record(resp)
+                s = str(parsed.get("summary", "")).strip()
+                if len(s) > 40:
+                    return s
+            except Exception as exc:
+                logger.debug("Narrative generation failed: %s", exc)
+        # Deterministic fallback so the summary never comes back empty.
+        return (
+            f'Your page scores {score}/100 for "{keyword}". Search engines can read about '
+            f"{client_p.word_count} words on your page, while the pages currently ranking "
+            f"({comp_domains}) average around {avg_wc} words. Work through the recommendations "
+            "below in order — the top one is the highest-impact fix — then re-run this analysis "
+            "to measure progress."
         )
 
     def _ai_analyze(self, client, competitors, gap, keyword, client_bl, features):
@@ -405,7 +538,7 @@ Heading gaps: {', '.join(gap.heading_gaps[:5])}"""
                 h2 = [l.replace("## ","").strip() for l in lines if l.startswith("## ")]
                 text = " ".join(lines)
                 words = [w for w in re.findall(r"[A-Za-z][A-Za-z\-']+", text.lower()) if w not in STOPWORDS and len(w)>2]
-                ents = [e for e,_ in Counter(re.findall(r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z0-9&]+)+)\b", md)).most_common()]
+                ents = _clean_entities([e for e,_ in Counter(re.findall(r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z0-9&]+)+)\b", md)).most_common(40)])
                 profiles.append(CompetitorPageProfile(url=link, title=h1c[0] if h1c else "Untitled", h1=h1c[0] if h1c else None, h2=h2[:15], top_entities=ents[:25], top_questions=[l for l in lines if l.endswith("?")][:12], word_count=len(words), keyword_density=_kw_density(words, request.primary_keyword)))
             except: pass
         if not profiles: raise ValueError("No competitors scraped")
@@ -414,13 +547,26 @@ Heading gaps: {', '.join(gap.heading_gaps[:5])}"""
         h1c = [l.replace("# ","").strip() for l in lines if l.startswith("# ")]
         text = " ".join(lines)
         words = [w for w in re.findall(r"[A-Za-z][A-Za-z\-']+", text.lower()) if w not in STOPWORDS and len(w)>2]
-        client_p = CompetitorPageProfile(url=str(request.client_url), title=h1c[0] if h1c else "Untitled", h1=h1c[0] if h1c else None, h2=[l.replace("## ","").strip() for l in lines if l.startswith("## ")][:15], top_entities=[e for e,_ in Counter(re.findall(r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z0-9&]+)+)\b", client_md)).most_common()][:25], top_questions=[l for l in lines if l.endswith("?")][:12], word_count=len(words), keyword_density=_kw_density(words, request.primary_keyword))
+        client_p = CompetitorPageProfile(url=str(request.client_url), title=h1c[0] if h1c else "Untitled", h1=h1c[0] if h1c else None, h2=[l.replace("## ","").strip() for l in lines if l.startswith("## ")][:15], top_entities=_clean_entities([e for e,_ in Counter(re.findall(r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z0-9&]+)+)\b", client_md)).most_common(40)]), top_questions=[l for l in lines if l.endswith("?")][:12], word_count=len(words), keyword_density=_kw_density(words, request.primary_keyword))
         ce=Counter(); cq=set(); ch=set()
         for c in profiles: ce.update(c.top_entities); cq.update(c.top_questions); ch.update(c.h2)
-        gap = GapAnalysis(missing_entities=[e for e,_ in ce.most_common(30) if e not in client_p.top_entities][:12], missing_questions=[q for q in cq if q not in client_p.top_questions][:12], heading_gaps=[h for h in ch if h not in client_p.h2][:12], density_gap=round(sum(c.keyword_density for c in profiles)/max(len(profiles),1)-client_p.keyword_density,3))
+        gap = GapAnalysis(missing_entities=_consensus_gap_entities(ce, client_p.top_entities, len(profiles)), missing_questions=[q for q in cq if q not in client_p.top_questions][:12], heading_gaps=[h for h in ch if h not in client_p.h2][:12], density_gap=round(sum(c.keyword_density for c in profiles)/max(len(profiles),1)-client_p.keyword_density,3))
         aw=sum(c.word_count for c in profiles)/max(len(profiles),1)
         score = round(min(100, min(35,(client_p.word_count/max(aw,1))*35)+max(0,30-len(gap.missing_entities)*2.2)))
         recs = []
-        if client_p.word_count<aw: recs.append(f"Expand content by ~{int(round((aw-client_p.word_count)/50.0)*50)} words")
-        if gap.missing_entities: recs.append("Add entities: "+", ".join(gap.missing_entities[:6]))
-        return ResearchResponse(seo_score=score, competitor_profiles=profiles, client_profile=client_p, gap_analysis=gap, recommendations=recs or ["Aligned"], raw_metrics={"ai_usage": {"total_input_tokens": self.usage.total_input_tokens, "total_output_tokens": self.usage.total_output_tokens, "total_cost_usd": self.usage.total_cost_usd}})
+        if client_p.word_count < aw:
+            comp_names = ", ".join(_extract_domain(c.url) for c in profiles[:3])
+            recs.append(
+                f"[HIGH] Top-ranking pages ({comp_names}) average ~{int(aw)} words of content; "
+                f"crawlers can read only {client_p.word_count} on yours. Build the missing depth "
+                "with sections covering the topic gaps below."
+            )
+        if gap.missing_entities:
+            recs.append(
+                "[MEDIUM] Topics competitors cover that your page doesn't: "
+                + ", ".join(gap.missing_entities[:6])
+                + ". Add a section (or FAQ answer) for each that fits your business."
+            )
+        recs = _site_health_recs(client_p, request.primary_keyword) + recs
+        summary = self._narrative(request.primary_keyword, client_p, profiles, score, recs)
+        return ResearchResponse(seo_score=score, competitor_profiles=profiles, client_profile=client_p, gap_analysis=gap, recommendations=recs or ["Content depth and topical coverage are competitive for this keyword."], analyst_summary=summary, raw_metrics={"ai_usage": {"total_input_tokens": self.usage.total_input_tokens, "total_output_tokens": self.usage.total_output_tokens, "total_cost_usd": self.usage.total_cost_usd}})

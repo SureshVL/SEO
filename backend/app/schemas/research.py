@@ -40,6 +40,9 @@ class ResearchResponse(BaseModel):
     client_profile: CompetitorPageProfile
     gap_analysis: GapAnalysis
     recommendations: list[str]
+    # Plain-language "what this means and what to do first" written for the
+    # site owner, generated from the findings (empty when unavailable).
+    analyst_summary: str = ""
     raw_metrics: dict[str, Any] = Field(default_factory=dict)
 
 
