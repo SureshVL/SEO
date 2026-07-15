@@ -375,7 +375,7 @@ export default function SettingsPage() {
             {["Ahrefs", "WordPress", "Razorpay"].map((name) => (
               <div key={name} className="flex items-center justify-between p-3 bg-zinc-800/30 rounded-lg">
                 <span className="text-sm text-zinc-300">{name}</span>
-                <button className="btn-ghost text-xs">Connect</button>
+                <span className="text-xs text-zinc-500 px-3 py-1.5 rounded-lg border border-zinc-700">Coming soon</span>
               </div>
             ))}
           </div>

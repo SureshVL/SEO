@@ -98,9 +98,9 @@ export default function ResearchPage() {
             See how your industry is competing for AI citations.
           </p>
           <div className="flex gap-4 justify-center">
-            <button className="bg-violet-600 text-white font-semibold px-8 py-3 rounded-lg hover:bg-violet-700 transition flex items-center gap-2">
-              <Download className="w-4 h-4" /> Download Latest Report
-            </button>
+            <a href="#subscribe" className="bg-violet-600 text-white font-semibold px-8 py-3 rounded-lg hover:bg-violet-700 transition flex items-center gap-2">
+              <Download className="w-4 h-4" /> Get the Monthly Report
+            </a>
             <Link href="/benchmarks" className="border border-slate-300 text-slate-900 font-semibold px-8 py-3 rounded-lg hover:bg-slate-100 transition">
               View Benchmarks
             </Link>
@@ -153,9 +153,9 @@ export default function ResearchPage() {
                             </div>
                           ))}
                         </div>
-                        <button className="text-sm font-semibold text-violet-600 hover:text-violet-700 flex items-center gap-1">
+                        <span className="text-sm font-semibold text-violet-600 group-hover:text-violet-700 flex items-center gap-1">
                           View Full Report <ArrowRight className="w-3 h-3" />
-                        </button>
+                        </span>
                       </>
                     ) : (
                       <p className="text-slate-600 text-sm">Report coming soon...</p>
@@ -168,7 +168,7 @@ export default function ResearchPage() {
         )}
       </section>
 
-      <section className="bg-slate-900 text-white py-20">
+      <section id="subscribe" className="bg-slate-900 text-white py-20">
         <div className="max-w-4xl mx-auto px-6 text-center">
           <h2 className="text-3xl font-bold mb-6">Get Research Delivered Monthly</h2>
           <p className="text-lg text-slate-300 mb-8">
