@@ -53,10 +53,21 @@ class ProviderStatus:
     exhausted: bool = False
 
 class LLMClient:
+    # Central response-cache policy (applies to every module using this
+    # client): analytical calls (temperature <= threshold) are served from
+    # cache for FRESH_TTL, and a stale copy (up to STALE_TTL) is served when
+    # every provider fails. Creative calls (higher temperature) skip caching.
+    CACHE_MAX_TEMPERATURE = 0.4
+    CACHE_FRESH_TTL = 24 * 3600
+    CACHE_STALE_TTL = 7 * 24 * 3600
+
     def __init__(self):
         self.provider = self._determine_provider()
         self._status: Dict[str, ProviderStatus] = {}
         self.allow_paid: bool = True
+        self.cache_hits = 0
+        self.cache_stale_served = 0
+        self.cache_misses = 0
         for p in self._get_available():
             self._status[p] = ProviderStatus(name=p)
 
@@ -146,11 +157,35 @@ class LLMClient:
         return self._normalize(result)
 
     def complete(self, messages: List[Dict], **kwargs) -> Dict[str, Any]:
-        """Smart complete: cheapest first, auto-fallback on 429/503."""
+        """Smart complete: cache-first for analytical calls, cheapest provider
+        first, auto-fallback on 429/503, stale-cache serve as last resort."""
         requested = kwargs.pop("provider", self.provider)
         model = kwargs.pop("model", None)
         temperature = kwargs.pop("temperature", 0.7)
         max_tokens = kwargs.pop("max_tokens", 4000)
+
+        # ── Central response cache (all callers inherit this) ──────
+        cache_k = None
+        cache_entry = None
+        if temperature <= self.CACHE_MAX_TEMPERATURE:
+            try:
+                from app.services.cache import cache_key, cache_json_get
+                cache_k = cache_key(
+                    "llm-v1", str(model), str(temperature), str(max_tokens),
+                    json.dumps(messages, sort_keys=True, default=str),
+                )
+                cache_entry = cache_json_get(cache_k)
+                if cache_entry and time.time() - float(cache_entry.get("at", 0)) < self.CACHE_FRESH_TTL:
+                    self.cache_hits += 1
+                    logger.info("LLM cache hit (skipping provider call)")
+                    result = dict(cache_entry["data"])
+                    result["_cache"] = "hit"
+                    return result
+                self.cache_misses += 1
+            except Exception as exc:
+                logger.debug("LLM cache unavailable: %s", exc)
+                cache_k = None
+
         fallback_order = self._get_fallback_order(requested)
         if not fallback_order:
             raise Exception("No LLM providers available. Add API keys to .env")
@@ -169,6 +204,15 @@ class LLMClient:
                         result["_provider_used"] = provider
                     self._status[provider] = status
                     logger.info("LLM OK: %s", provider)
+                    if cache_k and isinstance(result, dict):
+                        try:
+                            from app.services.cache import cache_json_set
+                            cache_json_set(
+                                cache_k, {"at": time.time(), "data": result},
+                                ttl=self.CACHE_STALE_TTL,
+                            )
+                        except Exception:
+                            pass
                     return result
                 except Exception as exc:
                     err = str(exc)
@@ -190,6 +234,13 @@ class LLMClient:
                         continue
                     logger.warning("%s failed: %s", provider, err[:100])
                     break
+        # Last resort: serve a stale cached response rather than failing.
+        if cache_entry:
+            self.cache_stale_served += 1
+            logger.warning("All LLM providers failed — serving stale cached response")
+            result = dict(cache_entry["data"])
+            result["_cache"] = "stale"
+            return result
         raise Exception(f"All providers failed: {last_error}")
 
     async def agenerate_text(self, prompt: str, model: Optional[str] = None,
@@ -246,6 +297,11 @@ class LLMClient:
             "fallback_order": self._get_fallback_order(self.provider),
             "all_free_exhausted": all_free_gone, "allow_paid": self.allow_paid,
             "providers": providers,
+            "cache": {
+                "hits": self.cache_hits,
+                "misses": self.cache_misses,
+                "stale_served": self.cache_stale_served,
+            },
         }
 
     def set_allow_paid(self, allow: bool):

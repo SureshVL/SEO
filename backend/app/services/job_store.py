@@ -17,7 +17,7 @@ class JobRecord:
     created_at: datetime
     updated_at: datetime
     payload: dict[str, Any]
-    result: WorkflowResponse | None = None
+    result: WorkflowResponse | dict | None = None
     error: str | None = None
     logs: list[dict[str, Any]] | None = None
 
@@ -77,7 +77,14 @@ class SQLiteJobStore:
                 return None
             logs = self.logs_since(job_id, 0)
             result = json.loads(row["result"]) if row["result"] else None
-            workflow_result = WorkflowResponse(**result) if result else None
+            # Research jobs store a WorkflowResponse; other job types (CRO,
+            # etc.) store plain dicts — parse the former, pass the rest through.
+            workflow_result = result
+            if result is not None:
+                try:
+                    workflow_result = WorkflowResponse(**result)
+                except Exception:
+                    workflow_result = result
             return JobRecord(
                 job_id=row["job_id"],
                 status=row["status"],
@@ -97,8 +104,9 @@ class SQLiteJobStore:
     def mark_running(self, job_id: str) -> None:
         self._update(job_id, status="running")
 
-    def mark_success(self, job_id: str, result: WorkflowResponse) -> None:
-        self._update(job_id, status="completed", result=json.dumps(result.model_dump()), error=None)
+    def mark_success(self, job_id: str, result) -> None:
+        payload = result.model_dump() if hasattr(result, "model_dump") else result
+        self._update(job_id, status="completed", result=json.dumps(payload, default=str), error=None)
 
     def mark_failed(self, job_id: str, error: str) -> None:
         self._update(job_id, status="failed", error=error)

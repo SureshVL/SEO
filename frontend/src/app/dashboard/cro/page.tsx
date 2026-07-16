@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { MousePointerClick, Loader2, Sparkles, Zap } from "lucide-react";
 import { useAppStore } from "@/lib/store";
-import { croAudit, type CroAuditResult } from "@/lib/api";
+import { createCroJob, getJob, type CroAuditResult } from "@/lib/api";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { toast } from "sonner";
 import { cn, scoreColor } from "@/lib/utils";
@@ -18,20 +18,38 @@ export default function CroPage() {
   const [url, setUrl] = useState("");
   const [goal, setGoal] = useState("");
   const [loading, setLoading] = useState(false);
+  const [statusNote, setStatusNote] = useState("");
   const [result, setResult] = useState<CroAuditResult | null>(null);
 
   async function run() {
     if (!url.trim()) { toast.error("Enter a landing-page URL."); return; }
     setLoading(true);
     setResult(null);
+    setStatusNote("Queuing audit…");
     try {
-      const data = await croAudit({ url: url.trim(), goal: goal.trim() }, apiKey);
-      setResult(data);
-      toast.success(`CRO score ${data.score ?? "—"} · ${data.issues.length} findings`);
+      const { job_id } = await createCroJob({ url: url.trim(), goal: goal.trim() }, apiKey);
+      setStatusNote("Analyzing the page — first run takes about a minute. Re-audits of the same page are instant.");
+      const started = Date.now();
+      while (Date.now() - started < 240_000) {
+        await new Promise((r) => setTimeout(r, 3000));
+        const job = await getJob(job_id, apiKey);
+        if (job.status === "completed") {
+          const data = job.result as CroAuditResult;
+          setResult(data);
+          toast.success(`CRO score ${data.score ?? "—"} · ${data.issues?.length ?? 0} findings`);
+          return;
+        }
+        if (job.status === "failed") {
+          toast.error(job.error || "CRO audit failed");
+          return;
+        }
+      }
+      toast.error("The audit is taking unusually long — check the Jobs list or try again.");
     } catch (err: any) {
       toast.error(err?.message || "CRO audit failed");
     } finally {
       setLoading(false);
+      setStatusNote("");
     }
   }
 
@@ -61,6 +79,7 @@ export default function CroPage() {
           {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
           {loading ? "Auditing page…" : "Run CRO audit"}
         </button>
+        {statusNote && <p className="text-xs text-zinc-500 mt-3">{statusNote}</p>}
       </div>
 
       {result && (

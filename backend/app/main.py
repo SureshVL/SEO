@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from datetime import datetime
 from typing import Any, Optional
 
@@ -737,26 +738,25 @@ class CroAuditRequest(BaseModel):
     goal: str = ""  # e.g. "sign up", "book a demo", "purchase"
 
 
-@app.post("/cro/audit")
-def cro_audit(
-    body: CroAuditRequest,
-    _auth: None = Depends(require_api_key),
-    _rate: None = Depends(enforce_rate_limit),
-):
-    """Audit a landing page for conversion issues (CTA, trust, copy, forms…)."""
-    import re as _re
-    from app.core.ssrf import validate_public_url, guarded_client, SSRFError
+def _validate_cro_url(url: str) -> None:
+    from app.core.ssrf import validate_public_url, SSRFError
 
     try:
-        validate_public_url(body.url)
+        validate_public_url(url)
     except SSRFError:
         raise HTTPException(status_code=400, detail="URL must be a public http(s) address.")
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid URL.")
 
+
+def _execute_cro_audit(url: str, goal: str | None) -> dict:
+    """Fetch + parse the page and run the LLM audit (no caching)."""
+    import re as _re
+    from app.core.ssrf import guarded_client
+
     try:
         with guarded_client(timeout=20, follow_redirects=True) as client:
-            resp = client.get(body.url, headers={"User-Agent": "Mozilla/5.0 (OmniRank-CRO)"})
+            resp = client.get(url, headers={"User-Agent": "Mozilla/5.0 (OmniRank-CRO)"})
             html = resp.text[:200_000]
     except Exception:
         raise HTTPException(status_code=502, detail="Could not fetch that page.")
@@ -778,7 +778,7 @@ def cro_audit(
         "\"quick_wins\":[\"...\"]}. Give 6-10 concrete, specific issues."
     )
     user = (
-        f"URL: {body.url}\nConversion goal: {body.goal or 'primary conversion'}\n"
+        f"URL: {url}\nConversion goal: {goal or 'primary conversion'}\n"
         f"Page title: {title}\nCTAs detected: {', '.join(ctas) or 'none found'}\n"
         f"Page copy excerpt: {text}"
     )
@@ -793,12 +793,60 @@ def cro_audit(
     except Exception:
         score = None
     return {
-        "url": body.url, "goal": body.goal, "score": score,
+        "url": url, "goal": goal, "score": score,
         "summary": parsed.get("summary", ""),
         "issues": parsed.get("issues", []),
         "quick_wins": parsed.get("quick_wins", []),
         "ctas_detected": ctas[:12],
     }
+
+
+@app.post("/cro/audit")
+def cro_audit(
+    body: CroAuditRequest,
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """Audit a landing page for conversion issues (synchronous).
+
+    LLM caching / provider failover / stale-serving happen centrally in the
+    LLM client, so identical re-audits return instantly. Prefer POST
+    /jobs/cro for UI use — the analysis can take a minute on first run.
+    """
+    _validate_cro_url(body.url)
+    return _execute_cro_audit(body.url, body.goal)
+
+
+@app.post("/jobs/cro", response_model=JobCreateResponse)
+def create_cro_job(
+    body: CroAuditRequest,
+    background_tasks: BackgroundTasks,
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+) -> JobCreateResponse:
+    """Queue a CRO audit as a background job (poll GET /jobs/{id})."""
+    _validate_cro_url(body.url)
+    record = job_store.create_job({"type": "cro_audit", "url": body.url, "goal": body.goal})
+    background_tasks.add_task(_run_cro_job, record.job_id)
+    return JobCreateResponse(job_id=record.job_id, status=record.status)
+
+
+def _run_cro_job(job_id: str) -> None:
+    record = job_store.get_job(job_id)
+    if not record:
+        return
+    try:
+        job_store.mark_running(job_id)
+        job_store.append_log(job_id, "Fetching and parsing the page…")
+        result = _execute_cro_audit(record.payload["url"], record.payload.get("goal"))
+        job_store.append_log(job_id, "CRO analysis complete")
+        job_store.mark_success(job_id, result)
+    except HTTPException as exc:
+        job_store.mark_failed(job_id, str(exc.detail))
+        job_store.append_log(job_id, f"Job failed: {exc.detail}", level="error")
+    except Exception as exc:
+        job_store.mark_failed(job_id, str(exc))
+        job_store.append_log(job_id, f"Job failed: {exc}", level="error")
 
 
 # ── Technical Audit (NEW) ──────────────────────────────────────────

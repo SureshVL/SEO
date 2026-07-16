@@ -174,6 +174,14 @@ export async function croAudit(payload: { url: string; goal?: string }, apiKey: 
   );
 }
 
+export async function createCroJob(payload: { url: string; goal?: string }, apiKey: string) {
+  return request<{ job_id: string; status: string }>(
+    "/jobs/cro",
+    { method: "POST", body: JSON.stringify(payload) },
+    apiKey
+  );
+}
+
 export async function getJob(jobId: string, apiKey: string) {
   return request<{
     job_id: string;

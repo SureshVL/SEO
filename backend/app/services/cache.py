@@ -43,9 +43,10 @@ def _get_redis():
 
 
 class _InMemoryFallback:
-    """Simple LRU fallback when Redis is down."""
+    """Simple LRU fallback when Redis is down. Entries expire at their TTL."""
 
     def __init__(self, max_size: int = 500):
+        # key -> (expires_at, value)
         self._store: dict[str, tuple[float, str]] = {}
         self._max_size = max_size
 
@@ -53,14 +54,17 @@ class _InMemoryFallback:
         entry = self._store.get(key)
         if entry is None:
             return None
-        ts, val = entry
+        expires_at, val = entry
+        if time.time() >= expires_at:
+            self._store.pop(key, None)
+            return None
         return val
 
     def set(self, key: str, value: str, ttl: int = 3600) -> None:
         if len(self._store) >= self._max_size:
             oldest = min(self._store, key=lambda x: self._store[x][0])
             del self._store[oldest]
-        self._store[key] = (time.time(), value)
+        self._store[key] = (time.time() + ttl, value)
 
     def delete(self, key: str) -> None:
         self._store.pop(key, None)
