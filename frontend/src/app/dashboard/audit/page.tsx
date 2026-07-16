@@ -62,9 +62,7 @@ export default function AuditPage() {
 
   const fetchSummary = async () => {
     try {
-      const res = await apiFetch(`/audits/summary`, {
-        headers: { "X-API-KEY": apiKey },
-      });
+      const res = await apiFetch(`/audits/summary`);
       if (res.ok) setSummary(await res.json());
     } catch (err) {
       console.error("Failed:", err);
@@ -73,9 +71,7 @@ export default function AuditPage() {
 
   const fetchIssues = async () => {
     try {
-      const res = await apiFetch(`/audits/issues`, {
-        headers: { "X-API-KEY": apiKey },
-      });
+      const res = await apiFetch(`/audits/issues`);
       if (res.ok) {
         const data = await res.json();
         setIssues(data.issues || []);
@@ -87,9 +83,7 @@ export default function AuditPage() {
 
   const fetchRuns = async () => {
     try {
-      const res = await apiFetch(`/audits/runs`, {
-        headers: { "X-API-KEY": apiKey },
-      });
+      const res = await apiFetch(`/audits/runs`);
       if (res.ok) {
         const data = await res.json();
         setRuns(data.runs || []);
@@ -110,7 +104,7 @@ export default function AuditPage() {
     try {
       const res = await apiFetch(`/audits/run`, {
         method: "POST",
-        headers: { "X-API-KEY": apiKey, "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ audit_type: auditType, audit_data: [] }),
       });
       if (res.ok) {
@@ -130,7 +124,7 @@ export default function AuditPage() {
     try {
       const res = await apiFetch(`/audits/issues/${issueId}`, {
         method: "PATCH",
-        headers: { "X-API-KEY": apiKey, "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status }),
       });
       if (res.ok) {

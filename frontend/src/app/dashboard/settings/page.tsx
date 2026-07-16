@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/lib/store";
+import { apiFetch } from "@/lib/api";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { toast } from "sonner";
 
@@ -14,17 +15,15 @@ const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 async function getAuthUrl(service: "ga4" | "gsc", projectId: string, apiKey: string) {
-  const res = await fetch(`${API}/analytics/${service}/auth-url?project_id=${projectId}`, {
-    headers: { "X-API-KEY": apiKey },
-  });
+  const res = await apiFetch(`/analytics/${service}/auth-url?project_id=${projectId}`);
   if (!res.ok) throw new Error(await res.text());
   return (await res.json()).auth_url as string;
 }
 
 async function exchangeCode(code: string, service: string, projectId: string, apiKey: string) {
-  const res = await fetch(`${API}/analytics/exchange-token`, {
+  const res = await apiFetch(`/analytics/exchange-token`, {
     method: "POST",
-    headers: { "X-API-KEY": apiKey, "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ code, service, project_id: projectId }),
   });
   if (!res.ok) throw new Error(await res.text());

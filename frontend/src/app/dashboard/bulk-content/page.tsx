@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/lib/store";
+import { apiFetch } from "@/lib/api";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/ui/PageHeader";
 
@@ -116,10 +117,9 @@ export default function BulkContentPage() {
 
     setLoading(true);
     try {
-      const res = await fetch(`${API}/bulk/jobs`, {
+      const res = await apiFetch(`/bulk/jobs`, {
         method: "POST",
         headers: {
-          "X-API-KEY": apiKey,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
@@ -154,9 +154,7 @@ export default function BulkContentPage() {
     const poll = async () => {
 
       try {
-        const res = await fetch(`${API}/bulk/jobs/${jobId}`, {
-          headers: { "X-API-KEY": apiKey },
-        });
+        const res = await apiFetch(`/bulk/jobs/${jobId}`);
 
         if (!res.ok) return;
 
@@ -188,9 +186,7 @@ export default function BulkContentPage() {
   const fetchArticles = async (jobId: string) => {
 
     try {
-      const res = await fetch(`${API}/bulk/jobs/${jobId}/articles?limit=100`, {
-        headers: { "X-API-KEY": apiKey },
-      });
+      const res = await apiFetch(`/bulk/jobs/${jobId}/articles?limit=100`);
 
       if (!res.ok) return;
 
@@ -207,9 +203,8 @@ export default function BulkContentPage() {
     if (!confirm("Cancel this job?")) return;
 
     try {
-      const res = await fetch(`${API}/bulk/jobs/${currentJob.job_id}`, {
+      const res = await apiFetch(`/bulk/jobs/${currentJob.job_id}`, {
         method: "DELETE",
-        headers: { "X-API-KEY": apiKey },
       });
 
       if (!res.ok) throw new Error("Cancel failed");

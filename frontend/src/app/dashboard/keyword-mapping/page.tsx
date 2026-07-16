@@ -64,9 +64,7 @@ export default function KeywordMappingPage() {
   const fetchClusters = async () => {
     setLoading(true);
     try {
-      const res = await apiFetch(`/keywords/clusters`, {
-        headers: { "X-API-KEY": apiKey },
-      });
+      const res = await apiFetch(`/keywords/clusters`);
       if (res.ok) {
         const data = await res.json();
         setClusters(data.clusters || []);
@@ -81,9 +79,7 @@ export default function KeywordMappingPage() {
   const fetchMappings = async () => {
     setLoading(true);
     try {
-      const res = await apiFetch(`/keywords/mappings`, {
-        headers: { "X-API-KEY": apiKey },
-      });
+      const res = await apiFetch(`/keywords/mappings`);
       if (res.ok) {
         const data = await res.json();
         setAssignments(data.mappings || []);
@@ -101,7 +97,6 @@ export default function KeywordMappingPage() {
       // run the AI analysis (stores results), then read them back
       const res = await apiFetch(`/keywords/gaps/identify`, {
         method: "POST",
-        headers: { "X-API-KEY": apiKey },
       });
       if (res.ok) {
         const data = await res.json();
@@ -147,7 +142,6 @@ export default function KeywordMappingPage() {
       const res = await apiFetch(`/keywords/import`, {
         method: "POST",
         headers: {
-          "X-API-KEY": apiKey,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({ keywords: keywordsList }),
@@ -174,7 +168,6 @@ export default function KeywordMappingPage() {
     try {
       const res = await apiFetch(`/keywords/cluster`, {
         method: "POST",
-        headers: { "X-API-KEY": apiKey },
       });
       if (res.ok) {
         const data = await res.json();
@@ -196,7 +189,6 @@ export default function KeywordMappingPage() {
     try {
       const res = await apiFetch(`/keywords/assign`, {
         method: "POST",
-        headers: { "X-API-KEY": apiKey },
       });
       if (res.ok) {
         const data = await res.json();

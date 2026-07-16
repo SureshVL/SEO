@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { Braces, Check, Copy, Loader2, Settings2, X, Zap } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/lib/store";
-import { detectSchema, type SchemaDetectionResult } from "@/lib/api";
+import { apiFetch, detectSchema, type SchemaDetectionResult } from "@/lib/api";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { CMSCredentialsModal } from "@/components/ui/CMSCredentialsModal";
 import { toast } from "sonner";
@@ -58,9 +58,7 @@ export default function SchemaPage() {
     // Fetch WordPress connection status
     async function checkWordPress() {
       try {
-        const res = await fetch(`${API}/cms/credentials/wordpress`, {
-          headers: { "X-API-KEY": apiKey },
-        });
+        const res = await apiFetch(`/cms/credentials/wordpress`);
         const data = await res.json();
         setWordpressStatus({ saved: data.saved, endpoint: data.endpoint_url || "" });
       } catch (err) {
@@ -116,10 +114,9 @@ export default function SchemaPage() {
 
     setBatchLoading(true);
     try {
-      const res = await fetch(`${API}/schema/inject-batch`, {
+      const res = await apiFetch(`/schema/inject-batch`, {
         method: "POST",
         headers: {
-          "X-API-KEY": apiKey,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
@@ -503,9 +500,7 @@ export default function SchemaPage() {
           // Refresh WordPress status
           setTimeout(async () => {
             try {
-              const res = await fetch(`${API}/cms/credentials/wordpress`, {
-                headers: { "X-API-KEY": apiKey },
-              });
+              const res = await apiFetch(`/cms/credentials/wordpress`);
               const data = await res.json();
               setWordpressStatus({ saved: data.saved, endpoint: data.endpoint_url || "" });
             } catch (err) {

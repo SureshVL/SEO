@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { Check, CreditCard, Loader2, TrendingUp, Zap, Bot } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/lib/store";
-import { listProjects, listProjectKeywords, listJobs } from "@/lib/api";
+import { apiFetch, listProjects, listProjectKeywords, listJobs } from "@/lib/api";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { toast } from "sonner";
 
@@ -166,15 +166,15 @@ export default function BillingPage() {
     setUpgrading(planId);
     const email = encodeURIComponent(businessProfile?.websiteUrl || "user@example.com");
     try {
-      let res = await fetch(
-        `${API}/billing/subscribe?plan=${planId}&email=${email}&interval=${interval}`,
-        { method: "POST", headers: { "X-API-KEY": apiKey } },
+      let res = await apiFetch(
+        `/billing/subscribe?plan=${planId}&email=${email}&interval=${interval}`,
+        { method: "POST" },
       );
       let provider = "Razorpay";
       if (!res.ok) {
-        res = await fetch(
-          `${API}/billing/stripe/checkout?plan=${planId}&email=${email}&interval=${interval}`,
-          { method: "POST", headers: { "X-API-KEY": apiKey } },
+        res = await apiFetch(
+          `/billing/stripe/checkout?plan=${planId}&email=${email}&interval=${interval}`,
+          { method: "POST" },
         );
         provider = "Stripe";
       }

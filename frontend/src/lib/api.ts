@@ -507,10 +507,7 @@ export async function generateReport(projectId: string, reportType = "seo_audit"
 }
 
 export async function getReportHtml(projectId: string, reportId: string, apiKey: string): Promise<string> {
-  const res = await fetch(
-    `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/projects/${projectId}/reports/${reportId}/html`,
-    { headers: { "X-API-KEY": apiKey } }
-  );
+  const res = await apiFetch(`/projects/${projectId}/reports/${reportId}/html`);
   if (!res.ok) throw new Error(await res.text());
   return res.text();
 }
@@ -1139,10 +1136,7 @@ export async function getSocialReportHtml(
   month: string,
   apiKey: string,
 ): Promise<string> {
-  const res = await fetch(
-    `${API_BASE}/projects/${projectId}/social-report/${month}`,
-    { headers: { "X-API-KEY": apiKey } },
-  );
+  const res = await apiFetch(`/projects/${projectId}/social-report/${month}`);
   if (!res.ok) throw new ApiError(res.status, await res.text());
   return res.text();
 }

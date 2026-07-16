@@ -6,6 +6,7 @@ import { useAppStore } from "@/lib/store";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Select } from "@/components/ui/Select";
 import {
+  apiFetch,
   getProjectBranding,
   listProjects,
   updateProjectBranding,
@@ -93,14 +94,12 @@ export default function BrandingPage() {
     }
     setPreviewLoading(true);
     try {
-      const base = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
-      const res = await fetch(
-        `${base}/projects/${projectId}/branding/preview`,
+      const res = await apiFetch(
+        `/projects/${projectId}/branding/preview`,
         {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            "X-API-KEY": apiKey,
           },
           body: JSON.stringify(cfg),
         },

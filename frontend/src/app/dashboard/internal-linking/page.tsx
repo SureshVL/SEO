@@ -49,7 +49,6 @@ export default function InternalLinkingPage() {
     try {
       const res = await apiFetch(`/linking/analyze`, {
         method: "POST",
-        headers: { "X-API-KEY": apiKey },
       });
       if (res.ok) {
         const data = await res.json();
@@ -65,9 +64,7 @@ export default function InternalLinkingPage() {
   const fetchOpportunities = async () => {
     setLoading(true);
     try {
-      const res = await apiFetch(`/linking/opportunities`, {
-        headers: { "X-API-KEY": apiKey },
-      });
+      const res = await apiFetch(`/linking/opportunities`);
       if (res.ok) {
         const data = await res.json();
         setOpportunities(data.opportunities || []);
@@ -99,7 +96,6 @@ export default function InternalLinkingPage() {
       const res = await apiFetch(`/linking/pages`, {
         method: "POST",
         headers: {
-          "X-API-KEY": apiKey,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
@@ -125,7 +121,6 @@ export default function InternalLinkingPage() {
     try {
       const res = await apiFetch(`/linking/opportunities/${opportunityId}?status=approved`, {
         method: "PATCH",
-        headers: { "X-API-KEY": apiKey },
       });
       if (!res.ok) throw new Error("Failed");
       toast.success("Approved!");

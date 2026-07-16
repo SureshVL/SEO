@@ -111,9 +111,7 @@ export default function MultilingualPage() {
   const fetchLanguages = async () => {
     setLoading(true);
     try {
-      const res = await apiFetch(`/multilingual/languages`, {
-        headers: { "X-API-KEY": apiKey },
-      });
+      const res = await apiFetch(`/multilingual/languages`);
       if (res.ok) {
         const data = await res.json();
         setLanguages(data.languages || []);
@@ -128,9 +126,7 @@ export default function MultilingualPage() {
   const fetchLocalizedContent = async () => {
     setLoading(true);
     try {
-      const res = await apiFetch(`/multilingual/content`, {
-        headers: { "X-API-KEY": apiKey },
-      });
+      const res = await apiFetch(`/multilingual/content`);
       if (res.ok) {
         const data = await res.json();
         setLocalizedContent(data.localized_content || []);
@@ -145,9 +141,7 @@ export default function MultilingualPage() {
   const fetchHreflangConfig = async () => {
     setLoading(true);
     try {
-      const res = await apiFetch(`/multilingual/hreflang`, {
-        headers: { "X-API-KEY": apiKey },
-      });
+      const res = await apiFetch(`/multilingual/hreflang`);
       if (res.ok) {
         const data = await res.json();
         setHreflangLinks(data.hreflang_config || []);
@@ -162,9 +156,7 @@ export default function MultilingualPage() {
   const fetchRegionalTargeting = async () => {
     setLoading(true);
     try {
-      const res = await apiFetch(`/multilingual/regional-targeting`, {
-        headers: { "X-API-KEY": apiKey },
-      });
+      const res = await apiFetch(`/multilingual/regional-targeting`);
       if (res.ok) {
         const data = await res.json();
         setRegionalTargets(data.regional_targeting || []);
@@ -181,7 +173,6 @@ export default function MultilingualPage() {
     try {
       const res = await apiFetch(`/multilingual/analyze`, {
         method: "POST",
-        headers: { "X-API-KEY": apiKey },
       });
       if (res.ok) {
         const data = await res.json();
@@ -220,7 +211,6 @@ export default function MultilingualPage() {
       const res = await apiFetch(`/multilingual/languages`, {
         method: "POST",
         headers: {
-          "X-API-KEY": apiKey,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
@@ -259,7 +249,6 @@ export default function MultilingualPage() {
       const res = await apiFetch(`/multilingual/localize`, {
         method: "POST",
         headers: {
-          "X-API-KEY": apiKey,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({

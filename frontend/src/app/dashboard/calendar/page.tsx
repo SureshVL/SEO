@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/lib/store";
+import { apiFetch } from "@/lib/api";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/ui/PageHeader";
 
@@ -63,9 +64,8 @@ export default function CalendarPage() {
       const endOfMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0)
         .toISOString().split("T")[0];
 
-      const res = await fetch(
-        `${API}/calendar?start_date=${startOfMonth}&end_date=${endOfMonth}`,
-        { headers: { "X-API-KEY": apiKey } }
+      const res = await apiFetch(
+        `/calendar?start_date=${startOfMonth}&end_date=${endOfMonth}`
       );
 
       if (res.ok) {
@@ -82,9 +82,7 @@ export default function CalendarPage() {
   const fetchPublishLogs = async (eventId: number) => {
 
     try {
-      const res = await fetch(`${API}/calendar/${eventId}/logs`, {
-        headers: { "X-API-KEY": apiKey },
-      });
+      const res = await apiFetch(`/calendar/${eventId}/logs`);
 
       if (res.ok) {
         const data = await res.json();
@@ -114,10 +112,9 @@ export default function CalendarPage() {
 
     setScheduling(true);
     try {
-      const res = await fetch(`${API}/calendar/schedule`, {
+      const res = await apiFetch(`/calendar/schedule`, {
         method: "POST",
         headers: {
-          "X-API-KEY": apiKey,
           "Content-Type": "application/json",
         },
         body: JSON.stringify(scheduleForm),
@@ -151,9 +148,8 @@ export default function CalendarPage() {
     if (!apiKey || !confirm("Publish this article now?")) return;
 
     try {
-      const res = await fetch(`${API}/calendar/${eventId}/publish`, {
+      const res = await apiFetch(`/calendar/${eventId}/publish`, {
         method: "POST",
-        headers: { "X-API-KEY": apiKey },
       });
 
       if (!res.ok) throw new Error("Publish failed");
@@ -170,9 +166,8 @@ export default function CalendarPage() {
   const handleReschedule = async (eventId: number, newDate: string) => {
 
     try {
-      const res = await fetch(`${API}/calendar/${eventId}?new_date=${newDate}`, {
+      const res = await apiFetch(`/calendar/${eventId}?new_date=${newDate}`, {
         method: "PATCH",
-        headers: { "X-API-KEY": apiKey },
       });
 
       if (!res.ok) throw new Error("Reschedule failed");
@@ -187,9 +182,8 @@ export default function CalendarPage() {
     if (!apiKey || !confirm("Cancel this scheduled article?")) return;
 
     try {
-      const res = await fetch(`${API}/calendar/${eventId}`, {
+      const res = await apiFetch(`/calendar/${eventId}`, {
         method: "DELETE",
-        headers: { "X-API-KEY": apiKey },
       });
 
       if (!res.ok) throw new Error("Cancel failed");

@@ -59,9 +59,7 @@ export default function CompetitorsPage() {
   const fetchCompetitors = async () => {
     setLoading(true);
     try {
-      const res = await apiFetch(`/competitors`, {
-        headers: { "X-API-KEY": apiKey },
-      });
+      const res = await apiFetch(`/competitors`);
       if (res.ok) {
         const data = await res.json();
         setCompetitors(data.competitors || []);
@@ -75,9 +73,7 @@ export default function CompetitorsPage() {
 
   const fetchAnalysis = async (competitorId: number) => {
     try {
-      const res = await apiFetch(`/competitors/${competitorId}/analysis`, {
-        headers: { "X-API-KEY": apiKey },
-      });
+      const res = await apiFetch(`/competitors/${competitorId}/analysis`);
       if (res.ok) {
         const data = await res.json();
         setAnalysis(data);
@@ -89,9 +85,7 @@ export default function CompetitorsPage() {
 
   const fetchStrategies = async (competitorId: number) => {
     try {
-      const res = await apiFetch(`/competitors/strategies?competitor_id=${competitorId}`, {
-        headers: { "X-API-KEY": apiKey },
-      });
+      const res = await apiFetch(`/competitors/strategies?competitor_id=${competitorId}`);
       if (res.ok) {
         const data = await res.json();
         setStrategies(data.strategies || []);
@@ -124,7 +118,6 @@ export default function CompetitorsPage() {
       const res = await apiFetch(`/competitors/add`, {
         method: "POST",
         headers: {
-          "X-API-KEY": apiKey,
           "Content-Type": "application/json",
         },
         body: JSON.stringify(newCompetitor),
@@ -150,7 +143,6 @@ export default function CompetitorsPage() {
       const res = await apiFetch(`/competitors/${selectedCompetitor.id}/analyze`, {
         method: "POST",
         headers: {
-          "X-API-KEY": apiKey,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
@@ -182,7 +174,6 @@ export default function CompetitorsPage() {
       const res = await apiFetch(`/competitors/${selectedCompetitor.id}/strategies`, {
         method: "POST",
         headers: {
-          "X-API-KEY": apiKey,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({

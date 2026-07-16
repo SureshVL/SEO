@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Copy, Loader2, Trash2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { apiFetch } from "@/lib/api";
 import { toast } from "sonner";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -35,9 +36,7 @@ export function CMSCredentialsModal({
 
   async function fetchCredentials() {
     try {
-      const res = await fetch(`${API}/cms/credentials/${platform}`, {
-        headers: { "X-API-KEY": apiKey },
-      });
+      const res = await apiFetch(`/cms/credentials/${platform}`);
       const data = await res.json();
       if (data.saved) {
         setEndpoint(data.endpoint_url || "");
@@ -57,10 +56,9 @@ export function CMSCredentialsModal({
 
     setLoading(true);
     try {
-      const res = await fetch(`${API}/cms/credentials`, {
+      const res = await apiFetch(`/cms/credentials`, {
         method: "POST",
         headers: {
-          "X-API-KEY": apiKey,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
@@ -92,9 +90,8 @@ export function CMSCredentialsModal({
 
     setLoading(true);
     try {
-      const res = await fetch(`${API}/cms/credentials/${platform}`, {
+      const res = await apiFetch(`/cms/credentials/${platform}`, {
         method: "DELETE",
-        headers: { "X-API-KEY": apiKey },
       });
 
       if (!res.ok) throw new Error("Delete failed");

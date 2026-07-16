@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/lib/store";
+import { apiFetch } from "@/lib/api";
 import { toast } from "sonner";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -90,9 +91,9 @@ export default function OnboardingPage() {
     e.preventDefault();
     setLoading(true);
     try {
-      const res = await fetch(`${API}/projects`, {
+      const res = await apiFetch(`/projects`, {
         method: "POST",
-        headers: { "X-API-KEY": apiKey, "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: form.name || new URL(form.url).hostname,
           client_url: form.url,
@@ -126,9 +127,9 @@ export default function OnboardingPage() {
     try {
       const keywords = form.keywords.split(",").map(k => k.trim()).filter(Boolean);
       for (const kw of keywords.slice(0, 10)) {
-        await fetch(`${API}/projects/${projectId}/keywords`, {
+        await apiFetch(`/projects/${projectId}/keywords`, {
           method: "POST",
-          headers: { "X-API-KEY": apiKey, "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             keyword: kw,
             target_region: "IN",
@@ -158,9 +159,9 @@ export default function OnboardingPage() {
     try {
       const firstKeyword = form.keywords.split(",")[0]?.trim() || "seo";
       const localKeyword = form.city ? `${firstKeyword} in ${form.city}` : firstKeyword;
-      await fetch(`${API}/jobs/research`, {
+      await apiFetch(`/jobs/research`, {
         method: "POST",
-        headers: { "X-API-KEY": apiKey, "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           research_request: {
             client_url: form.url,
