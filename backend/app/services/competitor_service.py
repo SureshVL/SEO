@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime, timezone
 from dataclasses import dataclass
 from typing import Any, Callable
 from uuid import UUID
@@ -141,7 +142,7 @@ class CompetitorService:
 
             # Update last_analyzed timestamp
             db_fn("patch", f"competitors?id=eq.{competitor_id}", {
-                "last_analyzed": "now()",
+                "last_analyzed": datetime.now(timezone.utc).isoformat(),
             })
 
             logger.info("Analyzed competitor: %d", competitor_id)
@@ -272,7 +273,7 @@ class CompetitorService:
         try:
             db_fn("patch", f"outrank_strategies?id=eq.{strategy_id}", {
                 "status": status,
-                "updated_at": "now()",
+                "updated_at": datetime.now(timezone.utc).isoformat(),
             })
             logger.info("Updated strategy %d to %s", strategy_id, status)
             return True
