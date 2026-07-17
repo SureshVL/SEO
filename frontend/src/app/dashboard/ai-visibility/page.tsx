@@ -19,6 +19,22 @@ const ENGINE_LABELS: Record<LLMEngine, string> = {
   gemini: "Gemini",
 };
 
+const MAX_KEYWORDS = 50;
+
+function parseKeywords(text: string): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of text.split(/\n|,/)) {
+    const k = raw.trim();
+    if (!k) continue;
+    const key = k.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(k);
+  }
+  return out;
+}
+
 // Fallback mock data when no real data exists
 const MOCK_HISTORY = [
   { date: "2026-01-08", score: 42, coverage: 35, citations: 28 },
@@ -115,12 +131,15 @@ export default function AIVisibilityPage() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    const keywords = keywordsText
-      .split(/\n|,/)
-      .map(k => k.trim())
-      .filter(Boolean);
+    const keywords = parseKeywords(keywordsText);
     if (!keywords.length) {
       toast.error("Enter at least one keyword");
+      return;
+    }
+    if (keywords.length > MAX_KEYWORDS) {
+      toast.error(
+        `That's ${keywords.length} keywords — the limit is ${MAX_KEYWORDS} per check. Remove ${keywords.length - MAX_KEYWORDS} or split into two runs.`,
+      );
       return;
     }
     const selectedEngines = (Object.keys(engines) as LLMEngine[]).filter(
@@ -331,7 +350,7 @@ export default function AIVisibilityPage() {
               </div>
               <div>
                 <label className="block text-xs text-zinc-500 uppercase tracking-wider mb-1">
-                  Keywords (one per line or comma-separated, max 50)
+                  Keywords (one per line or comma-separated, max {MAX_KEYWORDS})
                 </label>
                 <textarea
                   value={keywordsText}
@@ -340,6 +359,15 @@ export default function AIVisibilityPage() {
                   placeholder={"best crm software\ncheap vps hosting"}
                   required
                 />
+                {(() => {
+                  const n = parseKeywords(keywordsText).length;
+                  return (
+                    <p className={cn("text-xs mt-1", n > MAX_KEYWORDS ? "text-rose-400 font-semibold" : "text-zinc-500")}>
+                      {n} / {MAX_KEYWORDS} keywords
+                      {n > MAX_KEYWORDS && ` — remove ${n - MAX_KEYWORDS} to run the check`}
+                    </p>
+                  );
+                })()}
               </div>
               <div className="flex flex-wrap gap-4 items-center">
                 <div className="flex items-center gap-3">

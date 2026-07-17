@@ -4,8 +4,34 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 class ApiError extends Error {
   constructor(public status: number, message: string) {
-    super(message);
+    super(humanizeApiError(status, message));
   }
+}
+
+/**
+ * Backend errors arrive as FastAPI JSON — either {"detail": "..."} or, for
+ * validation failures, {"detail": [{loc, msg, ...}]}. Toasts show err.message
+ * directly, so translate those shapes into plain sentences here rather than
+ * at every call site.
+ */
+function humanizeApiError(status: number, body: string): string {
+  try {
+    const parsed = JSON.parse(body);
+    const detail = parsed?.detail ?? parsed;
+    if (typeof detail === "string") return detail;
+    if (Array.isArray(detail)) {
+      const msgs = detail.slice(0, 3).map((d: any) => {
+        const field = Array.isArray(d?.loc)
+          ? d.loc.filter((p: any) => p !== "body" && typeof p === "string").join(".")
+          : "";
+        return field ? `${field}: ${d?.msg ?? "invalid value"}` : d?.msg ?? "invalid value";
+      });
+      return msgs.join(" · ") || `Request failed (${status})`;
+    }
+  } catch {
+    /* not JSON — fall through */
+  }
+  return body || `Request failed (${status})`;
 }
 
 /**
@@ -508,7 +534,7 @@ export async function generateReport(projectId: string, reportType = "seo_audit"
 
 export async function getReportHtml(projectId: string, reportId: string, apiKey: string): Promise<string> {
   const res = await apiFetch(`/projects/${projectId}/reports/${reportId}/html`);
-  if (!res.ok) throw new Error(await res.text());
+  if (!res.ok) throw new ApiError(res.status, await res.text());
   return res.text();
 }
 
