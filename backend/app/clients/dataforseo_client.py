@@ -27,7 +27,14 @@ from app.core.config import settings
 
 logger = logging.getLogger("omnirank.dataforseo")
 
-BASE_URL = "https://api.dataforseo.com/v3"
+LIVE_URL = "https://api.dataforseo.com/v3"
+# Free sandbox: dummy data, identical response shapes — for dev/testing
+# without spending account balance (set DATAFORSEO_SANDBOX=true).
+SANDBOX_URL = "https://sandbox.dataforseo.com/v3"
+
+
+def _base_url() -> str:
+    return SANDBOX_URL if settings.dataforseo_sandbox else LIVE_URL
 
 
 @dataclass
@@ -88,7 +95,7 @@ class DataForSEOClient:
 
     def _post(self, endpoint: str, payload: list[dict], retries: int = 3) -> dict:
         """Make authenticated POST request with retry."""
-        url = f"{BASE_URL}/{endpoint}"
+        url = f"{_base_url()}/{endpoint}"
         last_error = None
 
         for attempt in range(retries):
@@ -621,7 +628,7 @@ class DataForSEOClient:
 
     def onpage_tasks_ready(self) -> list[dict]:
         """List on-page tasks that have finished crawling."""
-        url = f"{BASE_URL}/on_page/tasks_ready"
+        url = f"{_base_url()}/on_page/tasks_ready"
         try:
             with httpx.Client(timeout=30) as client:
                 resp = client.get(url, auth=self._auth())
@@ -637,7 +644,7 @@ class DataForSEOClient:
 
     def onpage_summary(self, task_id: str) -> dict:
         """Get on-page audit summary results."""
-        url = f"{BASE_URL}/on_page/summary/{task_id}"
+        url = f"{_base_url()}/on_page/summary/{task_id}"
         with httpx.Client(timeout=60) as client:
             resp = client.get(url, auth=self._auth())
             data = resp.json()

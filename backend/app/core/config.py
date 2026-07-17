@@ -25,6 +25,9 @@ class Settings(BaseSettings):
     pagespeed_api_key: str = ""
     dataforseo_login: str = ""
     dataforseo_password: str = ""
+    # True → hit DataForSEO's free Sandbox (dummy data, identical response
+    # shapes) instead of the paid live API. For development and testing only.
+    dataforseo_sandbox: bool = False
     supabase_url: str = ""
     supabase_service_role_key: str = ""
     supabase_anon_key: str = ""
