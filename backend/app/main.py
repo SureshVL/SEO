@@ -3439,7 +3439,11 @@ from app.schemas.project import (
 
 
 def _supabase_rest(method: str, path: str, payload: dict | list | None = None, params: str = "") -> dict | list:
-    """Helper to call Supabase REST API."""
+    """Helper to call Supabase REST API.
+
+    Every DB-backed endpoint funnels through here, so failures are translated
+    into diagnosable HTTP errors centrally instead of leaking raw 500s.
+    """
     import requests as req
     base = settings.supabase_url.rstrip("/") + "/rest/v1"
     headers = {
@@ -3449,8 +3453,26 @@ def _supabase_rest(method: str, path: str, payload: dict | list | None = None, p
         "Prefer": "return=representation",
     }
     url = f"{base}/{path}{'?' + params if params else ''}"
-    resp = getattr(req, method)(url, headers=headers, json=payload, timeout=20)
-    resp.raise_for_status()
+    try:
+        resp = getattr(req, method)(url, headers=headers, json=payload, timeout=20)
+    except req.RequestException as exc:
+        logger.error("Supabase unreachable (%s %s): %s", method, path, exc)
+        raise HTTPException(status_code=503, detail="Database is unreachable — please retry shortly.")
+    if resp.status_code in (401, 403):
+        logger.error("Supabase auth rejected (%s %s): check SUPABASE_SERVICE_ROLE_KEY", method, path)
+        raise HTTPException(
+            status_code=503,
+            detail="Database credentials are invalid or missing (SUPABASE_SERVICE_ROLE_KEY). Contact support.",
+        )
+    if resp.status_code == 404:
+        logger.error("Supabase table missing (%s %s): %s", method, path, resp.text[:200])
+        raise HTTPException(
+            status_code=503,
+            detail=f"Database table '{path.split('?')[0]}' is missing — run pending migrations.",
+        )
+    if resp.status_code >= 400:
+        logger.error("Supabase error %s (%s %s): %s", resp.status_code, method, path, resp.text[:300])
+        raise HTTPException(status_code=502, detail="Database request failed — please retry.")
     data = resp.json() if resp.content else []
     return data
 
