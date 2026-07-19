@@ -3353,6 +3353,82 @@ def _fetch_project(project_id: str) -> dict | None:
     return rows[0] if rows else None
 
 
+def _build_workflow_handlers() -> dict:
+    """Wire the Week 1-4 workflow tasks to whichever real engines are
+    configured. Engines that aren't configured stay None — their tasks then
+    report an honest skip instead of fake success."""
+    from app.services.workflow_tasks import build_handlers
+
+    claude = _get_claude_client()
+
+    run_technical = None
+    if settings.pagespeed_api_key:
+        def run_technical(url: str) -> dict:
+            r = _build_technical_agent().full_audit(url)
+            return {
+                "scores": {
+                    "performance": r.performance_score,
+                    "accessibility": r.accessibility_score,
+                    "seo": r.seo_score,
+                    "best_practices": r.best_practices_score,
+                },
+                "core_web_vitals": r.core_web_vitals,
+                "actions": r.execution_queue,
+                "issues_count": len(r.actions),
+            }
+
+    def detect_schema_fn(url: str) -> dict:
+        return _serialize_schema_detection(_build_schema_agent().detect(url=url))
+
+    make_brief = None
+    if claude:
+        def make_brief(keyword: str, domain: str) -> dict:
+            return _serialize_brief(
+                _build_content_agent().generate_brief(keyword=keyword, domain=domain)
+            )
+
+    def score_draft_fn(markdown: str, keyword: str) -> dict:
+        return _serialize_score(
+            _build_content_agent().score_content(keyword=keyword, markdown=markdown)
+        )
+
+    check_ranks = None
+    if settings.serper_api_key:
+        def check_ranks(batch: list[dict], domain: str) -> list:
+            from app.services.rank_tracker import RankTracker
+            tracker = RankTracker(serper_client=SerperHTTPClient(api_key=settings.serper_api_key))
+            return tracker.check_batch(batch, domain)
+
+    expand_kw = None
+    if claude:
+        def expand_kw(seeds: list[str], domain: str) -> list[str]:
+            parsed, _resp = _llm_json(claude, messages=[{"role": "user", "content": (
+                "You are an SEO strategist. Seed keywords: " + "; ".join(seeds)
+                + (f". Business site: {domain}." if domain else "")
+                + " Propose up to 12 long-tail keyword variants with clear buyer intent"
+                " (services, pricing, comparisons, 'for <niche>' modifiers, location"
+                " qualifiers). Avoid generic informational head terms."
+                ' Respond ONLY with JSON: {"keywords": ["..."]}'
+            )}], max_tokens=400, temperature=0.3)
+            return [str(k).strip() for k in parsed.get("keywords", []) if str(k).strip()]
+
+    report_fn = None
+    if claude:
+        def report_fn(project_id: str) -> dict:
+            return generate_report(project_id)
+
+    return build_handlers(
+        supabase_rest=_supabase_rest,
+        run_technical_audit=run_technical,
+        detect_schema=detect_schema_fn,
+        make_brief=make_brief,
+        score_draft=score_draft_fn,
+        expand_keywords=expand_kw,
+        check_ranks=check_ranks,
+        generate_report=report_fn,
+    )
+
+
 @app.get("/workflow/schedule/{project_id}")
 def workflow_schedule(
     project_id: str,
@@ -3381,7 +3457,7 @@ def workflow_run(
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    agent = WorkflowAgent()
+    agent = WorkflowAgent(task_handlers=_build_workflow_handlers())
     run = agent.run(project, only=(body.only if body else None))
 
     # Persist to workflow_runs (best-effort — don't fail the request if

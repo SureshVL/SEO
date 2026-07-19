@@ -220,6 +220,7 @@ export default function WorkflowPage() {
                               {t.detail && (
                                 <span style={{ color: "var(--text-muted)" }}> · {t.detail}</span>
                               )}
+                              <TaskData data={t.data as any} />
                             </div>
                           </div>
                         ))}
@@ -255,4 +256,62 @@ function StatusIcon({ status }: { status: string }) {
   if (status === "completed") return <CheckCircle2 className="w-3.5 h-3.5 mt-0.5" style={{ color: "#A3E635" }} />;
   if (status === "failed") return <XCircle className="w-3.5 h-3.5 mt-0.5" style={{ color: "#F43F5E" }} />;
   return <CircleDashed className="w-3.5 h-3.5 mt-0.5" style={{ color: "#FACC15" }} />;
+}
+
+/** Render the quantified artifacts a task returned: rank movers, keyword
+ *  candidates, draft scores, and the deep link to the page that owns them. */
+function TaskData({ data }: { data?: Record<string, any> }) {
+  if (!data || Object.keys(data).length === 0) return null;
+  const movers: Array<{ keyword: string; from: number | null; to: number | null }> = data.movers || [];
+  const candidates: string[] = data.candidates || [];
+  const scores: Array<{ title: string; score: number }> = data.scores || [];
+  const hasChips = movers.length > 0 || candidates.length > 0 || scores.length > 0;
+  if (!hasChips && !data.link) return null;
+  return (
+    <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+      {movers.map((m, i) => {
+        const up = (m.from ?? 99) > (m.to ?? 99);
+        return (
+          <span
+            key={`m${i}`}
+            className="px-1.5 py-0.5 rounded-md border text-[10px] font-medium"
+            style={{
+              color: up ? "#A3E635" : "#F43F5E",
+              borderColor: up ? "#A3E63544" : "#F43F5E44",
+              background: up ? "#A3E6350d" : "#F43F5E0d",
+            }}
+          >
+            {m.keyword} {m.from ?? "—"}→{m.to ?? "—"} {up ? "↑" : "↓"}
+          </span>
+        );
+      })}
+      {candidates.map((c, i) => (
+        <span
+          key={`c${i}`}
+          className="px-1.5 py-0.5 rounded-md text-[10px]"
+          style={{ background: "var(--bg-card)", border: "1px solid var(--border)", color: "var(--text-secondary)" }}
+        >
+          {c}
+        </span>
+      ))}
+      {scores.map((s, i) => (
+        <span
+          key={`s${i}`}
+          className="px-1.5 py-0.5 rounded-md text-[10px]"
+          style={{ background: "var(--bg-card)", border: "1px solid var(--border)", color: "var(--text-secondary)" }}
+        >
+          {s.title?.slice(0, 40)}: {s.score}/100
+        </span>
+      ))}
+      {data.link && (
+        <a
+          href={data.link}
+          className="text-[10px] font-semibold hover:underline"
+          style={{ color: "#8B5CF6" }}
+        >
+          View →
+        </a>
+      )}
+    </div>
+  );
 }

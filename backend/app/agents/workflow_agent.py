@@ -13,11 +13,13 @@ The agent answers two questions:
     1. "What should I do for this project this week?"   → `schedule_for(project)`
     2. "Run the due tasks now and return a summary."    → `run(project)`
 
-Individual tasks are deliberately thin — they defer to existing agents
-(TechnicalAgent, ContentAgent, LinkAgent, …) rather than re-implementing
-the work. If an underlying agent isn't wired up for a project yet, the
-task records a `skipped` status with the reason so that the dashboard can
-surface it without crashing.
+Individual tasks defer to existing engines (technical audit, rank tracker,
+content agent, report generator, …) — the real handlers live in
+app.services.workflow_tasks and are injected by the API layer via
+`WorkflowAgent(task_handlers=...)`. If an engine isn't configured for a
+project yet, its handler records an honest `skipped` status with the setup
+action so the dashboard can surface it without crashing — a task must never
+claim success for work that did not happen.
 """
 
 from __future__ import annotations
@@ -88,9 +90,10 @@ class WorkflowAgent:
     """Drives the monthly SEO cadence for a project."""
 
     def __init__(self, task_handlers: dict[str, Callable[[dict], TaskResult]] | None = None):
-        # Handlers can be swapped in for testing; default to stubbed ones that
-        # delegate to other agents via the registry below.
-        self._handlers = task_handlers or DEFAULT_HANDLERS
+        # Real handlers are injected by the caller (see
+        # app.services.workflow_tasks.build_handlers). With none injected,
+        # every task is honestly reported as skipped — never fake success.
+        self._handlers = task_handlers or {}
 
     def schedule_for(self, project: dict, *, now: datetime | None = None) -> dict:
         """Return the task list due this week for `project`."""
@@ -145,103 +148,7 @@ class WorkflowAgent:
         )
 
 
-# ── Default task handlers ────────────────────────────────────────────────────
-# Each handler must be cheap and side-effect-safe. They return a TaskResult
-# summarising what happened. Real implementations delegate to the existing
-# agent classes; when dependencies aren't configured for the project, they
-# return status="skipped" with a reason.
-
-def _skipped(name: str, reason: str) -> TaskResult:
-    return TaskResult(name=name, status="skipped", detail=reason)
-
-
-def _handle_technical_audit(project: dict) -> TaskResult:
-    domain = project.get("domain") or project.get("client_url")
-    if not domain:
-        return _skipped("technical_audit", "Project has no domain")
-    return TaskResult(
-        name="technical_audit",
-        status="completed",
-        detail=f"Queued technical audit for {domain}",
-        data={"domain": domain},
-    )
-
-
-def _handle_schema_review(project: dict) -> TaskResult:
-    domain = project.get("domain") or project.get("client_url")
-    if not domain:
-        return _skipped("schema_review", "Project has no domain")
-    return TaskResult(
-        name="schema_review",
-        status="completed",
-        detail=f"Schema review scheduled for {domain}",
-        data={"domain": domain},
-    )
-
-
-def _handle_content_brief(project: dict) -> TaskResult:
-    target_keywords = project.get("target_keywords") or []
-    if not target_keywords:
-        return _skipped("content_brief", "No target keywords set")
-    return TaskResult(
-        name="content_brief",
-        status="completed",
-        detail=f"Drafted briefs for {len(target_keywords)} keyword(s)",
-        data={"count": len(target_keywords)},
-    )
-
-
-def _handle_content_draft_score(project: dict) -> TaskResult:
-    return TaskResult(
-        name="content_draft_score",
-        status="completed",
-        detail="Pending drafts scored against top-10 SERP",
-    )
-
-
-def _handle_rank_check(project: dict) -> TaskResult:
-    domain = project.get("domain") or project.get("client_url")
-    if not domain:
-        return _skipped("rank_check", "Project has no domain")
-    return TaskResult(
-        name="rank_check",
-        status="completed",
-        detail=f"Rank check triggered for {domain}",
-        data={"domain": domain},
-    )
-
-
-def _handle_keyword_expansion(project: dict) -> TaskResult:
-    return TaskResult(
-        name="keyword_expansion",
-        status="completed",
-        detail="New long-tail candidates added to opportunities queue",
-    )
-
-
-def _handle_link_outreach(project: dict) -> TaskResult:
-    return TaskResult(
-        name="link_outreach",
-        status="completed",
-        detail="Follow-ups queued for pending outreach prospects",
-    )
-
-
-def _handle_monthly_report(project: dict) -> TaskResult:
-    return TaskResult(
-        name="monthly_report",
-        status="completed",
-        detail="Branded monthly report generated and stored",
-    )
-
-
-DEFAULT_HANDLERS: dict[str, Callable[[dict], TaskResult]] = {
-    "technical_audit": _handle_technical_audit,
-    "schema_review": _handle_schema_review,
-    "content_brief": _handle_content_brief,
-    "content_draft_score": _handle_content_draft_score,
-    "rank_check": _handle_rank_check,
-    "keyword_expansion": _handle_keyword_expansion,
-    "link_outreach": _handle_link_outreach,
-    "monthly_report": _handle_monthly_report,
-}
+# The former module-level "default handlers" fabricated success messages
+# ("Rank check triggered", "report generated") without doing any work — they
+# are gone. Real, engine-backed handlers live in
+# app.services.workflow_tasks.build_handlers and are injected by the API layer.
