@@ -1204,6 +1204,68 @@ export async function getWorkflowSchedule(projectId: string, apiKey: string) {
   );
 }
 
+// ── Content decay (GSC refresh loop) ──────────────────────────────
+
+export interface DecayQueryStat {
+  query: string;
+  impressions: number;
+  clicks: number;
+  position: number;
+}
+
+export interface DecayItem {
+  page: string;
+  clicks_prev: number;
+  clicks_now: number;
+  clicks_lost: number;
+  impressions_prev: number;
+  impressions_now: number;
+  position_prev: number;
+  position_now: number;
+  reasons: string[];
+  severity: "warning" | "critical";
+  top_queries: DecayQueryStat[];
+}
+
+export interface ContentDecayReport {
+  project_id: string;
+  site_url: string;
+  window_days: number;
+  current_window: [string, string];
+  previous_window: [string, string];
+  pages_analyzed: number;
+  decayed_count: number;
+  decayed: DecayItem[];
+}
+
+export async function getContentDecay(
+  projectId: string,
+  apiKey: string,
+  siteUrl = "",
+  days = 28,
+) {
+  const params = new URLSearchParams();
+  if (siteUrl) params.set("site_url", siteUrl);
+  params.set("days", String(days));
+  return request<ContentDecayReport>(
+    `/projects/${projectId}/content-decay?${params}`,
+    {},
+    apiKey,
+  );
+}
+
+export async function createDecayRefresh(
+  projectId: string,
+  body: { page: string; queries: string[]; reasons: string[] },
+  apiKey: string,
+) {
+  return request<{ page: string; title: string; sections: any[]; draft_id: string | null }>(
+    `/projects/${projectId}/content-decay/refresh`,
+    { method: "POST", body: JSON.stringify(body) },
+    apiKey,
+  );
+}
+
 export async function runWorkflow(
   projectId: string,
   apiKey: string,

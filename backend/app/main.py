@@ -3417,6 +3417,18 @@ def _build_workflow_handlers() -> dict:
         def report_fn(project_id: str) -> dict:
             return generate_report(project_id)
 
+    def find_decay_fn(project: dict) -> dict | None:
+        """None → GSC not connected (honest skip); dict → decay report."""
+        import asyncio
+        try:
+            return asyncio.run(_content_decay_core(
+                project.get("id", ""), _default_gsc_site(project), 28,
+            ))
+        except HTTPException as exc:
+            if exc.status_code == 400:
+                return None
+            raise
+
     return build_handlers(
         supabase_rest=_supabase_rest,
         run_technical_audit=run_technical,
@@ -3426,6 +3438,7 @@ def _build_workflow_handlers() -> dict:
         expand_keywords=expand_kw,
         check_ranks=check_ranks,
         generate_report=report_fn,
+        find_decay=find_decay_fn,
     )
 
 
@@ -3716,6 +3729,158 @@ def trigger_rank_check(
 
     background_tasks.add_task(_run)
     return {"status": "rank_check_queued", "project_id": project_id}
+
+
+# ── Content decay (GSC-driven refresh loop) ────────────────────────
+
+async def _content_decay_core(project_id: str, site_url: str, days: int = 28) -> dict:
+    """Compare two GSC windows and flag decaying pages. Raises HTTPException
+    400 when GSC isn't connected for the project."""
+    import httpx as _httpx
+    from urllib.parse import quote as _quote
+    from datetime import date, timedelta
+    from app.api.analytics import get_valid_access_token, _gsc_query
+    from app.services.cache import cache_json_get, cache_json_set, cache_key
+    from app.services.content_decay import analyze_decay, serialize_decay_item
+
+    token = await get_valid_access_token(project_id, "gsc")
+    if not token:
+        raise HTTPException(
+            status_code=400,
+            detail="Google Search Console is not connected for this project — connect it in Settings → Revenue Attribution first.",
+        )
+
+    today = date.today()
+    now_start, now_end = today - timedelta(days=days), today
+    prev_start, prev_end = today - timedelta(days=2 * days), today - timedelta(days=days + 1)
+
+    ck = cache_key("content-decay-v1", project_id, site_url, str(days), now_end.isoformat())
+    cached = cache_json_get(ck)
+    if cached:
+        return cached
+
+    site_q = _quote(site_url, safe="")  # url-prefix properties contain '/' and ':'
+    async with _httpx.AsyncClient(timeout=30.0) as client:
+        pages_now = await _gsc_query(client, token, site_q, now_start.isoformat(), now_end.isoformat(), ["page"], 250)
+        pages_prev = await _gsc_query(client, token, site_q, prev_start.isoformat(), prev_end.isoformat(), ["page"], 250)
+        pq_now = await _gsc_query(client, token, site_q, now_start.isoformat(), now_end.isoformat(), ["page", "query"], 500)
+
+    items = analyze_decay(pages_now, pages_prev, pq_now)
+    result = {
+        "project_id": project_id,
+        "site_url": site_url,
+        "window_days": days,
+        "current_window": [now_start.isoformat(), now_end.isoformat()],
+        "previous_window": [prev_start.isoformat(), prev_end.isoformat()],
+        "pages_analyzed": len(pages_now),
+        "decayed_count": len(items),
+        "decayed": [serialize_decay_item(d) for d in items],
+    }
+    cache_json_set(ck, result, ttl=6 * 3600)
+    return result
+
+
+def _default_gsc_site(project: dict) -> str:
+    domain = (project.get("domain") or "").replace("https://", "").replace("http://", "").rstrip("/")
+    return f"sc-domain:{domain}"
+
+
+@app.get("/projects/{project_id}/content-decay")
+async def content_decay_report(
+    project_id: str,
+    site_url: str = "",
+    days: int = 28,
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """Pages losing clicks/impressions/position vs the previous period."""
+    project = _fetch_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    days = max(7, min(days, 90))
+    return await _content_decay_core(project_id, site_url or _default_gsc_site(project), days)
+
+
+class DecayRefreshRequest(BaseModel):
+    page: str = Field(..., min_length=4, max_length=1000)
+    queries: list[str] = Field(default_factory=list, max_length=10)
+    reasons: list[str] = Field(default_factory=list, max_length=6)
+
+
+@app.post("/projects/{project_id}/content-decay/refresh")
+def content_decay_refresh(
+    project_id: str,
+    body: DecayRefreshRequest,
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """Draft a refresh plan for a decaying page and queue it in Content Studio."""
+    claude = _get_claude_client()
+    if not claude:
+        raise HTTPException(status_code=400, detail="AI features require an LLM API key.")
+    project = _fetch_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    from app.agents.research_agent import _scrape_page, _extract_from_html
+    html = _scrape_page(body.page)
+    extracted = _extract_from_html(html) if html else {}
+    existing_heads = (extracted.get("h2s") or [])[:10]
+
+    queries_txt = "; ".join(body.queries[:8]) or "(no query data)"
+    parsed, _resp = _llm_json(claude, messages=[{"role": "user", "content": (
+        f"A page is losing Google search traffic and needs a content refresh.\n"
+        f"Page: {body.page}\n"
+        f"Decay signals: {'; '.join(body.reasons[:4]) or 'declining clicks/impressions'}\n"
+        f"Queries it should win back: {queries_txt}\n"
+        f"Current page sections: {existing_heads or 'unknown (page may be JS-rendered)'}\n"
+        f"Current word count: {extracted.get('word_count', 'unknown')}\n\n"
+        "Produce a concrete refresh plan: which sections to update, what to add, "
+        "and what to prune. Be specific to the declining queries — the goal is "
+        "recovering those rankings, not a rewrite for its own sake.\n"
+        'Respond ONLY with JSON: {"title": "...", "sections": [{"heading": "...", '
+        '"action": "update|add|remove", "instruction": "..."}], "meta_description": "...", '
+        '"notes": "..."}'
+    )}], max_tokens=1200, temperature=0.3)
+
+    sections = parsed.get("sections") or []
+    outline = [f"# Refresh plan: {body.page}", ""]
+    if body.reasons:
+        outline += ["**Why:** " + "; ".join(body.reasons), ""]
+    if body.queries:
+        outline += ["**Queries to win back:** " + ", ".join(body.queries[:8]), ""]
+    for s in sections:
+        outline.append(f"## [{str(s.get('action', 'update')).upper()}] {s.get('heading', '')}")
+        outline.append(str(s.get("instruction", "")))
+        outline.append("")
+    if parsed.get("meta_description"):
+        outline += ["## [UPDATE] Meta description", str(parsed["meta_description"]), ""]
+    if parsed.get("notes"):
+        outline += ["---", str(parsed["notes"])]
+
+    draft_id = None
+    try:
+        created = _supabase_rest("post", "content_queue", {
+            "project_id": project_id,
+            "content_type": "refresh",
+            "title": parsed.get("title") or f"Refresh: {body.page}",
+            "slug": "refresh-" + "-".join(body.page.rstrip("/").split("/")[-1].split()[:6])[:60],
+            "body_markdown": "\n".join(outline),
+            "target_keyword": (body.queries[0] if body.queries else ""),
+        })
+        if isinstance(created, list) and created:
+            draft_id = created[0].get("id")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.warning("decay refresh draft not persisted: %s", exc)
+
+    return {
+        "page": body.page,
+        "title": parsed.get("title") or f"Refresh: {body.page}",
+        "sections": sections,
+        "draft_id": draft_id,
+    }
 
 
 # ── Content Queue ──────────────────────────────────────────────────

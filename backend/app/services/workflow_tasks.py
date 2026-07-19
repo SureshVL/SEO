@@ -47,6 +47,7 @@ def build_handlers(
     expand_keywords: Callable[[list[str], str], list[str]] | None = None,
     check_ranks: Callable[[list[dict], str], list] | None = None,
     generate_report: Callable[[str], dict] | None = None,
+    find_decay: Callable[[dict], dict | None] | None = None,
 ) -> dict[str, Callable[[dict], TaskResult]]:
     """Build the task-name -> handler map from injected engine callables.
 
@@ -205,6 +206,42 @@ def build_handlers(
                 f'"{weakest["title"][:60]}" at {weakest["score"]}. Improve that one first.'
             ),
             data={"scores": rows, "average": avg, "link": "/dashboard/content"},
+        )
+
+    def content_refresh(project: dict) -> TaskResult:
+        if not find_decay:
+            return _skip("content_refresh", "Decay monitoring not configured.")
+        report = find_decay(project)
+        if report is None:
+            return _skip(
+                "content_refresh",
+                "Google Search Console not connected — connect it in Settings to monitor content decay.",
+                "/dashboard/settings",
+            )
+        decayed = report.get("decayed") or []
+        if not decayed:
+            return TaskResult(
+                name="content_refresh",
+                status="completed",
+                detail=(
+                    f"Checked {report.get('pages_analyzed', 0)} page(s) over "
+                    f"{report.get('window_days', 28)} days — no content decay detected."
+                ),
+                data={"decayed_count": 0, "link": "/dashboard/refresh"},
+            )
+        worst = decayed[0]
+        return TaskResult(
+            name="content_refresh",
+            status="completed",
+            detail=(
+                f"{len(decayed)} page(s) losing search traffic. Worst: {worst.get('page', '')} "
+                f"({'; '.join(worst.get('reasons', [])[:2])}). Draft refreshes in Content Refresh."
+            ),
+            data={
+                "decayed_count": len(decayed),
+                "pages": [d.get("page", "") for d in decayed[:5]],
+                "link": "/dashboard/refresh",
+            },
         )
 
     # ── Week 3 ───────────────────────────────────────────────────────────
@@ -374,6 +411,7 @@ def build_handlers(
         "schema_review": schema_review,
         "content_brief": content_brief,
         "content_draft_score": content_draft_score,
+        "content_refresh": content_refresh,
         "rank_check": rank_check,
         "keyword_expansion": keyword_expansion,
         "link_outreach": link_outreach,

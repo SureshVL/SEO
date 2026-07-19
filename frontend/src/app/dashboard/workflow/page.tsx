@@ -20,6 +20,7 @@ const TASK_LABELS: Record<string, string> = {
   schema_review: "Schema markup review",
   content_brief: "Content brief",
   content_draft_score: "Score pending drafts",
+  content_refresh: "Content decay check",
   rank_check: "Rank check",
   keyword_expansion: "Keyword expansion",
   link_outreach: "Link outreach follow-ups",

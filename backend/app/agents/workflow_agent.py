@@ -51,7 +51,7 @@ def week_of_month(dt: datetime | None = None) -> int:
 
 WEEK_TASKS: dict[int, list[str]] = {
     1: ["technical_audit", "schema_review"],
-    2: ["content_brief", "content_draft_score"],
+    2: ["content_brief", "content_draft_score", "content_refresh"],
     3: ["rank_check", "keyword_expansion"],
     4: ["link_outreach", "monthly_report"],
 }
