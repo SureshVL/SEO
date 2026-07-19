@@ -136,7 +136,7 @@ GSC_SCOPES = [
 def ga4_auth_url(project_id: str = Query(default="")):
     """Return the OAuth URL to redirect the user to Google for GA4 access."""
     if not GOOGLE_CLIENT_ID:
-        raise HTTPException(status_code=500, detail="GOOGLE_CLIENT_ID not configured")
+        raise HTTPException(status_code=503, detail="Google connection is not set up yet — add GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET to the backend .env (see Setup steps below).")
     params = {
         "client_id": GOOGLE_CLIENT_ID,
         "redirect_uri": REDIRECT_URI,
@@ -154,7 +154,7 @@ def ga4_auth_url(project_id: str = Query(default="")):
 def gsc_auth_url(project_id: str = Query(default="")):
     """Return the OAuth URL to redirect the user to Google for GSC access."""
     if not GOOGLE_CLIENT_ID:
-        raise HTTPException(status_code=500, detail="GOOGLE_CLIENT_ID not configured")
+        raise HTTPException(status_code=503, detail="Google connection is not set up yet — add GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET to the backend .env (see Setup steps below).")
     params = {
         "client_id": GOOGLE_CLIENT_ID,
         "redirect_uri": REDIRECT_URI,
@@ -190,7 +190,7 @@ class TokenExchangeResponse(BaseModel):
 async def exchange_token(req: TokenExchangeRequest):
     """Exchange OAuth code for tokens and fetch available properties/sites."""
     if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
-        raise HTTPException(status_code=500, detail="Google OAuth not configured. Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET.")
+        raise HTTPException(status_code=503, detail="Google connection is not set up yet — add GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET to the backend .env (see Setup steps below).")
 
     async with httpx.AsyncClient() as client:
         # Exchange code for tokens
