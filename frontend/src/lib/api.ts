@@ -1204,6 +1204,31 @@ export async function getWorkflowSchedule(projectId: string, apiKey: string) {
   );
 }
 
+// ── Copilot ───────────────────────────────────────────────────────
+
+export interface CopilotAction {
+  type: "none" | "navigate" | "technical_audit" | "rank_check" | "content_decay";
+  params: Record<string, any>;
+}
+
+export interface CopilotResponse {
+  reply: string;
+  action: CopilotAction;
+  action_result: { status: string; detail: string; data?: Record<string, any> } | null;
+}
+
+export async function copilotChat(
+  messages: Array<{ role: "user" | "assistant"; content: string }>,
+  projectId: string,
+  apiKey: string,
+) {
+  return request<CopilotResponse>(
+    "/copilot/chat",
+    { method: "POST", body: JSON.stringify({ messages, project_id: projectId }) },
+    apiKey,
+  );
+}
+
 // ── Content decay (GSC refresh loop) ──────────────────────────────
 
 export interface DecayQueryStat {

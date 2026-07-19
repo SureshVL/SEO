@@ -3883,6 +3883,138 @@ def content_decay_refresh(
     }
 
 
+# ── Copilot (in-app AI guide + operator) ───────────────────────────
+
+# Compact product map the copilot reasons over. Kept deliberately terse —
+# it rides on every chat call, so every line costs tokens.
+_COPILOT_PRODUCT_MAP = """OMNI-RANK modules (path — what it does / when to recommend):
+- /dashboard — overview of the selected project.
+- /dashboard/projects — create/select projects (one per website). Everything is project-scoped.
+- /dashboard/research (AI Research) — deep URL+keyword analysis: SEO score, competitor gaps, strategy advice. START HERE for any new site.
+- /dashboard/keywords — add/track keywords. Prerequisite for rank tracking, briefs, expansion.
+- /dashboard/budget-keywords — best PPC keyword mix for a monthly ad budget.
+- /dashboard/rank-tracker — Google position history for tracked keywords.
+- /dashboard/ai-visibility (AEO) — presence in AI answers (ChatGPT/Perplexity/Gemini) + Google AI Overviews. Max 50 keywords/check.
+- /dashboard/attribution — GA4 + Search Console revenue attribution (connect both in Settings).
+- /dashboard/competitors — track competitor domains, run analyses, counter-strategies.
+- /dashboard/audit (Technical Audit) — performance/SEO/accessibility scores + Core Web Vitals + fixes.
+- /dashboard/cro — landing-page conversion audit (CTAs, trust, copy).
+- /dashboard/aso — app-store listing optimization.
+- /dashboard/schema — detect + generate JSON-LD structured data.
+- /dashboard/brief — SERP-driven content brief for a keyword.
+- /dashboard/content (Content Studio) — draft queue, scoring, publish to CMS (WordPress creds in Settings).
+- /dashboard/refresh (Content Refresh) — GSC-based decay scan: pages losing clicks/position + AI refresh plans. Needs GSC connected.
+- /dashboard/social — generate/approve social posts.
+- /dashboard/programmatic — bulk landing-page generation.
+- /dashboard/links — backlink profile + outreach prospects/emails.
+- /dashboard/workflow — the Week 1-4 monthly cadence; "Run now" executes this week's tasks.
+- /dashboard/reports — client-ready reports (white-label via /dashboard/branding).
+- /dashboard/settings — API keys, GA4/GSC connect, CMS credentials.
+Recommended first session: create project -> add 5-10 keywords -> AI Research on the homepage -> Technical Audit -> first rank check."""
+
+_COPILOT_ACTIONS = ("navigate", "technical_audit", "rank_check", "content_decay", "none")
+
+
+class CopilotMessage(BaseModel):
+    role: str = Field(..., pattern="^(user|assistant)$")
+    content: str = Field(..., min_length=1, max_length=4000)
+
+
+class CopilotChatRequest(BaseModel):
+    messages: list[CopilotMessage] = Field(..., min_length=1, max_length=12)
+    project_id: str = ""
+
+
+def _copilot_project_context(project_id: str) -> str:
+    """Small, fail-soft snapshot of the user's project for grounding."""
+    if not project_id:
+        return "No project selected."
+    try:
+        rows = _supabase_rest("get", "projects", params=f"id=eq.{project_id}&select=name,domain")
+        if not rows:
+            return "No project selected."
+        p = rows[0]
+        kw = _supabase_rest("get", "keywords", params=f"project_id=eq.{project_id}&select=id&limit=100")
+        gsc = _supabase_rest("get", "oauth_tokens", params=f"project_id=eq.{project_id}&service=eq.gsc&select=id")
+        return (
+            f"Current project: {p.get('name')} ({p.get('domain')}). "
+            f"Tracked keywords: {len(kw) if isinstance(kw, list) else 0}. "
+            f"Search Console connected: {'yes' if gsc else 'no'}."
+        )
+    except Exception:
+        return "Project context unavailable right now."
+
+
+@app.post("/copilot/chat")
+async def copilot_chat(
+    body: CopilotChatRequest,
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """In-app copilot: answers product/SEO questions grounded in the user's
+    project, and can execute a small whitelist of real actions."""
+    claude = _get_claude_client()
+    if not claude:
+        raise HTTPException(status_code=400, detail="AI features require an LLM API key.")
+
+    context = _copilot_project_context(body.project_id)
+    system = (
+        "You are the OMNI-RANK Copilot — a sharp, friendly SEO guide living inside the "
+        "OMNI-RANK dashboard. Answer in the same language the user writes in. Be concise "
+        "(2-5 sentences), concrete, and always point to the next best action in the product.\n\n"
+        + _COPILOT_PRODUCT_MAP + "\n\nUser context: " + context + "\n\n"
+        "You can execute these actions when the user asks for them (not for purely "
+        "informational questions):\n"
+        "- navigate {\"path\": \"/dashboard/...\"} — open a page for the user.\n"
+        "- technical_audit {\"url\": \"https://...\"} — run a technical audit now (takes ~20s).\n"
+        "- rank_check {} — check Google positions for the project's tracked keywords now.\n"
+        "- content_decay {} — scan Search Console for pages losing traffic.\n"
+        'Respond ONLY with JSON: {"reply": "...", "action": {"type": "none|navigate|'
+        'technical_audit|rank_check|content_decay", "params": {}}}. Use type "none" unless '
+        "the user clearly wants an action performed."
+    )
+    messages = [{"role": m.role, "content": m.content} for m in body.messages[-8:]]
+
+    parsed, _resp = _llm_json(claude, messages=messages, system=system, max_tokens=700, temperature=0.4)
+    reply = str(parsed.get("reply", "")).strip() or "Sorry — I could not produce an answer. Try rephrasing?"
+    action = parsed.get("action") or {}
+    action_type = str(action.get("type", "none"))
+    params = action.get("params") or {}
+    if action_type not in _COPILOT_ACTIONS:
+        action_type = "none"
+
+    action_result = None
+    if action_type in ("technical_audit", "rank_check", "content_decay"):
+        project = _fetch_project(body.project_id) if body.project_id else None
+        if not project and action_type != "technical_audit":
+            action_result = {"status": "skipped", "detail": "Select a project first — actions run against the selected project."}
+        else:
+            handlers = _build_workflow_handlers()
+            try:
+                if action_type == "technical_audit":
+                    url = str(params.get("url") or "").strip()
+                    target = project or {}
+                    if url:
+                        target = {**(project or {}), "domain": url.replace("https://", "").replace("http://", "").rstrip("/"), "id": (project or {}).get("id", "")}
+                    tr = handlers["technical_audit"](target)
+                elif action_type == "rank_check":
+                    tr = handlers["rank_check"](project)
+                else:
+                    tr = handlers["content_refresh"](project)
+                action_result = {"status": tr.status, "detail": tr.detail, "data": tr.data}
+            except HTTPException as exc:
+                action_result = {"status": "failed", "detail": str(exc.detail)}
+            except Exception as exc:
+                logger.warning("copilot action %s failed: %s", action_type, exc)
+                action_result = {"status": "failed", "detail": "That action failed — try it from its page instead."}
+
+    return {
+        "reply": reply,
+        "action": {"type": action_type, "params": params},
+        "action_result": action_result,
+    }
+
+
 # ── Content Queue ──────────────────────────────────────────────────
 
 @app.get("/projects/{project_id}/content", response_model=list[ContentDraftResponse])
