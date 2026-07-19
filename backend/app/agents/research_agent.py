@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 import math
 import re
+import statistics
 import httpx
 from collections import Counter
 from typing import Any
@@ -131,6 +132,89 @@ def _consensus_gap_entities(
 # A page with fewer visible words than this is effectively invisible to
 # crawlers — typical of client-side-rendered apps with an empty HTML shell.
 _THIN_PAGE_WORDS = 100
+
+
+def _word_stats(comps) -> tuple[int, int, int]:
+    """(median, typical_low, typical_high) of competitor word counts.
+
+    A single encyclopedia-length page (Wikipedia at 35k words) makes the mean
+    useless as a content target; the median and interquartile range describe
+    what actually ranks.
+    """
+    counts = sorted(c.word_count for c in comps if c.word_count > 0)
+    if not counts:
+        return 0, 0, 0
+    med = int(statistics.median(counts))
+    if len(counts) >= 4:
+        lo, hi = counts[len(counts) // 4], counts[(3 * len(counts)) // 4]
+    else:
+        lo, hi = counts[0], counts[-1]
+    return med, lo, hi
+
+
+# Reference/education sites whose presence marks a SERP as informational.
+_INFORMATIONAL_AUTHORITIES = {
+    "wikipedia.org", "britannica.com", "investopedia.com", "geeksforgeeks.org",
+    "w3schools.com", "tutorialspoint.com", "javatpoint.com", "wikihow.com",
+    "quora.com", "reddit.com", "medium.com", "stackoverflow.com",
+    "stackexchange.com", "youtube.com", "coursera.org", "udemy.com", "edx.org",
+    "techtarget.com", "sciencedirect.com", "springer.com", "nature.com",
+    "forbes.com", "hbr.org", "mckinsey.com", "gartner.com", "ibm.com",
+}
+
+# Mega-brands whose domain authority a small site cannot realistically outrank
+# on a head keyword.
+_MEGA_BRANDS = {
+    "google.com", "amazon.com", "microsoft.com", "oracle.com", "sap.com",
+    "apple.com", "salesforce.com", "adobe.com", "nvidia.com", "intel.com",
+    "tableau.com", "cisco.com", "dell.com", "hp.com", "meta.com",
+}
+
+
+def _domain_in(domain: str, group: frozenset | set) -> bool:
+    return any(domain == a or domain.endswith("." + a) for a in group)
+
+
+# Title/H1 shapes that mark a ranking page as informational content (listicle,
+# encyclopedia, tutorial) rather than a commercial page a business competes with.
+_INFO_TITLE_RE = re.compile(
+    r"\b(best|top\s?\d+|what\s+is|what\s+are|how\s+to|guide|tutorial|examples?\s+of|"
+    r"applications?\s+of|types?\s+of|introduction\s+to|explained|vs\.?|comparison)\b",
+    re.IGNORECASE,
+)
+
+
+def _serp_strategy_rec(keyword: str, comps: list, client_domain: str, region: str = "") -> list[str]:
+    """Warn when the SERP is dominated by pages a commercial site can't outrank
+    head-on — high-authority domains and/or informational listicle content —
+    and point at winnable long-tail variants instead. Deterministic — no LLM,
+    no extra API calls. `comps` items need .url, and optionally .title/.h1."""
+    comps = [c for c in comps[:5] if getattr(c, "url", "")]
+    domains = [_extract_domain(c.url) for c in comps]
+    if not domains or (client_domain and any(client_domain in d or d in client_domain for d in domains)):
+        return []  # client already ranks here — the keyword is clearly winnable
+    evidence: dict[str, str] = {}  # domain -> why it counts
+    for c, d in zip(comps, domains):
+        if _domain_in(d, _INFORMATIONAL_AUTHORITIES) or d.endswith((".edu", ".gov")):
+            evidence[d] = "authority"
+        elif _domain_in(d, _MEGA_BRANDS):
+            evidence[d] = "mega-brand"
+        else:
+            page_head = f"{getattr(c, 'title', '') or ''} {getattr(c, 'h1', '') or ''}"
+            if _INFO_TITLE_RE.search(page_head):
+                evidence[d] = "informational article"
+    if len(evidence) < 3:
+        return []
+    named = ", ".join(list(evidence)[:3])
+    where = f" in {region}" if region else ""
+    return [
+        f'[STRATEGY] {len(evidence)} of the top {len(domains)} results for "{keyword}" are '
+        f"high-authority sites or informational articles ({named}) — searchers here want "
+        "reference content, not a vendor, and outranking these pages head-on is unrealistic "
+        "for a commercial site. Target buyer-intent long-tail variants instead (e.g. "
+        f'"{keyword} for [your industry]", "{keyword} services{where}", '
+        f'"best {keyword} tools for [your niche]") and run this analysis on those keywords.'
+    ]
 
 
 def _site_health_recs(client_p, keyword: str) -> list[str]:
@@ -418,7 +502,11 @@ class AlgorithmicReverseEngineerAgent:
             score = self._calc_score(client_profile, competitor_profiles, gap, client_bl, serp, client_domain)
             recs = self._basic_recs(client_bl, serp, features, client_domain, gap, client_profile, competitor_profiles)
 
-        recs = _site_health_recs(client_profile, keyword) + recs
+        strategy = _serp_strategy_rec(
+            keyword, competitor_profiles, client_domain,
+            getattr(request, "target_region", "") or "",
+        )
+        recs = _site_health_recs(client_profile, keyword) + strategy + recs
         summary = self._narrative(keyword, client_profile, competitor_profiles, score, recs)
 
         return ResearchResponse(
@@ -435,17 +523,18 @@ class AlgorithmicReverseEngineerAgent:
 
     def _narrative(self, keyword, client_p, comps, score, recs) -> str:
         """Plain-language 'what this means and what to do first' for the owner."""
-        avg_wc = int(sum(c.word_count for c in comps) / max(len(comps), 1))
+        med_wc, lo_wc, hi_wc = _word_stats(comps)
         comp_domains = ", ".join(_extract_domain(c.url) for c in comps[:5])
+        typical = f"{lo_wc:,}–{hi_wc:,}" if lo_wc != hi_wc else f"about {med_wc:,}"
         if self.claude:
             try:
                 prompt = f"""You are an SEO analyst explaining results to a business owner in 3-5 plain sentences (no jargon, no fluff).
 DATA:
 - Their page: {client_p.word_count} words visible to crawlers, page title "{client_p.title}", keyword "{keyword}" appears at {client_p.keyword_density}% density
 - SEO score: {score}/100
-- Pages currently ranking for "{keyword}": {comp_domains} (average {avg_wc} words of content)
+- Pages currently ranking for "{keyword}": {comp_domains} (typically {typical} words of content, median {med_wc})
 - Top findings already identified: {recs[:4]}
-Explain: what the score means, the single most important problem, and the first thing to fix. Be direct and specific to THIS data.
+Explain: what the score means, the single most important problem, and the first thing to fix. Be direct and specific to THIS data. If a [STRATEGY] finding exists, reflect it honestly (don't tell them to out-write Wikipedia).
 Return ONLY JSON: {{"summary": "<3-5 sentences>"}}"""
                 parsed, resp = self.claude.complete_json(
                     messages=[{"role": "user", "content": prompt}], max_tokens=400, temperature=0.3
@@ -460,7 +549,7 @@ Return ONLY JSON: {{"summary": "<3-5 sentences>"}}"""
         return (
             f'Your page scores {score}/100 for "{keyword}". Search engines can read about '
             f"{client_p.word_count} words on your page, while the pages currently ranking "
-            f"({comp_domains}) average around {avg_wc} words. Work through the recommendations "
+            f"({comp_domains}) typically have {typical} words. Work through the recommendations "
             "below in order — the top one is the highest-impact fix — then re-run this analysis "
             "to measure progress."
         )
@@ -492,8 +581,8 @@ Heading gaps: {', '.join(gap.heading_gaps[:5])}"""
 
     def _calc_score(self, client, comps, gap, client_bl, serp, client_domain):
         score = 10.0
-        avg_wc = sum(c.word_count for c in comps) / max(len(comps), 1)
-        if avg_wc > 0: score += min(20, (client.word_count / avg_wc) * 20)
+        med_wc, _, _ = _word_stats(comps)
+        if med_wc > 0: score += min(20, (client.word_count / med_wc) * 20)
         if client_bl:
             if client_bl.referring_domains > 100: score += 20
             elif client_bl.referring_domains > 30: score += 12
@@ -509,9 +598,9 @@ Heading gaps: {', '.join(gap.heading_gaps[:5])}"""
 
     def _basic_recs(self, client_bl, serp, features, client_domain, gap, client, comps):
         recs = []
-        avg_wc = sum(c.word_count for c in comps) / max(len(comps), 1)
-        if client.word_count < avg_wc * 0.5:
-            recs.append(f"[CRITICAL] Content too thin ({client.word_count} words vs avg {int(avg_wc)}) -> 2-3x more traffic")
+        med_wc, _, _ = _word_stats(comps)
+        if client.word_count < med_wc * 0.5:
+            recs.append(f"[CRITICAL] Content too thin ({client.word_count} words vs typical {med_wc}) -> 2-3x more traffic")
         if not client_bl or client_bl.referring_domains < 20:
             recs.append("[CRITICAL] Build backlinks — very low referring domains -> Improved authority")
         if "local_pack" in features:
@@ -551,15 +640,16 @@ Heading gaps: {', '.join(gap.heading_gaps[:5])}"""
         ce=Counter(); cq=set(); ch=set()
         for c in profiles: ce.update(c.top_entities); cq.update(c.top_questions); ch.update(c.h2)
         gap = GapAnalysis(missing_entities=_consensus_gap_entities(ce, client_p.top_entities, len(profiles)), missing_questions=[q for q in cq if q not in client_p.top_questions][:12], heading_gaps=[h for h in ch if h not in client_p.h2][:12], density_gap=round(sum(c.keyword_density for c in profiles)/max(len(profiles),1)-client_p.keyword_density,3))
-        aw=sum(c.word_count for c in profiles)/max(len(profiles),1)
-        score = round(min(100, min(35,(client_p.word_count/max(aw,1))*35)+max(0,30-len(gap.missing_entities)*2.2)))
+        med_wc, lo_wc, hi_wc = _word_stats(profiles)
+        score = round(min(100, min(35,(client_p.word_count/max(med_wc,1))*35)+max(0,30-len(gap.missing_entities)*2.2)))
         recs = []
-        if client_p.word_count < aw:
+        if client_p.word_count < med_wc:
             comp_names = ", ".join(_extract_domain(c.url) for c in profiles[:3])
+            typical = f"{lo_wc:,}–{hi_wc:,}" if lo_wc != hi_wc else f"~{med_wc:,}"
             recs.append(
-                f"[HIGH] Top-ranking pages ({comp_names}) average ~{int(aw)} words of content; "
-                f"crawlers can read only {client_p.word_count} on yours. Build the missing depth "
-                "with sections covering the topic gaps below."
+                f"[HIGH] Top-ranking pages ({comp_names}) typically carry {typical} words of "
+                f"content; crawlers can read only {client_p.word_count} on yours. Build the "
+                "missing depth with sections covering the topic gaps below."
             )
         if gap.missing_entities:
             recs.append(
@@ -567,6 +657,10 @@ Heading gaps: {', '.join(gap.heading_gaps[:5])}"""
                 + ", ".join(gap.missing_entities[:6])
                 + ". Add a section (or FAQ answer) for each that fits your business."
             )
-        recs = _site_health_recs(client_p, request.primary_keyword) + recs
+        strategy = _serp_strategy_rec(
+            request.primary_keyword, profiles,
+            _extract_domain(str(request.client_url)), request.target_region or "",
+        )
+        recs = _site_health_recs(client_p, request.primary_keyword) + strategy + recs
         summary = self._narrative(request.primary_keyword, client_p, profiles, score, recs)
         return ResearchResponse(seo_score=score, competitor_profiles=profiles, client_profile=client_p, gap_analysis=gap, recommendations=recs or ["Content depth and topical coverage are competitive for this keyword."], analyst_summary=summary, raw_metrics={"ai_usage": {"total_input_tokens": self.usage.total_input_tokens, "total_output_tokens": self.usage.total_output_tokens, "total_cost_usd": self.usage.total_cost_usd}})

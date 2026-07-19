@@ -4099,9 +4099,10 @@ def edge_config(token: str, request: Request, url: str = "/"):
         raise HTTPException(status_code=400, detail="Invalid token")
     try:
         result = EdgeService().resolve_directives(token, url, _supabase_rest)
-    except HTTPException:
-        raise
     except Exception as exc:
+        # Includes HTTPException from _supabase_rest: this endpoint runs in
+        # visitors' browsers on customer sites, so a backend/db problem must
+        # degrade to "no directives", never surface as an error there.
         logger.warning("edge config lookup failed: %s", exc)
         result = None
     if result is None:

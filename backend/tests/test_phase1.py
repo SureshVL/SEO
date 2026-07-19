@@ -193,7 +193,8 @@ class TestAnalyticsRouter:
         importlib.reload(mod)
         with pytest.raises(HTTPException) as exc_info:
             mod.ga4_auth_url()
-        assert exc_info.value.status_code == 500
+        # Missing OAuth config is a setup state, reported as 503 with guidance
+        assert exc_info.value.status_code == 503
         os.environ["GOOGLE_CLIENT_ID"] = original
 
     def test_token_exchange_request_schema(self):
