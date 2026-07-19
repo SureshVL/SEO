@@ -277,11 +277,12 @@ export default function ResearchPage() {
                   const isCrit = r.includes("[CRITICAL]");
                   const isWarn = r.includes("[WARNING]");
                   const isHigh = r.includes("[HIGH]");
-                  const clean = r.replace("[CRITICAL] ", "").replace("[WARNING] ", "").replace("[HIGH] ", "").replace("[MEDIUM] ", "");
+                  const isStrategy = r.includes("[STRATEGY]");
+                  const clean = r.replace(/^\[(CRITICAL|WARNING|HIGH|MEDIUM|STRATEGY)\]\s*/, "");
                   return (
-                    <div key={i} className={cn("p-3 rounded-lg border text-sm", isCrit ? "bg-red-500/5 border-red-500/20" : isWarn ? "bg-orange-500/5 border-orange-500/20" : isHigh ? "bg-amber-500/5 border-amber-500/20" : "bg-zinc-800/30 border-zinc-700/30")}>
-                      <span className={cn("text-[10px] font-bold uppercase mr-2", isCrit ? "text-red-400" : isWarn ? "text-orange-400" : isHigh ? "text-amber-400" : "text-blue-400")}>
-                        {isCrit ? "Critical" : isWarn ? "Warning" : isHigh ? "High" : "Medium"}
+                    <div key={i} className={cn("p-3 rounded-lg border text-sm", isCrit ? "bg-red-500/5 border-red-500/20" : isStrategy ? "bg-violet-500/5 border-violet-500/25" : isWarn ? "bg-orange-500/5 border-orange-500/20" : isHigh ? "bg-amber-500/5 border-amber-500/20" : "bg-zinc-800/30 border-zinc-700/30")}>
+                      <span className={cn("text-[10px] font-bold uppercase mr-2", isCrit ? "text-red-400" : isStrategy ? "text-violet-400" : isWarn ? "text-orange-400" : isHigh ? "text-amber-400" : "text-blue-400")}>
+                        {isCrit ? "Critical" : isStrategy ? "Strategy" : isWarn ? "Warning" : isHigh ? "High" : "Medium"}
                       </span>
                       {clean}
                     </div>

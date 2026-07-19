@@ -96,8 +96,22 @@ def _clean_entities(raw: list[str], limit: int = 25) -> list[str]:
     return out
 
 
+def _redundant_with_keyword(entity: str, keyword: str) -> bool:
+    """'Artificial Intelligence' is not a content gap for the keyword
+    'AI Applications' — drop entities that restate the keyword itself,
+    either literally or as the expansion of an acronym in it."""
+    e, k = entity.lower().strip(), keyword.lower().strip()
+    if not e or not k:
+        return False
+    if e in k or k in e:
+        return True
+    acronym = "".join(w[0] for w in entity.split() if w).lower()
+    return len(acronym) >= 2 and acronym in re.findall(r"[a-z0-9]+", k)
+
+
 def _consensus_gap_entities(
-    ce: Counter, client_entities: list[str], n_competitors: int, limit: int = 12
+    ce: Counter, client_entities: list[str], n_competitors: int,
+    keyword: str = "", limit: int = 12,
 ) -> list[str]:
     """Missing entities the client should actually cover.
 
@@ -117,6 +131,7 @@ def _consensus_gap_entities(
     picks = [
         e for e, c in ce.most_common(60)
         if c >= min_count and e not in client_set
+        and not _redundant_with_keyword(e, keyword)
         and (min_count >= 2 or not _looks_like_person(e))
     ]
     if not picks:
@@ -125,6 +140,7 @@ def _consensus_gap_entities(
         picks = [
             e for e, _ in ce.most_common(60)
             if e not in client_set and not _looks_like_person(e)
+            and not _redundant_with_keyword(e, keyword)
         ]
     return _clean_entities(picks, limit=limit)
 
@@ -175,6 +191,23 @@ def _domain_in(domain: str, group: frozenset | set) -> bool:
     return any(domain == a or domain.endswith("." + a) for a in group)
 
 
+# Country codes arrive from the UI ("IN") but recommendations are prose —
+# never show a raw code to the user.
+_REGION_NAMES = {
+    "in": "India", "us": "the United States", "gb": "the United Kingdom",
+    "uk": "the United Kingdom", "au": "Australia", "ca": "Canada",
+    "de": "Germany", "fr": "France", "es": "Spain", "it": "Italy",
+    "nl": "the Netherlands", "sg": "Singapore", "ae": "the UAE",
+    "sa": "Saudi Arabia", "jp": "Japan", "br": "Brazil", "mx": "Mexico",
+    "za": "South Africa", "nz": "New Zealand", "ie": "Ireland",
+}
+
+
+def _region_name(region: str) -> str:
+    r = (region or "").strip()
+    return _REGION_NAMES.get(r.lower(), r) if len(r) == 2 else r
+
+
 # Title/H1 shapes that mark a ranking page as informational content (listicle,
 # encyclopedia, tutorial) rather than a commercial page a business competes with.
 _INFO_TITLE_RE = re.compile(
@@ -206,7 +239,7 @@ def _serp_strategy_rec(keyword: str, comps: list, client_domain: str, region: st
     if len(evidence) < 3:
         return []
     named = ", ".join(list(evidence)[:3])
-    where = f" in {region}" if region else ""
+    where = f" in {_region_name(region)}" if region else ""
     return [
         f'[STRATEGY] {len(evidence)} of the top {len(domains)} results for "{keyword}" are '
         f"high-authority sites or informational articles ({named}) — searchers here want "
@@ -490,7 +523,7 @@ class AlgorithmicReverseEngineerAgent:
             ce.update(c.top_entities); cq.update(c.top_questions); ch.update(c.h2)
 
         gap = GapAnalysis(
-            missing_entities=_consensus_gap_entities(ce, client_profile.top_entities, len(competitor_profiles)),
+            missing_entities=_consensus_gap_entities(ce, client_profile.top_entities, len(competitor_profiles), keyword),
             missing_questions=[q for q in cq if q not in client_profile.top_questions][:12],
             heading_gaps=[h for h in ch if h not in client_profile.h2][:12],
             density_gap=round(sum(c.keyword_density for c in competitor_profiles) / max(len(competitor_profiles), 1) - client_profile.keyword_density, 3),
@@ -639,12 +672,15 @@ Heading gaps: {', '.join(gap.heading_gaps[:5])}"""
         client_p = CompetitorPageProfile(url=str(request.client_url), title=h1c[0] if h1c else "Untitled", h1=h1c[0] if h1c else None, h2=[l.replace("## ","").strip() for l in lines if l.startswith("## ")][:15], top_entities=_clean_entities([e for e,_ in Counter(re.findall(r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z0-9&]+)+)\b", client_md)).most_common(40)]), top_questions=[l for l in lines if l.endswith("?")][:12], word_count=len(words), keyword_density=_kw_density(words, request.primary_keyword))
         ce=Counter(); cq=set(); ch=set()
         for c in profiles: ce.update(c.top_entities); cq.update(c.top_questions); ch.update(c.h2)
-        gap = GapAnalysis(missing_entities=_consensus_gap_entities(ce, client_p.top_entities, len(profiles)), missing_questions=[q for q in cq if q not in client_p.top_questions][:12], heading_gaps=[h for h in ch if h not in client_p.h2][:12], density_gap=round(sum(c.keyword_density for c in profiles)/max(len(profiles),1)-client_p.keyword_density,3))
+        gap = GapAnalysis(missing_entities=_consensus_gap_entities(ce, client_p.top_entities, len(profiles), request.primary_keyword), missing_questions=[q for q in cq if q not in client_p.top_questions][:12], heading_gaps=[h for h in ch if h not in client_p.h2][:12], density_gap=round(sum(c.keyword_density for c in profiles)/max(len(profiles),1)-client_p.keyword_density,3))
         med_wc, lo_wc, hi_wc = _word_stats(profiles)
         score = round(min(100, min(35,(client_p.word_count/max(med_wc,1))*35)+max(0,30-len(gap.missing_entities)*2.2)))
         recs = []
         if client_p.word_count < med_wc:
-            comp_names = ", ".join(_extract_domain(c.url) for c in profiles[:3])
+            # Name only competitors whose length sits inside the quoted range,
+            # so the examples and the numbers reconcile for a careful reader.
+            in_range = [c for c in profiles if lo_wc <= c.word_count <= hi_wc] or profiles
+            comp_names = ", ".join(_extract_domain(c.url) for c in in_range[:3])
             typical = f"{lo_wc:,}–{hi_wc:,}" if lo_wc != hi_wc else f"~{med_wc:,}"
             recs.append(
                 f"[HIGH] Top-ranking pages ({comp_names}) typically carry {typical} words of "
