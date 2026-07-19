@@ -28,6 +28,12 @@ class Settings(BaseSettings):
     # True → hit DataForSEO's free Sandbox (dummy data, identical response
     # shapes) instead of the paid live API. For development and testing only.
     dataforseo_sandbox: bool = False
+    # WhatsApp Cloud API (Meta) — copilot over WhatsApp
+    whatsapp_access_token: str = ""
+    whatsapp_phone_number_id: str = ""
+    whatsapp_verify_token: str = ""   # any secret string, echoed at webhook setup
+    whatsapp_app_secret: str = ""     # Meta app secret for webhook signatures
+    frontend_url: str = "http://localhost:3000"
     supabase_url: str = ""
     supabase_service_role_key: str = ""
     supabase_anon_key: str = ""

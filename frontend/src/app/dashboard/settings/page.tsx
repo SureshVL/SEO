@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import {
-  BarChart3, Check, ExternalLink, Loader2, RefreshCw,
+  BarChart3, Check, ExternalLink, Loader2, MessageCircle, RefreshCw,
   Settings, Shield, Unlink, Zap,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -85,8 +85,26 @@ export default function SettingsPage() {
   const [ga4Metrics, setGa4Metrics] = useState<any>(null);
   const [gscMetrics, setGscMetrics] = useState<any>(null);
   const [loadingMetrics, setLoadingMetrics] = useState(false);
+  const [waCode, setWaCode] = useState("");
+  const [waLoading, setWaLoading] = useState(false);
 
   const exchanging = useOAuthCallback();
+
+  async function generateWaCode() {
+    if (!businessProfile?.projectId) return;
+    setWaLoading(true);
+    try {
+      const res = await apiFetch(`/whatsapp/link-code?project_id=${businessProfile.projectId}`, { method: "POST" });
+      if (!res.ok) throw new Error(await res.text());
+      const data = await res.json();
+      setWaCode(data.code);
+      setTimeout(() => setWaCode(""), 15 * 60 * 1000);
+    } catch (err: any) {
+      toast.error(err?.message || "Could not generate code");
+    } finally {
+      setWaLoading(false);
+    }
+  }
 
   // ── handlers ──────────────────────────────────────────────────────────────
   async function connectGa4() {
@@ -364,6 +382,34 @@ export default function SettingsPage() {
               <p>3. Enable Analytics API + Search Console API in Google Cloud Console</p>
               <p>4. Add your domain to OAuth redirect URIs</p>
             </div>
+          )}
+        </div>
+
+        {/* WhatsApp Copilot */}
+        <div className="card p-6">
+          <h3 className="font-semibold mb-1 flex items-center gap-2">
+            <MessageCircle className="w-4 h-4 text-emerald-400" /> WhatsApp Copilot
+          </h3>
+          <p className="text-xs text-zinc-500 mb-4">
+            Talk to your project from WhatsApp — ask questions, run rank checks and audits, in any language.
+          </p>
+          {waCode ? (
+            <div className="p-4 rounded-lg bg-emerald-500/5 border border-emerald-500/20 text-sm">
+              <div className="text-xs text-zinc-500 mb-1">Send this message to the OMNI-RANK WhatsApp number within 15 minutes:</div>
+              <div className="font-mono text-lg text-emerald-300">LINK {waCode}</div>
+            </div>
+          ) : (
+            <button
+              onClick={generateWaCode}
+              disabled={waLoading || !businessProfile?.projectId}
+              className="btn-primary text-sm flex items-center gap-2 px-4"
+            >
+              {waLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <MessageCircle className="w-3.5 h-3.5" />}
+              Generate link code
+            </button>
+          )}
+          {!businessProfile?.projectId && (
+            <p className="text-xs text-zinc-600 mt-2">Select a project first — the bot answers about one project per number.</p>
           )}
         </div>
 

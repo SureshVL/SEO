@@ -11,7 +11,7 @@ from typing import Any, Optional
 
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import PlainTextResponse, StreamingResponse
 
 from app.agents.ai_visibility_agent import AIVisibilityAgent
 from app.agents.aso_agent import AsoAgent
@@ -3945,19 +3945,14 @@ def _copilot_project_context(project_id: str) -> str:
         return "Project context unavailable right now."
 
 
-@app.post("/copilot/chat")
-async def copilot_chat(
-    body: CopilotChatRequest,
-    _auth: None = Depends(require_api_key),
-    _rate: None = Depends(enforce_rate_limit),
-):
-    """In-app copilot: answers product/SEO questions grounded in the user's
-    project, and can execute a small whitelist of real actions."""
+def _copilot_answer(messages: list[dict], project_id: str) -> dict:
+    """The copilot brain, shared by the in-app widget and the WhatsApp bot:
+    grounded answer + optional whitelisted action execution."""
     claude = _get_claude_client()
     if not claude:
         raise HTTPException(status_code=400, detail="AI features require an LLM API key.")
 
-    context = _copilot_project_context(body.project_id)
+    context = _copilot_project_context(project_id)
     system = (
         "You are the OMNI-RANK Copilot — a sharp, friendly SEO guide living inside the "
         "OMNI-RANK dashboard. Answer in the same language the user writes in. Be concise "
@@ -3973,7 +3968,7 @@ async def copilot_chat(
         'technical_audit|rank_check|content_decay", "params": {}}}. Use type "none" unless '
         "the user clearly wants an action performed."
     )
-    messages = [{"role": m.role, "content": m.content} for m in body.messages[-8:]]
+    messages = messages[-8:]
 
     parsed, _resp = _llm_json(claude, messages=messages, system=system, max_tokens=700, temperature=0.4)
     reply = str(parsed.get("reply", "")).strip() or "Sorry — I could not produce an answer. Try rephrasing?"
@@ -3985,7 +3980,7 @@ async def copilot_chat(
 
     action_result = None
     if action_type in ("technical_audit", "rank_check", "content_decay"):
-        project = _fetch_project(body.project_id) if body.project_id else None
+        project = _fetch_project(project_id) if project_id else None
         if not project and action_type != "technical_audit":
             action_result = {"status": "skipped", "detail": "Select a project first — actions run against the selected project."}
         else:
@@ -4013,6 +4008,139 @@ async def copilot_chat(
         "action": {"type": action_type, "params": params},
         "action_result": action_result,
     }
+
+
+@app.post("/copilot/chat")
+async def copilot_chat(
+    body: CopilotChatRequest,
+    _auth: None = Depends(require_api_key),
+    _rate: None = Depends(enforce_rate_limit),
+):
+    """In-app copilot: answers product/SEO questions grounded in the user's
+    project, and can execute a small whitelist of real actions."""
+    messages = [{"role": m.role, "content": m.content} for m in body.messages]
+    return _copilot_answer(messages, body.project_id)
+
+
+# ── WhatsApp bot (Meta Cloud API) ──────────────────────────────────
+
+@app.post("/whatsapp/link-code")
+def whatsapp_link_code(
+    project_id: str,
+    _auth: None = Depends(require_api_key),
+):
+    """Mint a one-time code the user texts to the bot to link their number."""
+    from app.services.whatsapp_bot import create_link_code
+    if not _fetch_project(project_id):
+        raise HTTPException(status_code=404, detail="Project not found")
+    return {"code": create_link_code(project_id), "expires_in_minutes": 15}
+
+
+@app.get("/webhooks/whatsapp")
+def whatsapp_webhook_verify(request: Request):
+    """Meta's one-time webhook verification handshake."""
+    params = request.query_params
+    if (
+        params.get("hub.mode") == "subscribe"
+        and settings.whatsapp_verify_token
+        and params.get("hub.verify_token") == settings.whatsapp_verify_token
+    ):
+        return PlainTextResponse(params.get("hub.challenge", ""))
+    raise HTTPException(status_code=403, detail="Verification failed")
+
+
+def _whatsapp_project_for(phone: str) -> str | None:
+    try:
+        rows = _supabase_rest("get", "whatsapp_links", params=f"phone=eq.{phone}&select=project_id")
+        return rows[0]["project_id"] if rows else None
+    except Exception:
+        return None
+
+
+def _handle_whatsapp_message(sender: str, text: str) -> None:
+    """Background processing for one inbound message: link flow or copilot."""
+    from app.services.whatsapp_bot import (
+        append_history, consume_link_code, get_history, send_text,
+    )
+
+    def reply(msg: str) -> None:
+        send_text(settings.whatsapp_phone_number_id, settings.whatsapp_access_token, sender, msg)
+
+    # Linking flow: "LINK 123456"
+    stripped = text.strip()
+    if stripped.upper().startswith("LINK"):
+        code = "".join(ch for ch in stripped[4:] if ch.isdigit())
+        project_id = consume_link_code(code) if len(code) == 6 else None
+        if not project_id:
+            reply("That code is invalid or expired. Get a fresh one from OMNI-RANK → Settings → WhatsApp Copilot, then send: LINK <code>")
+            return
+        try:
+            _supabase_rest("delete", "whatsapp_links", params=f"phone=eq.{sender}")
+        except Exception:
+            pass
+        try:
+            _supabase_rest("post", "whatsapp_links", {"phone": sender, "project_id": project_id})
+        except Exception as exc:
+            logger.error("whatsapp link persist failed: %s", exc)
+            reply("Linking failed on our side — please try again in a minute.")
+            return
+        reply("✅ Linked! This number now talks to your OMNI-RANK project. Ask me anything — try: 'check my rankings' or 'what should I work on this week?'")
+        return
+
+    project_id = _whatsapp_project_for(sender)
+    if not project_id:
+        reply(
+            "👋 I'm the OMNI-RANK Copilot. To connect this number to your project: "
+            "open OMNI-RANK → Settings → WhatsApp Copilot → Generate code, then send me: LINK <code>"
+        )
+        return
+
+    history = append_history(sender, "user", text)
+    try:
+        result = _copilot_answer(list(history), project_id)
+    except Exception as exc:
+        logger.error("whatsapp copilot failed: %s", exc)
+        reply("Something went wrong on my side — please try again in a minute.")
+        return
+
+    parts = [result["reply"]]
+    ar = result.get("action_result")
+    if ar:
+        icon = {"completed": "✅", "failed": "❌"}.get(ar.get("status", ""), "◌")
+        parts.append(f"{icon} {ar.get('detail', '')}")
+        link = (ar.get("data") or {}).get("link")
+        if link:
+            parts.append(f"Details: {settings.frontend_url.rstrip('/')}{link}")
+    elif result.get("action", {}).get("type") == "navigate":
+        path = result["action"].get("params", {}).get("path", "")
+        if path:
+            parts.append(f"Open: {settings.frontend_url.rstrip('/')}{path}")
+
+    final = "\n\n".join(p for p in parts if p)
+    append_history(sender, "assistant", result["reply"])
+    reply(final)
+
+
+@app.post("/webhooks/whatsapp")
+async def whatsapp_webhook(request: Request, background_tasks: BackgroundTasks):
+    """Inbound WhatsApp messages. Must ACK fast — work runs in background."""
+    from app.services.whatsapp_bot import parse_incoming, verify_signature
+
+    raw = await request.body()
+    if not verify_signature(settings.whatsapp_app_secret, raw, request.headers.get("X-Hub-Signature-256", "")):
+        raise HTTPException(status_code=403, detail="Bad signature")
+    if not (settings.whatsapp_access_token and settings.whatsapp_phone_number_id):
+        return {"status": "ignored", "reason": "WhatsApp not configured"}
+
+    import json as _json
+    try:
+        payload = _json.loads(raw.decode() or "{}")
+    except ValueError:
+        return {"status": "ignored", "reason": "bad payload"}
+
+    for msg in parse_incoming(payload)[:5]:
+        background_tasks.add_task(_handle_whatsapp_message, msg["from"], msg["text"])
+    return {"status": "ok"}
 
 
 # ── Content Queue ──────────────────────────────────────────────────
