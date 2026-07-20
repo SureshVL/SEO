@@ -3,17 +3,35 @@ import pytest
 from datetime import datetime, timezone
 
 
+def _all_route_paths(routes):
+    """Flatten route paths, including routers mounted via include_router."""
+    out = []
+    for r in routes:
+        p = getattr(r, "path", None)
+        if p:
+            out.append(p)
+        sub = getattr(r, "routes", None)
+        if sub:
+            out.extend(_all_route_paths(sub))
+        orig = getattr(r, "original_router", None)  # FastAPI _IncludedRouter
+        if orig is not None:
+            prefix = getattr(getattr(r, "include_context", None), "prefix", "") or ""
+            out.extend(prefix + p for p in _all_route_paths(orig.routes))
+    return out
+
+
+
 # ── Competitor GET endpoint ────────────────────────────────────────────────────
 class TestCompetitorGetEndpoint:
     def test_list_competitors_route_exists(self):
         from app.main import app
-        paths = [r.path for r in app.routes]
+        paths = _all_route_paths(app.routes)
         assert "/projects/{project_id}/competitors" in paths
 
     def test_list_competitors_and_check_both_registered(self):
         from app.main import app
         competitor_routes = [r for r in app.routes if "competitors" in getattr(r, "path", "")]
-        assert len(competitor_routes) == 2  # GET list + POST check
+        assert len(competitor_routes) >= 2  # GET list + POST check (+ competitor AI features)
 
     def test_competitor_intel_route_method_get(self):
         from app.main import app
@@ -72,15 +90,19 @@ class TestContentSchema:
 class TestBillingService:
     def test_plans_defined(self):
         from app.services.billing import PLANS
-        assert "starter" in PLANS
-        assert "growth" in PLANS
-        assert "agency" in PLANS
+        for tier in ("free", "starter", "growth", "pro", "agency"):
+            assert tier in PLANS
 
     def test_plan_prices(self):
-        from app.services.billing import PLANS
+        from app.services.billing import PLANS, annual_price_inr
+        assert PLANS["free"]["price_inr"] == 0
         assert PLANS["starter"]["price_inr"] == 1999
         assert PLANS["growth"]["price_inr"] == 4999
-        assert PLANS["agency"]["price_inr"] == 14999
+        assert PLANS["pro"]["price_inr"] == 9999
+        assert PLANS["agency"]["price_inr"] == 19999
+        # annual = monthly * 12 * 0.8 (20% off)
+        assert annual_price_inr("growth") == round(4999 * 12 * 0.8)
+        assert annual_price_inr("free") == 0
 
     def test_razorpay_client_disabled_without_keys(self):
         from app.services.billing import RazorpayClient
@@ -149,7 +171,7 @@ class TestReportGenerator:
 class TestAnalyticsOAuth:
     def test_all_5_analytics_routes_registered(self):
         from app.main import app
-        paths = [getattr(r, "path", "") for r in app.routes]
+        paths = _all_route_paths(app.routes)
         assert "/analytics/ga4/auth-url" in paths
         assert "/analytics/gsc/auth-url" in paths
         assert "/analytics/exchange-token" in paths
@@ -168,7 +190,7 @@ class TestAnalyticsOAuth:
 class TestRouteInventory:
     def test_all_expected_routes_present(self):
         from app.main import app
-        paths = {getattr(r, "path", "") for r in app.routes}
+        paths = set(_all_route_paths(app.routes))
         expected = [
             "/health",
             "/projects",

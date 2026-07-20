@@ -1,8 +1,9 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BarChart3, Bot, Braces, Calendar, ClipboardList, Coins, Eye, FileText, Grid3x3, Home, LayoutDashboard, Lightbulb, Link2, LogOut, Palette, Search, Settings, Shield, Sparkles, Zap } from "lucide-react";
+import { BarChart3, Bot, Braces, Calendar, ClipboardList, Coins, Eye, FileText, GitPullRequest, Grid3x3, Home, LayoutDashboard, Lightbulb, Link2, LogOut, MousePointerClick, Palette, RefreshCw, Rocket, Search, Settings, Share2, Shield, Smartphone, ShoppingCart, Sparkles, Zap } from "lucide-react";
 import { ThemeToggle } from "../ui/ThemeToggle";
+import { ProjectPicker } from "./ProjectPicker";
 
 const navSections = [
   { label: "Command", items: [
@@ -13,6 +14,7 @@ const navSections = [
   { label: "Intelligence", items: [
     { href: "/dashboard/research", label: "AI Research", icon: Bot, color: "#8B5CF6" },
     { href: "/dashboard/keywords", label: "Keywords", icon: Search, color: "#22D3EE" },
+    { href: "/dashboard/budget-keywords", label: "Budget Keywords", icon: Coins, color: "#FACC15" },
     { href: "/dashboard/rank-tracker", label: "Rank Tracker", icon: BarChart3, color: "#EC4899" },
     { href: "/dashboard/ai-visibility", label: "AI Visibility", icon: Sparkles, color: "#A3E635" },
     { href: "/dashboard/attribution", label: "Attribution", icon: Coins, color: "#F97316" },
@@ -20,11 +22,18 @@ const navSections = [
   ]},
   { label: "Execute", items: [
     { href: "/dashboard/audit", label: "Technical Audit", icon: Shield, color: "#A3E635" },
+    { href: "/dashboard/cro", label: "CRO Audit", icon: MousePointerClick, color: "#F43F5E" },
+    { href: "/dashboard/aso", label: "App Store (ASO)", icon: Smartphone, color: "#2DD4BF" },
     { href: "/dashboard/schema", label: "Schema Markup", icon: Braces, color: "#8B5CF6" },
     { href: "/dashboard/brief", label: "Content Brief", icon: Lightbulb, color: "#F97316" },
     { href: "/dashboard/content", label: "Content Studio", icon: FileText, color: "#818CF8" },
+    { href: "/dashboard/refresh", label: "Content Refresh", icon: RefreshCw, color: "#34D399" },
+    { href: "/dashboard/social", label: "Social Studio", icon: Share2, color: "#E1306C" },
     { href: "/dashboard/programmatic", label: "Programmatic", icon: Grid3x3, color: "#FACC15" },
     { href: "/dashboard/links", label: "Link Building", icon: Link2, color: "#2DD4BF" },
+    { href: "/dashboard/edge", label: "Edge Deploy", icon: Rocket, color: "#14B8A6" },
+    { href: "/dashboard/git", label: "Git Write-back", icon: GitPullRequest, color: "#6366F1" },
+    { href: "/dashboard/feeds", label: "Product Feeds", icon: ShoppingCart, color: "#F97316" },
     { href: "/dashboard/reports", label: "Reports", icon: ClipboardList, color: "#EC4899" },
   ]},
   { label: "Account", items: [
@@ -36,6 +45,19 @@ const navSections = [
 
 export function Sidebar() {
   const pathname = usePathname();
+
+  async function handleLogout() {
+    try {
+      const { createClient } = await import("@/lib/supabase");
+      await createClient().auth.signOut();
+    } catch {
+      /* proceed to login regardless */
+    }
+    // Clear persisted UI state so the next login doesn't inherit this
+    // session's project selection.
+    try { localStorage.removeItem("omnirank-store"); } catch { /* ignore */ }
+    window.location.href = "/auth/login";
+  }
   return (
     <aside
       className="w-64 h-screen fixed left-0 top-0 z-40 flex flex-col"
@@ -53,6 +75,8 @@ export function Sidebar() {
           </div>
         </Link>
       </div>
+
+      <ProjectPicker />
 
       <nav className="flex-1 px-3 py-4 overflow-y-auto space-y-5">
         {navSections.map((section) => (
@@ -103,6 +127,7 @@ export function Sidebar() {
       <div className="px-3 py-3 space-y-1" style={{ borderTop: "1px solid var(--sidebar-border)" }}>
         <ThemeToggle />
         <button
+          onClick={handleLogout}
           className="flex items-center gap-3 px-3 py-2 rounded-xl text-[13px] font-sans font-medium w-full transition-colors hover:bg-[var(--sidebar-active-bg)]"
           style={{ color: "var(--sidebar-item)" }}
         >

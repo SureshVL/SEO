@@ -14,6 +14,106 @@ from pydantic import BaseModel
 logger = logging.getLogger("omnirank.analytics")
 router = APIRouter(prefix="/analytics", tags=["analytics"])
 
+
+def _db():
+    """Lazy import of the Supabase REST helper to avoid a circular import."""
+    from app.main import _supabase_rest
+    return _supabase_rest
+
+
+def store_oauth_tokens(
+    project_id: str, service: str, access_token: str,
+    refresh_token: str | None, expires_in: int | None, email: str | None,
+) -> None:
+    """Persist Google OAuth tokens server-side, encrypted."""
+    if not project_id:
+        return
+    import time
+    from app.core.secrets_crypto import encrypt
+    from app.core.pgrest import q, ts
+    from datetime import datetime, timezone, timedelta
+
+    db = _db()
+    expires_at = None
+    if expires_in:
+        expires_at = ts(datetime.now(timezone.utc) + timedelta(seconds=int(expires_in) - 60))
+    row = {
+        "project_id": project_id,
+        "service": service,
+        "access_token": encrypt(access_token),
+        "refresh_token": encrypt(refresh_token) if refresh_token else None,
+        "expires_at": expires_at,
+        "email": email,
+    }
+    try:
+        existing = db("get", "oauth_tokens",
+                      params=f"project_id=eq.{project_id}&service=eq.{q(service)}&select=id")
+        existing = existing if isinstance(existing, list) else [existing] if existing else []
+        if existing:
+            # keep the previous refresh_token if Google didn't return a new one
+            if not refresh_token:
+                row.pop("refresh_token", None)
+            db("patch", f"oauth_tokens?id=eq.{existing[0]['id']}", row)
+        else:
+            db("post", "oauth_tokens", row)
+    except Exception as exc:
+        logger.warning("Could not persist oauth tokens: %s", exc)
+
+
+async def get_valid_access_token(project_id: str, service: str) -> str | None:
+    """Return a fresh access token for the project+service, refreshing if needed."""
+    import time
+    from datetime import datetime, timezone
+    from app.core.secrets_crypto import decrypt, encrypt
+    from app.core.pgrest import q, ts
+
+    db = _db()
+    try:
+        rows = db("get", "oauth_tokens",
+                  params=f"project_id=eq.{project_id}&service=eq.{q(service)}")
+    except Exception:
+        return None
+    rows = rows if isinstance(rows, list) else [rows] if rows else []
+    if not rows:
+        return None
+    row = rows[0]
+
+    expires_at = row.get("expires_at")
+    still_valid = True
+    if expires_at:
+        try:
+            exp = datetime.fromisoformat(str(expires_at).replace("Z", "+00:00"))
+            if exp.tzinfo is None:
+                exp = exp.replace(tzinfo=timezone.utc)
+            still_valid = exp > datetime.now(timezone.utc)
+        except ValueError:
+            still_valid = True
+
+    if still_valid and row.get("access_token"):
+        return decrypt(row["access_token"])
+
+    # refresh
+    refresh = decrypt(row["refresh_token"]) if row.get("refresh_token") else ""
+    if not refresh or not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
+        return decrypt(row["access_token"]) if row.get("access_token") else None
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            res = await client.post("https://oauth2.googleapis.com/token", data={
+                "client_id": GOOGLE_CLIENT_ID,
+                "client_secret": GOOGLE_CLIENT_SECRET,
+                "refresh_token": refresh,
+                "grant_type": "refresh_token",
+            })
+        if res.status_code == 200:
+            t = res.json()
+            new_access = t.get("access_token", "")
+            store_oauth_tokens(project_id, service, new_access, None,
+                               t.get("expires_in"), row.get("email"))
+            return new_access
+    except Exception as exc:
+        logger.warning("Token refresh failed: %s", exc)
+    return decrypt(row["access_token"]) if row.get("access_token") else None
+
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
 GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "")
 REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI", "http://localhost:3000/dashboard/settings")
@@ -36,7 +136,7 @@ GSC_SCOPES = [
 def ga4_auth_url(project_id: str = Query(default="")):
     """Return the OAuth URL to redirect the user to Google for GA4 access."""
     if not GOOGLE_CLIENT_ID:
-        raise HTTPException(status_code=500, detail="GOOGLE_CLIENT_ID not configured")
+        raise HTTPException(status_code=503, detail="Google connection is not set up yet — add GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET to the backend .env (see Setup steps below).")
     params = {
         "client_id": GOOGLE_CLIENT_ID,
         "redirect_uri": REDIRECT_URI,
@@ -54,7 +154,7 @@ def ga4_auth_url(project_id: str = Query(default="")):
 def gsc_auth_url(project_id: str = Query(default="")):
     """Return the OAuth URL to redirect the user to Google for GSC access."""
     if not GOOGLE_CLIENT_ID:
-        raise HTTPException(status_code=500, detail="GOOGLE_CLIENT_ID not configured")
+        raise HTTPException(status_code=503, detail="Google connection is not set up yet — add GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET to the backend .env (see Setup steps below).")
     params = {
         "client_id": GOOGLE_CLIENT_ID,
         "redirect_uri": REDIRECT_URI,
@@ -75,18 +175,22 @@ class TokenExchangeRequest(BaseModel):
 
 
 class TokenExchangeResponse(BaseModel):
-    access_token: str
+    # access/refresh tokens are intentionally NOT returned to the browser; they
+    # are stored server-side (encrypted) and used by the backend. `connected`
+    # signals success. Fields kept optional for backward compatibility.
+    access_token: str = ""
     refresh_token: str | None = None
     email: str | None = None
     properties: list[dict[str, Any]] = []   # GA4 properties or GSC sites
     service: str
+    connected: bool = False
 
 
 @router.post("/exchange-token", response_model=TokenExchangeResponse)
 async def exchange_token(req: TokenExchangeRequest):
     """Exchange OAuth code for tokens and fetch available properties/sites."""
     if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
-        raise HTTPException(status_code=500, detail="Google OAuth not configured. Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET.")
+        raise HTTPException(status_code=503, detail="Google connection is not set up yet — add GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET to the backend .env (see Setup steps below).")
 
     async with httpx.AsyncClient() as client:
         # Exchange code for tokens
@@ -145,12 +249,19 @@ async def exchange_token(req: TokenExchangeRequest):
                         "permission_level": site.get("permissionLevel", ""),
                     })
 
+        # Persist tokens server-side (encrypted). Do NOT return them to the
+        # browser - that was the localStorage exposure we are closing.
+        if req.project_id:
+            store_oauth_tokens(
+                req.project_id, req.service, access_token, refresh_token,
+                tokens.get("expires_in"), email,
+            )
+
         return TokenExchangeResponse(
-            access_token=access_token,
-            refresh_token=refresh_token,
             email=email,
             properties=properties,
             service=req.service,
+            connected=True,
         )
 
 
@@ -273,12 +384,15 @@ async def fetch_gsc_metrics(req: GSCMetricsRequest):
 # ── Combined attribution report ───────────────────────────────────────────────
 
 class AttributionRequest(BaseModel):
-    ga4_access_token: str
+    # tokens are optional: when project_id is given, the backend uses the
+    # server-side stored tokens instead of trusting tokens from the browser.
+    ga4_access_token: str = ""
     ga4_property_id: str
-    gsc_access_token: str
+    gsc_access_token: str = ""
     gsc_site_url: str
     date_range_days: int = 30
     top_n: int = 15
+    project_id: str = ""
 
 
 async def _ga4_pages(
@@ -406,19 +520,29 @@ async def attribution_report(req: AttributionRequest):
     end = date.today().isoformat()
     start = (date.today() - timedelta(days=req.date_range_days)).isoformat()
 
+    # Prefer server-side stored tokens; fall back to any tokens in the request
+    # (legacy clients) so this stays backward compatible during rollout.
+    ga4_token = req.ga4_access_token
+    gsc_token = req.gsc_access_token
+    if req.project_id:
+        ga4_token = (await get_valid_access_token(req.project_id, "ga4")) or ga4_token
+        gsc_token = (await get_valid_access_token(req.project_id, "gsc")) or gsc_token
+    if not ga4_token or not gsc_token:
+        raise HTTPException(status_code=400, detail="GA4/GSC not connected for this project")
+
     async with httpx.AsyncClient(timeout=30.0) as client:
-        ga4_pages = await _ga4_pages(client, req.ga4_access_token, req.ga4_property_id, start, end)
-        ga4_channels = await _ga4_channel_totals(client, req.ga4_access_token, req.ga4_property_id, start, end)
+        ga4_pages = await _ga4_pages(client, ga4_token, req.ga4_property_id, start, end)
+        ga4_channels = await _ga4_channel_totals(client, ga4_token, req.ga4_property_id, start, end)
         gsc_queries = await _gsc_query(
-            client, req.gsc_access_token, req.gsc_site_url, start, end,
+            client, gsc_token, req.gsc_site_url, start, end,
             dimensions=["query"], row_limit=200,
         )
         gsc_pages = await _gsc_query(
-            client, req.gsc_access_token, req.gsc_site_url, start, end,
+            client, gsc_token, req.gsc_site_url, start, end,
             dimensions=["page"], row_limit=200,
         )
         gsc_page_queries = await _gsc_query(
-            client, req.gsc_access_token, req.gsc_site_url, start, end,
+            client, gsc_token, req.gsc_site_url, start, end,
             dimensions=["page", "query"], row_limit=500,
         )
 

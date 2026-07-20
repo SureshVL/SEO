@@ -8,7 +8,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/lib/store";
-import { listProjects, listProjectKeywords } from "@/lib/api";
+import { createProject, deleteProject, listProjects, listProjectKeywords } from "@/lib/api";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { toast } from "sonner";
 
@@ -51,19 +51,14 @@ export default function ProjectsPage() {
     e.preventDefault();
     setCreating(true);
     try {
-      const res = await fetch(`${API}/projects`, {
-        method: "POST",
-        headers: { "X-API-KEY": apiKey, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: form.name,
-          client_url: form.client_url,
-          target_niche: form.target_niche || null,
-          goal_keywords: form.goal_keywords
-            ? form.goal_keywords.split(",").map((k) => k.trim()).filter(Boolean)
-            : [],
-        }),
-      });
-      if (!res.ok) throw new Error(await res.text());
+      await createProject({
+        name: form.name,
+        client_url: form.client_url,
+        target_niche: form.target_niche || null,
+        goal_keywords: form.goal_keywords
+          ? form.goal_keywords.split(",").map((k) => k.trim()).filter(Boolean)
+          : [],
+      }, apiKey);
       toast.success("Project created!");
       setShowCreate(false);
       setForm({ name: "", client_url: "", target_niche: "", goal_keywords: "" });
@@ -76,10 +71,7 @@ export default function ProjectsPage() {
   async function handleDelete(id: string) {
     if (!confirm("Delete this project and all its data?")) return;
     try {
-      await fetch(`${API}/projects/${id}`, {
-        method: "DELETE",
-        headers: { "X-API-KEY": apiKey },
-      });
+      await deleteProject(id, apiKey);
       if (businessProfile?.projectId === id) {
         setBusinessProfile({ ...businessProfile, projectId: "" });
       }

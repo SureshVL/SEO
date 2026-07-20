@@ -50,10 +50,22 @@ class SerperHTTPClient(_BaseHTTPClient):
         self.timeout = timeout
 
     def search_top_results(self, keyword: str, locale: str, region: str, limit: int = 3) -> list[dict]:
+        # SERPs are stable on a day scale — cache to cut quota burn and give
+        # a stale fallback when the provider errors.
+        from app.services.cache import cache_key, cache_json_get, cache_json_set
+
+        key = cache_key("serper-v1", keyword.lower().strip(), locale, region.lower(), str(limit))
+        cached = cache_json_get(key)
+        if cached is not None:
+            return cached
+
         headers = {"X-API-KEY": self.api_key, "Content-Type": "application/json"}
         payload = {"q": keyword, "gl": region.lower(), "hl": locale.split("-")[0]}
         data = self._post_with_retry(self.base_url, headers, payload, self.timeout, fallback_url=self.fallback_url)
-        return data.get("organic", [])[:limit]
+        results = data.get("organic", [])[:limit]
+        if results:
+            cache_json_set(key, results, ttl=12 * 3600)
+        return results
 
 
 class FirecrawlHTTPClient(_BaseHTTPClient):

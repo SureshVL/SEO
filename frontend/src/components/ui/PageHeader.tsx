@@ -5,6 +5,8 @@ import { LucideIcon } from "lucide-react";
 interface Props {
   title: string;
   subtitle?: string;
+  /** alias for subtitle */
+  description?: string;
   icon?: LucideIcon;
   /** accent color for the icon tile + strip (hex). Defaults to violet. */
   accent?: string;
@@ -22,7 +24,8 @@ interface Props {
  *   └────────────────────────────────────────────┘
  *   • a thin colored accent strip hints at the page identity
  */
-export function PageHeader({ title, subtitle, icon: Icon, accent = "#8B5CF6", actions, chips }: Props) {
+export function PageHeader({ title, subtitle, description, icon: Icon, accent = "#8B5CF6", actions, chips }: Props) {
+  subtitle = subtitle ?? description;
   return (
     <div className="mb-8 animate-fade-in">
       <div

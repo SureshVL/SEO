@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect, useState } from "react";
 import { ArrowRight, BarChart3, Bot, Globe, Search, Shield, Zap } from "lucide-react";
 
 const features = [
@@ -12,13 +13,59 @@ const features = [
   { icon: Zap, title: "Content Studio", desc: "AI writes SEO content with entity coverage, FAQ blocks, and E-E-A-T signals — calibrated against real SERP data." },
 ];
 
-const plans = [
-  { name: "Starter", price: "\u20B91,999", features: ["1 project", "50 keywords", "5 AI reports/mo", "Daily rank tracking"], cta: "Start free trial" },
-  { name: "Growth", price: "\u20B94,999", features: ["5 projects", "300 keywords", "Unlimited reports", "Backlink monitoring", "Content studio", "Competitor alerts"], cta: "Start free trial", popular: true },
-  { name: "Agency", price: "\u20B914,999", features: ["25 projects", "2,000 keywords", "White-label reports", "API access", "Team seats (10)", "Priority support"], cta: "Contact sales" },
+type Currency = "INR" | "USD";
+
+type LandingPlan = {
+  name: string;
+  priceMonthly: number;      // INR
+  priceMonthlyUsd: number;   // USD (positioned price, not FX conversion)
+  agents: number;
+  serpPerDay: number;
+  features: string[];
+  cta: string;
+  popular?: boolean;
+};
+
+const plans: LandingPlan[] = [
+  { name: "Free", priceMonthly: 0, priceMonthlyUsd: 0, agents: 2, serpPerDay: 25,
+    features: ["1 project", "10 keywords", "1 AI report/mo", "Research + Keyword agents"], cta: "Start free" },
+  { name: "Starter", priceMonthly: 1999, priceMonthlyUsd: 29, agents: 3, serpPerDay: 250,
+    features: ["1 project", "50 keywords", "5 AI reports/mo", "Daily rank tracking"], cta: "Start free trial" },
+  { name: "Growth", priceMonthly: 4999, priceMonthlyUsd: 69, agents: 6, serpPerDay: 1000,
+    features: ["5 projects", "300 keywords", "Unlimited reports", "Content studio", "Competitor alerts"], cta: "Start free trial", popular: true },
+  { name: "Pro", priceMonthly: 9999, priceMonthlyUsd: 129, agents: 9, serpPerDay: 2500,
+    features: ["12 projects", "800 keywords", "Google AI Mode", "Automated audits", "Programmatic SEO"], cta: "Start free trial" },
+  { name: "Agency", priceMonthly: 19999, priceMonthlyUsd: 249, agents: 12, serpPerDay: 5000,
+    features: ["25 projects", "2,000 keywords", "White-label", "API access", "10 team seats"], cta: "Contact sales" },
 ];
 
+const ANNUAL_DISCOUNT = 0.20;
+
+// India \u2192 INR (billed via Razorpay); everywhere else \u2192 USD (billed via Stripe).
+function detectCurrency(): Currency {
+  try {
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "";
+    if (tz === "Asia/Kolkata" || tz === "Asia/Calcutta") return "INR";
+    const langs = navigator.languages || [navigator.language];
+    if (langs.some(l => /-IN$/i.test(l))) return "INR";
+  } catch { /* SSR / old browsers */ }
+  return "USD";
+}
+
+function priceLabel(plan: LandingPlan, interval: "month" | "year", currency: Currency): { display: string; note: string } {
+  const base = currency === "INR" ? plan.priceMonthly : plan.priceMonthlyUsd;
+  if (base === 0) return { display: "Free", note: "forever" };
+  const amount = interval === "month" ? base : Math.round(base * (1 - ANNUAL_DISCOUNT));
+  const display = currency === "INR"
+    ? `\u20B9${amount.toLocaleString("en-IN")}`
+    : `$${amount.toLocaleString("en-US")}`;
+  return { display, note: interval === "month" ? "/mo" : "/mo, billed yearly" };
+}
+
 export default function LandingPage() {
+  const [interval, setInterval] = useState<"month" | "year">("month");
+  const [currency, setCurrency] = useState<Currency>("USD");
+  useEffect(() => { setCurrency(detectCurrency()); }, []);
   return (
     <div className="min-h-screen grain" style={{ background: "#110f0d" }}>
       {/* Nav */}
@@ -31,6 +78,8 @@ export default function LandingPage() {
           <div className="hidden md:flex items-center gap-8 text-sm font-sans" style={{ color: "rgba(200, 180, 150, 0.5)" }}>
             <a href="#features" className="hover:text-amber-200 transition-colors">Features</a>
             <a href="#pricing" className="hover:text-amber-200 transition-colors">Pricing</a>
+            <Link href="/compare" className="hover:text-amber-200 transition-colors">Compare</Link>
+            <Link href="/tools" className="hover:text-amber-200 transition-colors">Free Tools</Link>
           </div>
           <div className="flex items-center gap-3">
             <Link href="/auth/login" className="btn-ghost text-sm">Log in</Link>
@@ -57,10 +106,10 @@ export default function LandingPage() {
               generate content, track rankings, and execute technical fixes — autonomously.
             </p>
             <div className="flex items-center gap-4">
-              <Link href="/auth/signup" className="btn-primary text-base px-8 py-3.5 flex items-center gap-2">
-                Start 14-day free trial <ArrowRight className="w-4 h-4" />
+              <Link href="/audit" className="btn-primary text-base px-8 py-3.5 flex items-center gap-2">
+                Free instant SEO audit <ArrowRight className="w-4 h-4" />
               </Link>
-              <Link href="#features" className="btn-secondary text-base px-6 py-3.5">How it works</Link>
+              <Link href="/auth/signup" className="btn-secondary text-base px-6 py-3.5">Start free trial</Link>
             </div>
             <p className="text-xs font-sans mt-5" style={{ color: "rgba(200, 180, 150, 0.25)" }}>No credit card required &middot; Cancel anytime</p>
           </div>
@@ -86,39 +135,138 @@ export default function LandingPage() {
       </section>
 
       {/* Pricing */}
-      <section id="pricing" className="max-w-5xl mx-auto px-6 py-28">
+      <section id="pricing" className="max-w-6xl mx-auto px-6 py-28">
         <p className="font-sans text-xs uppercase tracking-[0.2em] mb-4 text-center" style={{ color: "var(--copper)" }}>Pricing</p>
         <h2 className="font-serif text-4xl text-center mb-4" style={{ color: "#e8e0d4" }}>Transparent. Simple.</h2>
-        <p className="font-sans text-center mb-16" style={{ color: "rgba(200, 180, 150, 0.45)" }}>Start free, scale as you grow. Built for Indian businesses.</p>
-        <div className="grid md:grid-cols-3 gap-5">
-          {plans.map((plan) => (
-            <div
-              key={plan.name}
-              className="card p-7 relative"
-              style={plan.popular ? { borderColor: "rgba(200, 121, 65, 0.3)" } : {}}
+        <p className="font-sans text-center mb-8" style={{ color: "rgba(200, 180, 150, 0.45)" }}>Start free, scale as you grow. Save 20% with annual billing.</p>
+
+        <div className="flex justify-center mb-12">
+          <div className="inline-flex items-center gap-1 rounded-full p-1 text-xs font-sans" style={{ background: "rgba(200, 180, 150, 0.06)", border: "1px solid rgba(200, 180, 150, 0.1)" }}>
+            <button
+              onClick={() => setInterval("month")}
+              className="px-4 py-1.5 rounded-full transition-colors"
+              style={interval === "month"
+                ? { background: "var(--copper)", color: "#110f0d", fontWeight: 600 }
+                : { color: "rgba(200, 180, 150, 0.5)" }}
             >
-              {plan.popular && (
-                <div className="absolute -top-3 left-1/2 -translate-x-1/2 text-xs px-3 py-0.5 rounded-full font-sans font-medium" style={{ background: "rgba(200, 121, 65, 0.15)", color: "var(--copper-light)", border: "1px solid rgba(200, 121, 65, 0.2)" }}>
-                  Most popular
+              Monthly
+            </button>
+            <button
+              onClick={() => setInterval("year")}
+              className="px-4 py-1.5 rounded-full transition-colors flex items-center gap-1.5"
+              style={interval === "year"
+                ? { background: "var(--copper)", color: "#110f0d", fontWeight: 600 }
+                : { color: "rgba(200, 180, 150, 0.5)" }}
+            >
+              Annual
+              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: "rgba(107, 143, 113, 0.25)", color: "var(--sage)" }}>-20%</span>
+            </button>
+          </div>
+          <div className="inline-flex items-center gap-1 rounded-full p-1 text-xs font-sans ml-3" style={{ background: "rgba(200, 180, 150, 0.06)", border: "1px solid rgba(200, 180, 150, 0.1)" }}>
+            {(["USD", "INR"] as Currency[]).map((c) => (
+              <button
+                key={c}
+                onClick={() => setCurrency(c)}
+                className="px-3 py-1.5 rounded-full transition-colors"
+                style={currency === c
+                  ? { background: "var(--copper)", color: "#110f0d", fontWeight: 600 }
+                  : { color: "rgba(200, 180, 150, 0.5)" }}
+              >
+                {c === "USD" ? "$ USD" : "₹ INR"}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="grid md:grid-cols-2 lg:grid-cols-5 gap-4">
+          {plans.map((plan) => {
+            const { display, note } = priceLabel(plan, interval, currency);
+            return (
+              <div
+                key={plan.name}
+                className="card p-5 relative flex flex-col"
+                style={plan.popular ? { borderColor: "rgba(200, 121, 65, 0.3)" } : {}}
+              >
+                {plan.popular && (
+                  <div className="absolute -top-3 left-1/2 -translate-x-1/2 text-[10px] px-3 py-0.5 rounded-full font-sans font-medium whitespace-nowrap" style={{ background: "rgba(200, 121, 65, 0.15)", color: "var(--copper-light)", border: "1px solid rgba(200, 121, 65, 0.2)" }}>
+                    Most popular
+                  </div>
+                )}
+                <h3 className="font-serif text-xl mb-1" style={{ color: "#e8e0d4" }}>{plan.name}</h3>
+                <div className="flex items-baseline gap-1 min-h-[36px]">
+                  <span className="font-serif text-2xl" style={{ color: plan.popular ? "var(--copper-light)" : "#e8e0d4" }}>{display}</span>
                 </div>
-              )}
-              <h3 className="font-serif text-2xl mb-1" style={{ color: "#e8e0d4" }}>{plan.name}</h3>
-              <div className="flex items-baseline gap-1 mb-7">
-                <span className="font-serif text-3xl" style={{ color: plan.popular ? "var(--copper-light)" : "#e8e0d4" }}>{plan.price}</span>
-                <span className="text-sm font-sans" style={{ color: "rgba(200, 180, 150, 0.35)" }}>/mo</span>
+                <div className="text-[11px] font-sans mb-4 min-h-[16px]" style={{ color: "rgba(200, 180, 150, 0.35)" }}>{note}</div>
+
+                <div className="mb-4 p-2.5 rounded-lg flex items-center gap-2" style={{ background: "rgba(200, 180, 150, 0.04)", border: "1px solid rgba(200, 180, 150, 0.06)" }}>
+                  <Bot className="w-3.5 h-3.5" style={{ color: "var(--copper)" }} />
+                  <div className="text-[11px] font-sans leading-tight">
+                    <div style={{ color: "#e8e0d4", fontWeight: 600 }}>{plan.agents} AI Agents</div>
+                    <div style={{ color: "rgba(200, 180, 150, 0.45)" }}>{plan.serpPerDay.toLocaleString()} SERP/day</div>
+                  </div>
+                </div>
+
+                <ul className="space-y-2 flex-1 mb-5">
+                  {plan.features.map((f) => (
+                    <li key={f} className="flex items-start gap-2 text-xs font-sans" style={{ color: "rgba(200, 180, 150, 0.6)" }}>
+                      <span style={{ color: "var(--sage)" }}>&#10003;</span> <span>{f}</span>
+                    </li>
+                  ))}
+                </ul>
+                <Link href="/auth/signup" className={plan.popular ? "btn-primary w-full text-center block text-xs py-2" : "btn-secondary w-full text-center block text-xs py-2"}>
+                  {plan.cta}
+                </Link>
               </div>
-              <ul className="space-y-3 mb-8">
-                {plan.features.map((f) => (
-                  <li key={f} className="flex items-start gap-2 text-sm font-sans" style={{ color: "rgba(200, 180, 150, 0.6)" }}>
-                    <span style={{ color: "var(--sage)" }}>&#10003;</span> {f}
-                  </li>
-                ))}
-              </ul>
-              <Link href="/auth/signup" className={plan.popular ? "btn-primary w-full text-center block" : "btn-secondary w-full text-center block"}>
-                {plan.cta}
-              </Link>
-            </div>
-          ))}
+            );
+          })}
+        </div>
+      </section>
+
+      {/* FAQ */}
+      <section id="faq" className="max-w-4xl mx-auto px-6 py-28">
+        <p className="font-sans text-xs uppercase tracking-[0.2em] mb-4 text-center" style={{ color: "var(--copper)" }}>FAQ</p>
+        <h2 className="font-serif text-4xl text-center mb-16" style={{ color: "#e8e0d4" }}>Frequently asked questions</h2>
+        <div className="space-y-3">
+          <FaqItem
+            q="What's the difference between AI Agents and SERP/day limit?"
+            a="AI Agents are specialized bots: Research, Keyword Strategy, Competitor Analysis, Content Writer, Technical Auditor, and Ranking Agent. SERP/day is how many times per day you can check search rankings. Both scale with your tier."
+          />
+          <FaqItem
+            q="Can I upgrade mid-month?"
+            a="Yes. Upgrades are prorated. If you're on Starter (₹1,999) and upgrade to Growth (₹4,999) on day 15, you'll pay the difference for the remaining days, then renew at the Growth price next month."
+          />
+          <FaqItem
+            q="Do you offer annual discounts?"
+            a="Yes, 20% off all paid tiers when you commit to annual billing. Growth goes from ₹4,999/mo to ₹3,999/mo when billed yearly."
+          />
+          <FaqItem
+            q="Is there a free trial?"
+            a="Yes. All paid plans include a 14-day free trial. Free tier users get 25 SERP checks/day forever, no trial needed."
+          />
+          <FaqItem
+            q="What if I hit my SERP/day limit?"
+            a="Your SERP quota resets daily at midnight IST. You can track up to your tier's limit each day. To do more, upgrade to the next tier."
+          />
+          <FaqItem
+            q="Can I use Omni-Rank for multiple websites?"
+            a="Yes, depending on your tier. Free: 1 project, Starter: 1, Growth: 5, Pro: 12, Agency: 25 projects. Each project tracks its own keywords, competitors, and audits."
+          />
+          <FaqItem
+            q="Do you have an API?"
+            a="Yes, available on Growth tier and above. Use our REST API to build custom integrations with your CRM, dashboard, or internal tools."
+          />
+          <FaqItem
+            q="Is there a white-label option?"
+            a="Yes, on Growth tier and above. Rebrand reports, dashboards, and emails with your company colors and logo."
+          />
+          <FaqItem
+            q="How often is ranking data updated?"
+            a="Daily (or up to your SERP/day budget). We check rankings overnight IST and display results by morning. Set frequency per keyword."
+          />
+          <FaqItem
+            q="Do I need Google Search Console or GA4 to start?"
+            a="No. Omni-Rank works standalone. But connecting GSC and GA4 unlocks query insights and click data, making strategy more accurate."
+          />
         </div>
       </section>
 
@@ -137,5 +285,31 @@ export default function LandingPage() {
         </div>
       </footer>
     </div>
+  );
+}
+
+function FaqItem({ q, a }: { q: string; a: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <button
+      onClick={() => setOpen(!open)}
+      className="w-full text-left p-4 rounded-lg border transition"
+      style={{
+        borderColor: open ? "rgba(200, 121, 65, 0.3)" : "rgba(200, 180, 150, 0.06)",
+        background: open ? "rgba(200, 121, 65, 0.05)" : "rgba(200, 180, 150, 0.02)",
+      }}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <h3 className="font-semibold" style={{ color: "#e8e0d4" }}>{q}</h3>
+        <span style={{ color: "var(--copper)", marginTop: "2px" }}>
+          {open ? "−" : "+"}
+        </span>
+      </div>
+      {open && (
+        <p className="mt-3 text-sm" style={{ color: "rgba(200, 180, 150, 0.65)" }}>
+          {a}
+        </p>
+      )}
+    </button>
   );
 }

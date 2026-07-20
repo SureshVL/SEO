@@ -91,27 +91,135 @@ class TestWorkflowAgentRun:
         assert calls == ["technical_audit"]
 
 
-class TestDefaultHandlers:
-    def test_technical_audit_skipped_without_domain(self):
-        from app.agents.workflow_agent import _handle_technical_audit
-        r = _handle_technical_audit({})
+class TestRealHandlers:
+    """Handlers must do real (injected) work and report quantified outcomes —
+    or skip honestly with a setup action. Fake success is the bug these
+    replaced."""
+
+    PROJECT = {"id": "p1", "domain": "acme.com"}
+
+    @staticmethod
+    def _supabase(tables: dict):
+        def fake(method, table, payload=None, params=""):
+            if method == "get":
+                return tables.get(table, [])
+            tables.setdefault("_writes", []).append((table, payload))
+            return [{"id": "new-row"}]
+        return fake
+
+    def test_no_engines_all_skip_never_fake_success(self):
+        from app.services.workflow_tasks import build_handlers
+        handlers = build_handlers(supabase_rest=self._supabase({}))
+        for name in ("technical_audit", "rank_check", "keyword_expansion", "monthly_report"):
+            r = handlers[name](self.PROJECT)
+            assert r.status == "skipped", f"{name} fabricated success with no engine"
+
+    def test_technical_audit_reports_scores(self):
+        from app.services.workflow_tasks import build_handlers
+        handlers = build_handlers(
+            supabase_rest=self._supabase({}),
+            run_technical_audit=lambda url: {
+                "scores": {"seo": 80, "performance": 95},
+                "issues_count": 4,
+                "actions": [{"action": "Add meta description"}],
+                "core_web_vitals": {"LCP": 900},
+            },
+        )
+        r = handlers["technical_audit"](self.PROJECT)
+        assert r.status == "completed"
+        assert r.data["scores"]["seo"] == 80
+        assert "80" in r.detail and "4" in r.detail
+        assert r.data["link"] == "/dashboard/audit"
+
+    def test_rank_check_skips_without_keywords(self):
+        from app.services.workflow_tasks import build_handlers
+        handlers = build_handlers(
+            supabase_rest=self._supabase({"keywords": []}),
+            check_ranks=lambda batch, domain: [],
+        )
+        r = handlers["rank_check"](self.PROJECT)
         assert r.status == "skipped"
+        assert "keyword" in r.detail.lower()
+        assert r.data["link"] == "/dashboard/keywords"
 
-    def test_technical_audit_completed_with_domain(self):
-        from app.agents.workflow_agent import _handle_technical_audit
-        r = _handle_technical_audit({"domain": "acme.com"})
+    def test_rank_check_computes_deltas(self):
+        from dataclasses import dataclass
+        from app.services.workflow_tasks import build_handlers
+
+        @dataclass
+        class R:
+            keyword_id: str; keyword: str; position: int | None
+            previous_position: int | None; url: str | None
+            serp_features: list; checked_at: str
+
+        def fake_check(batch, domain):
+            return [
+                R("k1", "seo tool", 3, 7, "https://acme.com/a", [], "now"),   # improved
+                R("k2", "rank tracker", 12, 5, "https://acme.com/b", [], "now"),  # dropped
+                R("k3", "ai seo", 9, None, "https://acme.com/c", [], "now"),  # newly ranked
+                R("k4", "cheap crm", None, None, None, [], "now"),            # unranked
+            ]
+
+        tables = {
+            "keywords": [{"id": f"k{i}", "keyword": k} for i, k in
+                         enumerate(["seo tool", "rank tracker", "ai seo", "cheap crm"], 1)],
+            "rank_history": [],
+        }
+        handlers = build_handlers(supabase_rest=self._supabase(tables), check_ranks=fake_check)
+        r = handlers["rank_check"](self.PROJECT)
         assert r.status == "completed"
-        assert r.data["domain"] == "acme.com"
+        assert r.data["up"] == 1 and r.data["down"] == 1
+        assert r.data["entered"] == 1 and r.data["unranked"] == 1
+        assert r.data["movers"][0]["keyword"] == "rank tracker"  # biggest move (7)
+        assert ("rank_history", [
+            p for t, p in tables["_writes"] if t == "rank_history"
+        ][0]) is not None  # results were persisted
 
-    def test_content_brief_skipped_without_keywords(self):
-        from app.agents.workflow_agent import _handle_content_brief
-        assert _handle_content_brief({}).status == "skipped"
-
-    def test_content_brief_completed_with_keywords(self):
-        from app.agents.workflow_agent import _handle_content_brief
-        r = _handle_content_brief({"target_keywords": ["a", "b", "c"]})
+    def test_keyword_expansion_dedupes_tracked(self):
+        from app.services.workflow_tasks import build_handlers
+        tables = {"keywords": [{"id": 1, "keyword": "seo tool"}]}
+        handlers = build_handlers(
+            supabase_rest=self._supabase(tables),
+            expand_keywords=lambda seeds, domain: ["seo tool", "seo tool for dentists", "affordable seo tool india"],
+        )
+        r = handlers["keyword_expansion"](self.PROJECT)
         assert r.status == "completed"
-        assert r.data["count"] == 3
+        assert "seo tool" not in r.data["candidates"]  # already tracked
+        assert len(r.data["candidates"]) == 2
+
+    def test_content_brief_saves_draft_for_uncovered_keyword(self):
+        from app.services.workflow_tasks import build_handlers
+        tables = {
+            "keywords": [{"id": 1, "keyword": "ev charging"}],
+            "content_queue": [],
+        }
+        handlers = build_handlers(
+            supabase_rest=self._supabase(tables),
+            make_brief=lambda kw, domain: {"target_word_count": 1400, "recommended_headings": ["What", "Why"]},
+        )
+        r = handlers["content_brief"](self.PROJECT)
+        assert r.status == "completed"
+        assert r.data["keyword"] == "ev charging"
+        writes = [t for t, _ in tables.get("_writes", [])]
+        assert "content_queue" in writes  # outline persisted as a draft
+
+    def test_link_outreach_skips_without_prospects(self):
+        from app.services.workflow_tasks import build_handlers
+        handlers = build_handlers(supabase_rest=self._supabase({"link_prospects": []}))
+        r = handlers["link_outreach"](self.PROJECT)
+        assert r.status == "skipped"
+        assert r.data["link"] == "/dashboard/links"
+
+    def test_monthly_report_returns_report_link(self):
+        from app.services.workflow_tasks import build_handlers
+        handlers = build_handlers(
+            supabase_rest=self._supabase({}),
+            generate_report=lambda pid: {"id": "rep-9", "title": "July SEO Report"},
+        )
+        r = handlers["monthly_report"](self.PROJECT)
+        assert r.status == "completed"
+        assert r.data["report_id"] == "rep-9"
+        assert r.data["link"] == "/dashboard/reports"
 
 
 # ── Route integration ───────────────────────────────────────────────────────

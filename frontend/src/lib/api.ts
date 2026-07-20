@@ -1,9 +1,85 @@
+import { useAppStore } from "./store";
+
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 class ApiError extends Error {
   constructor(public status: number, message: string) {
-    super(message);
+    super(humanizeApiError(status, message));
   }
+}
+
+/**
+ * Backend errors arrive as FastAPI JSON — either {"detail": "..."} or, for
+ * validation failures, {"detail": [{loc, msg, ...}]}. Toasts show err.message
+ * directly, so translate those shapes into plain sentences here rather than
+ * at every call site.
+ */
+function humanizeApiError(status: number, body: string): string {
+  try {
+    const parsed = JSON.parse(body);
+    const detail = parsed?.detail ?? parsed;
+    if (typeof detail === "string") return detail;
+    if (Array.isArray(detail)) {
+      const msgs = detail.slice(0, 3).map((d: any) => {
+        const field = Array.isArray(d?.loc)
+          ? d.loc.filter((p: any) => p !== "body" && typeof p === "string").join(".")
+          : "";
+        return field ? `${field}: ${d?.msg ?? "invalid value"}` : d?.msg ?? "invalid value";
+      });
+      return msgs.join(" · ") || `Request failed (${status})`;
+    }
+  } catch {
+    /* not JSON — fall through */
+  }
+  return body || `Request failed (${status})`;
+}
+
+/**
+ * fetch() wrapper that authenticates as the logged-in user (Supabase JWT as
+ * a Bearer token) and scopes the request to the selected project. The backend
+ * confines JWT callers to their own org, so this is the real tenant boundary.
+ * Falls back to the API key only if there is no user session (service/CLI use).
+ */
+export async function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {
+  const { apiKey, currentProject } = useAppStore.getState();
+  const headers: Record<string, string> = {
+    ...(currentProject?.id ? { "X-Project-ID": String(currentProject.id) } : {}),
+    ...((init.headers as Record<string, string>) || {}),
+  };
+
+  let token: string | null = null;
+  try {
+    const { createClient } = await import("./supabase");
+    const { data } = await createClient().auth.getSession();
+    token = data.session?.access_token ?? null;
+  } catch {
+    /* no session available */
+  }
+
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  } else if (apiKey) {
+    headers["X-API-KEY"] = apiKey;
+  }
+
+  const url = path.startsWith("http") ? path : `${API_BASE}${path}`;
+  return fetch(url, { ...init, headers });
+}
+
+// ── Wins / ROI counter ──
+export interface WinsSummary {
+  project_id: string;
+  period_days: number;
+  stats: Record<string, number>;
+  total_actions: number;
+  value_inr: number;
+  value_usd: number;
+}
+
+export async function getWinsSummary(days = 30): Promise<WinsSummary> {
+  const res = await apiFetch(`/wins/summary?days=${days}`);
+  if (!res.ok) throw new ApiError(res.status, await res.text());
+  return res.json();
 }
 
 async function request<T>(
@@ -15,7 +91,19 @@ async function request<T>(
     "Content-Type": "application/json",
     ...(options.headers as Record<string, string>),
   };
-  if (apiKey) headers["X-API-KEY"] = apiKey;
+
+  // Prefer the logged-in user's Supabase JWT (org-scoped on the backend);
+  // fall back to an explicit API key for service/CLI callers.
+  let token: string | null = null;
+  try {
+    const { createClient } = await import("./supabase");
+    const { data } = await createClient().auth.getSession();
+    token = data.session?.access_token ?? null;
+  } catch {
+    /* no session */
+  }
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  else if (apiKey) headers["X-API-KEY"] = apiKey;
 
   const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
   if (!res.ok) {
@@ -52,6 +140,74 @@ export async function createResearchJob(payload: {
   );
 }
 
+export interface BudgetKeyword {
+  keyword: string;
+  cpc_inr: number;
+  monthly_searches: number;
+  competition: string;
+  intent: string;
+  relevance: number;
+  priority: number;
+  allocated_budget_inr: number;
+  estimated_clicks: number;
+}
+export interface BudgetKeywordsResult {
+  seed_keyword: string;
+  mode: string;
+  budget_inr: number;
+  region: string;
+  total_estimated_clicks: number;
+  keywords_selected: number;
+  recommended_mix: BudgetKeyword[];
+  all_candidates: Array<Omit<BudgetKeyword, "allocated_budget_inr" | "estimated_clicks">>;
+  notes: string;
+}
+export async function optimisedKeywords(payload: {
+  budget_inr: number;
+  seed_keyword: string;
+  url?: string;
+  mode?: string;
+  region?: string;
+  locale?: string;
+}, apiKey: string) {
+  return request<BudgetKeywordsResult>(
+    "/keywords/optimised",
+    { method: "POST", body: JSON.stringify(payload) },
+    apiKey
+  );
+}
+
+export interface CroIssue {
+  category: string;
+  severity: "high" | "medium" | "low";
+  finding: string;
+  fix: string;
+}
+export interface CroAuditResult {
+  url: string;
+  goal: string;
+  score: number | null;
+  summary: string;
+  issues: CroIssue[];
+  quick_wins: string[];
+  ctas_detected: string[];
+}
+export async function croAudit(payload: { url: string; goal?: string }, apiKey: string) {
+  return request<CroAuditResult>(
+    "/cro/audit",
+    { method: "POST", body: JSON.stringify(payload) },
+    apiKey
+  );
+}
+
+export async function createCroJob(payload: { url: string; goal?: string }, apiKey: string) {
+  return request<{ job_id: string; status: string }>(
+    "/jobs/cro",
+    { method: "POST", body: JSON.stringify(payload) },
+    apiKey
+  );
+}
+
 export async function getJob(jobId: string, apiKey: string) {
   return request<{
     job_id: string;
@@ -65,7 +221,7 @@ export async function getJob(jobId: string, apiKey: string) {
 }
 
 export async function listJobs(apiKey: string) {
-  return request<Array<{ job_id: string; status: string; created_at: string; updated_at: string }>>(
+  return request<Array<{ job_id: string; status: string; created_at: string; updated_at: string; result?: any }>>(
     "/jobs",
     {},
     apiKey
@@ -305,6 +461,23 @@ export async function listProjects(apiKey: string) {
   }>>("/projects", {}, apiKey);
 }
 
+export async function createProject(payload: {
+  name: string;
+  client_url: string;
+  target_niche?: string | null;
+  goal_keywords?: string[];
+}, apiKey: string) {
+  return request<{ id: string; name: string }>(
+    "/projects",
+    { method: "POST", body: JSON.stringify(payload) },
+    apiKey,
+  );
+}
+
+export async function deleteProject(projectId: string, apiKey: string) {
+  return request<{ deleted: boolean }>(`/projects/${projectId}`, { method: "DELETE" }, apiKey);
+}
+
 export async function getProject(projectId: string, apiKey: string) {
   return request<{
     id: string; name: string; client_url: string; domain: string | null;
@@ -360,11 +533,8 @@ export async function generateReport(projectId: string, reportType = "seo_audit"
 }
 
 export async function getReportHtml(projectId: string, reportId: string, apiKey: string): Promise<string> {
-  const res = await fetch(
-    `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/projects/${projectId}/reports/${reportId}/html`,
-    { headers: { "X-API-KEY": apiKey } }
-  );
-  if (!res.ok) throw new Error(await res.text());
+  const res = await apiFetch(`/projects/${projectId}/reports/${reportId}/html`);
+  if (!res.ok) throw new ApiError(res.status, await res.text());
   return res.text();
 }
 
@@ -559,12 +729,13 @@ export interface AttributionReport {
 
 export async function attributionReport(
   payload: {
-    ga4_access_token: string;
+    ga4_access_token?: string;
     ga4_property_id: string;
-    gsc_access_token: string;
+    gsc_access_token?: string;
     gsc_site_url: string;
     date_range_days?: number;
     top_n?: number;
+    project_id?: string;
   },
   apiKey: string,
 ) {
@@ -829,6 +1000,173 @@ export async function generateProgrammaticPages(
   );
 }
 
+// ── Social Media Studio ──────────────────────────────────────────
+
+export type SocialPlatform = "instagram" | "facebook" | "tiktok" | "youtube" | "linkedin";
+
+export type SocialPostStatus =
+  | "draft"
+  | "pending_approval"
+  | "revision_requested"
+  | "approved"
+  | "scheduled"
+  | "published";
+
+export interface SocialGenerated {
+  hook: string;
+  caption: string;
+  hashtags: string[];
+  cta: string;
+  best_time_hint: string;
+  error?: string;
+}
+
+export interface SocialGenerateResult {
+  topic: string;
+  tone: string;
+  content_goal: string;
+  platforms: Record<string, SocialGenerated>;
+  model_used: string | null;
+}
+
+export interface SocialPost {
+  id: string;
+  project_id: string;
+  platform: SocialPlatform;
+  topic: string;
+  caption: string;
+  hashtags: string[];
+  content_goal: string;
+  media_notes: string;
+  scheduled_date: string | null;
+  status: SocialPostStatus;
+  revision_count: number;
+  revision_notes: Array<{ round: number; note: string; at: string }>;
+  created_at: string;
+  updated_at: string;
+}
+
+export async function generateSocialPosts(
+  payload: {
+    topic: string;
+    platforms: SocialPlatform[];
+    tone?: string;
+    business_context?: string;
+    content_goal?: string;
+  },
+  apiKey: string,
+) {
+  return request<SocialGenerateResult>(
+    "/social/generate",
+    { method: "POST", body: JSON.stringify(payload) },
+    apiKey,
+  );
+}
+
+export async function listSocialPosts(
+  projectId: string,
+  apiKey: string,
+  filters?: { status?: SocialPostStatus; platform?: SocialPlatform },
+) {
+  const qs = new URLSearchParams();
+  if (filters?.status) qs.set("status", filters.status);
+  if (filters?.platform) qs.set("platform", filters.platform);
+  const suffix = qs.toString() ? `?${qs}` : "";
+  return request<SocialPost[]>(`/projects/${projectId}/social-posts${suffix}`, {}, apiKey);
+}
+
+export async function createSocialPost(
+  projectId: string,
+  payload: {
+    platform: SocialPlatform;
+    topic?: string;
+    caption: string;
+    hashtags?: string[];
+    content_goal?: string;
+    media_notes?: string;
+    scheduled_date?: string | null;
+  },
+  apiKey: string,
+) {
+  return request<SocialPost>(
+    `/projects/${projectId}/social-posts`,
+    { method: "POST", body: JSON.stringify(payload) },
+    apiKey,
+  );
+}
+
+export async function updateSocialPost(
+  postId: string,
+  payload: Partial<Pick<SocialPost, "caption" | "hashtags" | "topic" | "content_goal" | "media_notes" | "scheduled_date" | "status" | "platform">>,
+  apiKey: string,
+) {
+  return request<SocialPost>(
+    `/social-posts/${postId}`,
+    { method: "PATCH", body: JSON.stringify(payload) },
+    apiKey,
+  );
+}
+
+export async function approveSocialPost(postId: string, apiKey: string) {
+  return request<SocialPost>(`/social-posts/${postId}/approve`, { method: "POST" }, apiKey);
+}
+
+export async function requestSocialRevision(postId: string, note: string, apiKey: string) {
+  return request<SocialPost>(
+    `/social-posts/${postId}/request-revision`,
+    { method: "POST", body: JSON.stringify({ note }) },
+    apiKey,
+  );
+}
+
+export async function deleteSocialPost(postId: string, apiKey: string) {
+  return request<{ deleted: boolean }>(`/social-posts/${postId}`, { method: "DELETE" }, apiKey);
+}
+
+export interface SocialMetrics {
+  platform: SocialPlatform;
+  month: string; // 'YYYY-MM'
+  reach: number;
+  impressions: number;
+  engagement: number;
+  followers: number;
+  website_clicks: number;
+  whatsapp_clicks: number;
+  enquiries: number;
+  posts_published: number;
+  notes?: string;
+}
+
+export async function upsertSocialMetrics(
+  projectId: string,
+  payload: SocialMetrics,
+  apiKey: string,
+) {
+  return request<SocialMetrics>(
+    `/projects/${projectId}/social-metrics`,
+    { method: "PUT", body: JSON.stringify(payload) },
+    apiKey,
+  );
+}
+
+export async function listSocialMetrics(projectId: string, month: string, apiKey: string) {
+  return request<SocialMetrics[]>(
+    `/projects/${projectId}/social-metrics?month=${month}`,
+    {},
+    apiKey,
+  );
+}
+
+export async function getSocialReportHtml(
+  projectId: string,
+  month: string,
+  apiKey: string,
+): Promise<string> {
+  const res = await apiFetch(`/projects/${projectId}/social-report/${month}`);
+  if (!res.ok) throw new ApiError(res.status, await res.text());
+  return res.text();
+}
+
 // ── Monthly workflow (Week 1-4 cadence) ──────────────────────────
 
 export interface WorkflowSchedule {
@@ -862,6 +1200,93 @@ export async function getWorkflowSchedule(projectId: string, apiKey: string) {
   return request<WorkflowSchedule>(
     `/workflow/schedule/${projectId}`,
     { method: "GET" },
+    apiKey,
+  );
+}
+
+// ── Copilot ───────────────────────────────────────────────────────
+
+export interface CopilotAction {
+  type: "none" | "navigate" | "technical_audit" | "rank_check" | "content_decay";
+  params: Record<string, any>;
+}
+
+export interface CopilotResponse {
+  reply: string;
+  action: CopilotAction;
+  action_result: { status: string; detail: string; data?: Record<string, any> } | null;
+}
+
+export async function copilotChat(
+  messages: Array<{ role: "user" | "assistant"; content: string }>,
+  projectId: string,
+  apiKey: string,
+) {
+  return request<CopilotResponse>(
+    "/copilot/chat",
+    { method: "POST", body: JSON.stringify({ messages, project_id: projectId }) },
+    apiKey,
+  );
+}
+
+// ── Content decay (GSC refresh loop) ──────────────────────────────
+
+export interface DecayQueryStat {
+  query: string;
+  impressions: number;
+  clicks: number;
+  position: number;
+}
+
+export interface DecayItem {
+  page: string;
+  clicks_prev: number;
+  clicks_now: number;
+  clicks_lost: number;
+  impressions_prev: number;
+  impressions_now: number;
+  position_prev: number;
+  position_now: number;
+  reasons: string[];
+  severity: "warning" | "critical";
+  top_queries: DecayQueryStat[];
+}
+
+export interface ContentDecayReport {
+  project_id: string;
+  site_url: string;
+  window_days: number;
+  current_window: [string, string];
+  previous_window: [string, string];
+  pages_analyzed: number;
+  decayed_count: number;
+  decayed: DecayItem[];
+}
+
+export async function getContentDecay(
+  projectId: string,
+  apiKey: string,
+  siteUrl = "",
+  days = 28,
+) {
+  const params = new URLSearchParams();
+  if (siteUrl) params.set("site_url", siteUrl);
+  params.set("days", String(days));
+  return request<ContentDecayReport>(
+    `/projects/${projectId}/content-decay?${params}`,
+    {},
+    apiKey,
+  );
+}
+
+export async function createDecayRefresh(
+  projectId: string,
+  body: { page: string; queries: string[]; reasons: string[] },
+  apiKey: string,
+) {
+  return request<{ page: string; title: string; sections: any[]; draft_id: string | null }>(
+    `/projects/${projectId}/content-decay/refresh`,
+    { method: "POST", body: JSON.stringify(body) },
     apiKey,
   );
 }

@@ -40,7 +40,7 @@ export const useAppStore = create<AppState>()(
       user: null,
       org: null,
       currentProject: null,
-      apiKey: process.env.NEXT_PUBLIC_API_KEY || "dev-orchestrator-key",
+      apiKey: process.env.NEXT_PUBLIC_API_KEY || "",
       businessProfile: null,
       ga4Connected: false,
       gscConnected: false,
@@ -69,15 +69,15 @@ export const useAppStore = create<AppState>()(
     }),
     {
       name: "omnirank-store",
+      // NOTE: OAuth access tokens are deliberately NOT persisted to
+      // localStorage (XSS-stealable). They live encrypted server-side; the
+      // backend uses them by project_id. Only non-secret UI state is persisted.
       partialize: (state) => ({
-        apiKey: state.apiKey,
         businessProfile: state.businessProfile,
         ga4Connected: state.ga4Connected,
         gscConnected: state.gscConnected,
         ga4PropertyId: state.ga4PropertyId,
         gscSiteUrl: state.gscSiteUrl,
-        ga4AccessToken: state.ga4AccessToken,
-        gscAccessToken: state.gscAccessToken,
       }),
     }
   )

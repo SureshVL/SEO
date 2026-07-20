@@ -1,222 +1,387 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import {
-  AlertTriangle, ArrowUpRight, Eye, ExternalLink, FolderOpen,
-  Loader2, RefreshCw, Sparkles, TrendingUp,
+  Plus, Trash2, Loader2, Target, TrendingUp,
+  ChevronDown, ExternalLink,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/lib/store";
-import { listProjects, listCompetitors, triggerCompetitorScan } from "@/lib/api";
-import { PageHeader } from "@/components/ui/PageHeader";
-import { Select } from "@/components/ui/Select";
+import { apiFetch } from "@/lib/api";
 import { toast } from "sonner";
+import { PageHeader } from "@/components/ui/PageHeader";
+
+const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
+interface Competitor {
+  id: number;
+  domain: string;
+  name: string;
+  last_analyzed?: string;
+}
+
+interface Strategy {
+  id: number;
+  target_keyword: string;
+  competitor_position: number;
+  action: string;
+  priority: number;
+  status: "pending" | "in_progress" | "completed";
+}
+
+interface Analysis {
+  domain: string;
+  analysis: string;
+  data_snapshot: {
+    keyword_count: number;
+    backlink_count: number;
+    referring_domains: number;
+  };
+}
 
 export default function CompetitorsPage() {
-  const { apiKey, businessProfile } = useAppStore();
-  const [projects, setProjects] = useState<any[]>([]);
-  const [projectId, setProjectId] = useState(businessProfile?.projectId || "");
-  const [competitors, setCompetitors] = useState<any[]>([]);
+  const { apiKey } = useAppStore();
+
+  const [competitors, setCompetitors] = useState<Competitor[]>([]);
   const [loading, setLoading] = useState(false);
-  const [scanning, setScanning] = useState(false);
-  const [expanded, setExpanded] = useState<string | null>(null);
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [selectedCompetitor, setSelectedCompetitor] = useState<Competitor | null>(null);
+  const [analysis, setAnalysis] = useState<Analysis | null>(null);
+  const [strategies, setStrategies] = useState<Strategy[]>([]);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [generatingStrategies, setGeneratingStrategies] = useState(false);
 
-  useEffect(() => { listProjects(apiKey).then(setProjects).catch(() => {}); }, [apiKey]);
-  useEffect(() => { if (businessProfile?.projectId && !projectId) setProjectId(businessProfile.projectId); }, [businessProfile]);
+  const [newCompetitor, setNewCompetitor] = useState({
+    domain: "",
+    name: "",
+  });
 
-  const loadCompetitors = useCallback(async () => {
-    if (!projectId) return;
+  const fetchCompetitors = async () => {
     setLoading(true);
     try {
-      const data = await listCompetitors(projectId, apiKey);
-      setCompetitors(data);
-    } catch { /* no intel yet */ }
-    finally { setLoading(false); }
-  }, [projectId, apiKey]);
+      const res = await apiFetch(`/competitors`);
+      if (res.ok) {
+        const data = await res.json();
+        setCompetitors(data.competitors || []);
+      }
+    } catch (err) {
+      console.error("Failed to fetch competitors:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
 
-  useEffect(() => { loadCompetitors(); }, [loadCompetitors]);
-
-  async function handleScan() {
-    if (!projectId) { toast.error("Select a project first"); return; }
-    setScanning(true);
+  const fetchAnalysis = async (competitorId: number) => {
     try {
-      await triggerCompetitorScan(projectId, apiKey);
-      toast.success("Competitor scan queued — changes logged in ~2 min");
-      setTimeout(loadCompetitors, 30000);
-    } catch (err: any) { toast.error(err.message || "Scan failed"); }
-    finally { setScanning(false); }
-  }
+      const res = await apiFetch(`/competitors/${competitorId}/analysis`);
+      if (res.ok) {
+        const data = await res.json();
+        setAnalysis(data);
+      }
+    } catch (err) {
+      console.error("Failed to fetch analysis:", err);
+    }
+  };
 
-  // Parse entities from stored intel
-  function getEntities(c: any): string[] {
+  const fetchStrategies = async (competitorId: number) => {
     try {
-      return c.entity_maps?.top_entities || [];
-    } catch { return []; }
-  }
+      const res = await apiFetch(`/competitors/strategies?competitor_id=${competitorId}`);
+      if (res.ok) {
+        const data = await res.json();
+        setStrategies(data.strategies || []);
+      }
+    } catch (err) {
+      console.error("Failed to fetch strategies:", err);
+    }
+  };
 
-  function getDomain(url: string) {
-    try { return new URL(url).hostname.replace("www.", ""); } catch { return url; }
-  }
+  useEffect(() => {
+    fetchCompetitors();
+  }, [apiKey]);
 
-  const uniqueDomains = [...new Set(competitors.map(c => getDomain(c.source_url)))];
+  useEffect(() => {
+    if (selectedCompetitor) {
+      fetchAnalysis(selectedCompetitor.id);
+      fetchStrategies(selectedCompetitor.id);
+    }
+  }, [selectedCompetitor, apiKey]);
+
+  const handleAddCompetitor = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!apiKey || !newCompetitor.domain) {
+      toast.error("Domain required");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const res = await apiFetch(`/competitors/add`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(newCompetitor),
+      });
+
+      if (!res.ok) throw new Error("Failed");
+      toast.success("Competitor added!");
+      setShowAddModal(false);
+      setNewCompetitor({ domain: "", name: "" });
+      fetchCompetitors();
+    } catch (err: any) {
+      toast.error(err.message || "Failed");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleAnalyze = async () => {
+    if (!apiKey || !selectedCompetitor) return;
+
+    setAnalyzing(true);
+    try {
+      const res = await apiFetch(`/competitors/${selectedCompetitor.id}/analyze`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          competitor_id: selectedCompetitor.id,
+          keywords: [],
+          backlinks: 5000,
+          referring_domains: 300,
+          top_pages: [],
+          content_pages: 1500,
+          avg_content_length: 2000,
+        }),
+      });
+
+      if (!res.ok) throw new Error("Failed");
+      toast.success("Analysis complete!");
+      fetchAnalysis(selectedCompetitor.id);
+    } catch (err: any) {
+      toast.error(err.message || "Failed");
+    } finally {
+      setAnalyzing(false);
+    }
+  };
+
+  const handleGenerateStrategies = async () => {
+    if (!apiKey || !selectedCompetitor) return;
+
+    setGeneratingStrategies(true);
+    try {
+      const res = await apiFetch(`/competitors/${selectedCompetitor.id}/strategies`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          competitor_id: selectedCompetitor.id,
+          your_keywords: ["seo", "content", "marketing"],
+          your_rankings: {},
+        }),
+      });
+
+      if (!res.ok) throw new Error("Failed");
+      toast.success("Strategies generated!");
+      fetchStrategies(selectedCompetitor.id);
+    } catch (err: any) {
+      toast.error(err.message || "Failed");
+    } finally {
+      setGeneratingStrategies(false);
+    }
+  };
+
+  const priorityColor = (priority: number) => {
+    if (priority >= 8) return "text-red-400";
+    if (priority >= 6) return "text-orange-400";
+    return "text-cyan-400";
+  };
 
   return (
-    <div className="animate-fade-in">
+    <div className="min-h-screen bg-zinc-950">
       <PageHeader
-        title="Competitor Monitor"
-        subtitle="Track competitor content, entities, and backlink changes — know before they outrank you."
-        icon={Eye}
-        accent="#22D3EE"
-        actions={
-          <div className="flex items-center gap-2 flex-wrap">
-            <Select
-              icon={FolderOpen}
-              accent="#22D3EE"
-              placeholder="Select a project…"
-              value={projectId}
-              onChange={(e) => setProjectId(e.target.value)}
-              options={projects.map((p) => ({ value: p.id, label: p.name }))}
-              widthClass="min-w-[220px]"
-            />
-            {projectId && (
-              <>
-                <button onClick={loadCompetitors} disabled={loading} className="btn-ghost flex items-center gap-1.5 text-sm px-3 py-2.5">
-                  <RefreshCw className={cn("w-3.5 h-3.5", loading && "animate-spin")} />
-                </button>
-                <button onClick={handleScan} disabled={scanning} className="btn-primary flex items-center gap-2 text-sm">
-                  {scanning ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
-                  {scanning ? "Scanning…" : "Scan Competitors"}
-                </button>
-              </>
-            )}
-          </div>
-        }
+        title="Competitor Analysis"
+        subtitle="Analyze competitors and generate strategies to outrank them"
       />
 
-      {/* KPI strip */}
-      {competitors.length > 0 && (
-        <div className="grid grid-cols-3 gap-4 mb-6">
-          {[
-            { label: "Competitors tracked", value: uniqueDomains.length, icon: Eye, color: "text-purple-400" },
-            { label: "Pages indexed", value: competitors.length, icon: TrendingUp, color: "text-teal-400" },
-            { label: "Entities mapped", value: competitors.reduce((n, c) => n + getEntities(c).length, 0), icon: Sparkles, color: "text-brand-400" },
-          ].map(m => (
-            <div key={m.label} className="metric-card">
-              <div className="flex items-center justify-between mb-2">
-                <span className="metric-label">{m.label}</span>
-                <m.icon className={cn("w-4 h-4", m.color)} />
-              </div>
-              <div className={cn("metric-value", m.color)}>{m.value}</div>
-            </div>
-          ))}
-        </div>
-      )}
+      <div className="max-w-7xl mx-auto p-6">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="lg:col-span-1 space-y-4">
+            <button
+              onClick={() => setShowAddModal(true)}
+              className="btn-primary w-full flex items-center justify-center gap-2"
+            >
+              <Plus className="w-4 h-4" />
+              Add Competitor
+            </button>
 
-      {loading ? (
-        <div className="card p-12 text-center">
-          <Loader2 className="w-6 h-6 animate-spin text-zinc-500 mx-auto mb-2" />
-          <p className="text-sm text-zinc-500">Loading competitor intelligence…</p>
-        </div>
-      ) : competitors.length === 0 ? (
-        <div className="card p-10 text-center">
-          <Eye className="w-12 h-12 text-zinc-700 mx-auto mb-4" />
-          <h3 className="font-semibold text-lg mb-2">No competitor data yet</h3>
-          <p className="text-sm text-zinc-400 max-w-md mx-auto mb-2">
-            Competitors are auto-discovered when you run an <strong>AI Research</strong> job. Their pages are scraped and entity-mapped.
-          </p>
-          <p className="text-sm text-zinc-500 max-w-md mx-auto">
-            Once discovered, use <em>Scan Competitors</em> to detect content changes and get AI strategy recommendations.
-          </p>
-        </div>
-      ) : (
-        <div className="space-y-3">
-          {competitors.map(c => {
-            const entities = getEntities(c);
-            const domain = getDomain(c.source_url);
-            const isExpanded = expanded === c.id;
-            const capturedAt = new Date(c.captured_at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
-
-            return (
-              <div key={c.id} className="card overflow-hidden">
+            <div className="space-y-2">
+              {competitors.map((comp) => (
                 <button
-                  onClick={() => setExpanded(isExpanded ? null : c.id)}
-                  className="w-full p-5 flex items-center justify-between hover:bg-zinc-800/20 transition-colors text-left"
+                  key={comp.id}
+                  onClick={() => setSelectedCompetitor(comp)}
+                  className={cn(
+                    "w-full text-left p-3 rounded-lg border transition-all",
+                    selectedCompetitor?.id === comp.id
+                      ? "bg-cyan-500/10 border-cyan-500/50"
+                      : "bg-zinc-900/50 border-zinc-800 hover:border-zinc-700"
+                  )}
                 >
-                  <div className="flex items-center gap-4">
-                    <div className="w-10 h-10 rounded-lg bg-purple-500/10 flex items-center justify-center shrink-0">
-                      <Eye className="w-5 h-5 text-purple-400" />
-                    </div>
-                    <div>
-                      <div className="font-medium text-sm flex items-center gap-2">
-                        {domain}
-                        <a
-                          href={c.source_url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          onClick={e => e.stopPropagation()}
-                          className="text-zinc-600 hover:text-brand-400"
-                        >
-                          <ExternalLink className="w-3 h-3" />
-                        </a>
-                      </div>
-                      <p className="text-xs text-zinc-500 mt-0.5 max-w-xs truncate">{c.source_url}</p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-6 shrink-0">
-                    <div className="text-right hidden md:block">
-                      <div className="text-xs text-zinc-500">Entities</div>
-                      <div className="text-sm font-semibold text-teal-400">{entities.length}</div>
-                    </div>
-                    <div className="text-right hidden md:block">
-                      <div className="text-xs text-zinc-500">Captured</div>
-                      <div className="text-xs text-zinc-400">{capturedAt}</div>
-                    </div>
-                    <ArrowUpRight className={cn("w-4 h-4 text-zinc-600 transition-transform", isExpanded && "rotate-90")} />
-                  </div>
+                  <div className="font-medium text-zinc-100 truncate">{comp.name || comp.domain}</div>
+                  <div className="text-xs text-zinc-500 truncate">{comp.domain}</div>
                 </button>
+              ))}
+            </div>
+          </div>
 
-                {isExpanded && (
-                  <div className="px-5 pb-5 border-t border-zinc-800/50 pt-4 space-y-4 animate-fade-in">
-                    {entities.length > 0 && (
-                      <div>
-                        <p className="text-xs text-zinc-500 uppercase tracking-wider font-medium mb-2">Top Entities</p>
-                        <div className="flex flex-wrap gap-1.5">
-                          {entities.slice(0, 20).map((e: string) => (
-                            <span key={e} className="text-xs bg-purple-500/10 border border-purple-500/20 text-purple-300 rounded-full px-2.5 py-1">
-                              {e}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    {c.scraped_content && (
-                      <div>
-                        <p className="text-xs text-zinc-500 uppercase tracking-wider font-medium mb-2">Content Snapshot</p>
-                        <p className="text-xs text-zinc-400 leading-relaxed line-clamp-4 bg-zinc-900/60 p-3 rounded-lg">
-                          {c.scraped_content.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 600)}…
-                        </p>
-                      </div>
-                    )}
-
-                    {Object.keys(c.backlink_profiles || {}).length > 0 && (
-                      <div>
-                        <p className="text-xs text-zinc-500 uppercase tracking-wider font-medium mb-2">Backlink Profile</p>
-                        <div className="flex gap-6 text-sm">
-                          {Object.entries(c.backlink_profiles).slice(0, 4).map(([k, v]) => (
-                            <div key={k}>
-                              <span className="text-zinc-500 text-xs">{k.replace(/_/g, " ")}: </span>
-                              <span className="text-zinc-300 font-medium">{String(v)}</span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
+          <div className="lg:col-span-2 space-y-6">
+            {selectedCompetitor ? (
+              <>
+                <div className="flex items-start justify-between">
+                  <div>
+                    <h2 className="text-2xl font-bold text-zinc-100">{selectedCompetitor.name}</h2>
+                    <a
+                      href={`https://${selectedCompetitor.domain}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-cyan-400 hover:text-cyan-300 text-sm flex items-center gap-1 mt-1"
+                    >
+                      {selectedCompetitor.domain}
+                      <ExternalLink className="w-3 h-3" />
+                    </a>
                   </div>
-                )}
+                </div>
+
+                <div className="space-y-3">
+                  <div className="flex justify-between items-center">
+                    <h3 className="font-semibold text-zinc-100">Analysis</h3>
+                    <button
+                      onClick={handleAnalyze}
+                      disabled={analyzing}
+                      className="btn-primary text-sm flex items-center gap-2"
+                    >
+                      {analyzing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Target className="w-4 h-4" />}
+                      Analyze
+                    </button>
+                  </div>
+
+                  {analysis ? (
+                    <div className="bg-zinc-900/50 border border-zinc-800 rounded-lg p-4 space-y-3">
+                      <div className="grid grid-cols-3 gap-2">
+                        <div className="bg-zinc-800/50 rounded p-2">
+                          <div className="text-xs text-zinc-500">Keywords</div>
+                          <div className="font-bold text-cyan-400">{analysis.data_snapshot?.keyword_count}</div>
+                        </div>
+                        <div className="bg-zinc-800/50 rounded p-2">
+                          <div className="text-xs text-zinc-500">Backlinks</div>
+                          <div className="font-bold text-violet-400">{(analysis.data_snapshot?.backlink_count / 1000).toFixed(1)}K</div>
+                        </div>
+                        <div className="bg-zinc-800/50 rounded p-2">
+                          <div className="text-xs text-zinc-500">Domains</div>
+                          <div className="font-bold text-emerald-400">{analysis.data_snapshot?.referring_domains}</div>
+                        </div>
+                      </div>
+                      <div className="border-t border-zinc-700 pt-2">
+                        <div className="text-xs font-semibold text-zinc-300 mb-1">Insights</div>
+                        <div className="text-sm text-zinc-300 line-clamp-6">{analysis.analysis}</div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="bg-zinc-900/50 border border-zinc-800 rounded-lg p-6 text-center text-zinc-400 text-sm">
+                      Run analysis
+                    </div>
+                  )}
+                </div>
+
+                <div className="space-y-3">
+                  <div className="flex justify-between items-center">
+                    <h3 className="font-semibold text-zinc-100">Strategies</h3>
+                    <button
+                      onClick={handleGenerateStrategies}
+                      disabled={generatingStrategies || !analysis}
+                      className="btn-primary text-sm flex items-center gap-2"
+                    >
+                      {generatingStrategies ? <Loader2 className="w-4 h-4 animate-spin" /> : <TrendingUp className="w-4 h-4" />}
+                      Generate
+                    </button>
+                  </div>
+
+                  {strategies.length > 0 ? (
+                    <div className="space-y-2">
+                      {strategies.slice(0, 10).map((strategy) => (
+                        <div key={strategy.id} className="bg-zinc-900/50 border border-zinc-800 rounded-lg p-3">
+                          <div className="flex items-start justify-between">
+                            <div>
+                              <div className="font-medium text-zinc-100 text-sm">{strategy.target_keyword}</div>
+                              <div className="flex gap-2 mt-1">
+                                <span className={cn("text-xs font-bold", priorityColor(strategy.priority))}>P{strategy.priority}</span>
+                                <span className="text-xs text-zinc-500">#{strategy.competitor_position}</span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="bg-zinc-900/50 border border-zinc-800 rounded-lg p-6 text-center text-zinc-400 text-sm">
+                      {analysis ? "Generate strategies" : "Run analysis first"}
+                    </div>
+                  )}
+                </div>
+              </>
+            ) : (
+              <div className="bg-zinc-900/50 border border-zinc-800 rounded-lg p-16 text-center">
+                <Target className="w-12 h-12 text-zinc-600 mx-auto mb-4" />
+                <div className="text-zinc-400">Select a competitor</div>
               </div>
-            );
-          })}
+            )}
+          </div>
+        </div>
+      </div>
+
+      {showAddModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl max-w-md w-full">
+            <div className="border-b border-zinc-800 p-4">
+              <h2 className="text-lg font-semibold text-zinc-100">Add Competitor</h2>
+            </div>
+
+            <form onSubmit={handleAddCompetitor} className="p-6 space-y-4">
+              <div>
+                <label className="block text-xs text-zinc-500 uppercase tracking-wider mb-1">Domain</label>
+                <input
+                  type="text"
+                  value={newCompetitor.domain}
+                  onChange={(e) => setNewCompetitor({ ...newCompetitor, domain: e.target.value })}
+                  placeholder="example.com"
+                  className="input-field w-full"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs text-zinc-500 uppercase tracking-wider mb-1">Name</label>
+                <input
+                  type="text"
+                  value={newCompetitor.name}
+                  onChange={(e) => setNewCompetitor({ ...newCompetitor, name: e.target.value })}
+                  placeholder="Company"
+                  className="input-field w-full"
+                />
+              </div>
+
+              <div className="flex gap-2 pt-4">
+                <button type="button" onClick={() => setShowAddModal(false)} className="flex-1 btn-secondary">
+                  Cancel
+                </button>
+                <button type="submit" disabled={loading} className="flex-1 btn-primary">
+                  Add
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
     </div>

@@ -98,9 +98,10 @@ class GeminiClient:
     """
 
     def __init__(self, api_key: str | None = None):
-        self.api_key = api_key or settings.gemini_api_key
-        if not self.api_key:
+        self.api_keys = [api_key] if api_key else settings.gemini_api_key_list()
+        if not self.api_keys:
             raise ValueError("GEMINI_API_KEY is required")
+        self.api_key = self.api_keys[0]  # primary (back-compat)
         self.base_url = "https://generativelanguage.googleapis.com/v1beta"
 
     def complete(
@@ -136,25 +137,51 @@ class GeminiClient:
         }
 
         model_id = GEMINI_MODELS.get(model, model)
-        url = f"{self.base_url}/models/{model_id}:generateContent?key={self.api_key}"
-
+        # 2.5 models (including the "-latest" aliases, which currently resolve to
+        # gemini-2.5-flash) "think" by default, which consumes the output-token
+        # budget and can truncate/empty the JSON we ask for. Disable it for
+        # deterministic structured output.
+        if "2.5" in model_id or "latest" in model_id:
+            payload["generationConfig"]["thinkingConfig"] = {"thinkingBudget": 0}
         start = time.time()
         last_error: Exception | None = None
+        data = None
 
-        for attempt in range(3):
-            try:
-                with httpx.Client(timeout=120) as client:
-                    resp = client.post(url, json=payload)
-                    resp.raise_for_status()
-                    data = resp.json()
-                    break
-            except Exception as exc:
-                last_error = exc
-                wait = 1.5 * (2 ** attempt)
-                logger.warning("Gemini API attempt %d failed: %s", attempt + 1, exc)
-                time.sleep(wait)
-        else:
-            raise RuntimeError(f"Gemini API failed after 3 retries: {last_error}")
+        # Rotate across all configured keys. A 429 (quota exhausted) advances to
+        # the next key immediately; transient errors back off on the same key.
+        for key_idx, key in enumerate(self.api_keys):
+            url = f"{self.base_url}/models/{model_id}:generateContent?key={key}"
+            for attempt in range(3):
+                try:
+                    with httpx.Client(timeout=120) as client:
+                        resp = client.post(url, json=payload)
+                        if resp.status_code in (429, 403):
+                            # 429 = quota exhausted, 403 = key disabled/restricted;
+                            # both are key-specific and won't recover on retry.
+                            last_error = RuntimeError(
+                                f"HTTP {resp.status_code} on Gemini key #{key_idx + 1}"
+                            )
+                            logger.warning(
+                                "Gemini key #%d returned %d; rotating to next key",
+                                key_idx + 1, resp.status_code,
+                            )
+                            break  # stop retrying this key, move to the next one
+                        resp.raise_for_status()
+                        data = resp.json()
+                        break
+                except Exception as exc:
+                    last_error = exc
+                    wait = 1.5 * (2 ** attempt)
+                    logger.warning(
+                        "Gemini key #%d attempt %d failed: %s", key_idx + 1, attempt + 1, exc
+                    )
+                    time.sleep(wait)
+            if data is not None:
+                break
+        if data is None:
+            raise RuntimeError(
+                f"All {len(self.api_keys)} Gemini key(s) exhausted/failed: {last_error}"
+            )
 
         # Extract text
         content = ""

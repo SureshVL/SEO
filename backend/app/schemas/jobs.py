@@ -15,7 +15,7 @@ class JobStatus(BaseModel):
     status: str = Field(default="pending")
     created_at: datetime
     updated_at: datetime
-    result: WorkflowResponse | None = None
+    result: WorkflowResponse | dict | None = None
     error: str | None = None
     logs: list[dict[str, Any]] = Field(default_factory=list)
 

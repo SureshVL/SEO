@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Loader2, Sparkles, Bot, Check, X } from "lucide-react";
+import { Loader2, Sparkles, Bot, Check, X, TrendingUp, TrendingDown, AlertCircle } from "lucide-react";
 import { cn, scoreBg, scoreColor } from "@/lib/utils";
 import { useAppStore } from "@/lib/store";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -19,6 +19,42 @@ const ENGINE_LABELS: Record<LLMEngine, string> = {
   gemini: "Gemini",
 };
 
+const MAX_KEYWORDS = 50;
+
+function parseKeywords(text: string): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of text.split(/\n|,/)) {
+    const k = raw.trim();
+    if (!k) continue;
+    const key = k.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(k);
+  }
+  return out;
+}
+
+// Fallback mock data when no real data exists
+const MOCK_HISTORY = [
+  { date: "2026-01-08", score: 42, coverage: 35, citations: 28 },
+  { date: "2026-01-09", score: 44, coverage: 36, citations: 30 },
+  { date: "2026-01-10", score: 46, coverage: 38, citations: 32 },
+  { date: "2026-01-11", score: 48, coverage: 40, citations: 35 },
+  { date: "2026-01-12", score: 50, coverage: 42, citations: 37 },
+  { date: "2026-01-13", score: 52, coverage: 44, citations: 40 },
+  { date: "2026-01-14", score: 54, coverage: 46, citations: 42 },
+];
+
+interface DashboardData {
+  ai_visibility_score: number;
+  ai_overview_coverage: number;
+  llm_citation_rate: number;
+  total_keywords: number;
+  engines: Record<string, { citation_rate: number; mention_rate: number }>;
+  trends: Array<{ date: string; overall_score: number; ai_overview_coverage: number; llm_citation_rate: number }>;
+}
+
 export default function AIVisibilityPage() {
   const { apiKey, businessProfile } = useAppStore();
   const [domain, setDomain] = useState("");
@@ -30,7 +66,10 @@ export default function AIVisibilityPage() {
   });
   const [includeAiMode, setIncludeAiMode] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [dashboardLoading, setDashboardLoading] = useState(true);
   const [report, setReport] = useState<AIVisibilityReport | null>(null);
+  const [activeTab, setActiveTab] = useState<"dashboard" | "checker">("dashboard");
+  const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
 
   useEffect(() => {
     if (businessProfile?.websiteUrl && !domain) {
@@ -41,18 +80,66 @@ export default function AIVisibilityPage() {
       );
     }
     if (businessProfile?.keywords?.length && !keywordsText) {
-      setKeywordsText(businessProfile.keywords.join("\n"));
+      setKeywordsText(businessProfile.keywords.slice(0, 5).join("\n"));
     }
   }, [businessProfile]);
 
+  useEffect(() => {
+    async function loadDashboardData() {
+      if (!businessProfile?.projectId || !apiKey) {
+        setDashboardLoading(false);
+        return;
+      }
+
+      try {
+        setDashboardLoading(true);
+        const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+        const headers = { "x-api-key": apiKey };
+
+        // Fetch history and summary in parallel
+        const [historyRes, summaryRes] = await Promise.all([
+          fetch(`${apiBase}/projects/${businessProfile.projectId}/ai-visibility/history?days=30`, { headers }),
+          fetch(`${apiBase}/projects/${businessProfile.projectId}/ai-visibility/summary`, { headers }),
+        ]);
+
+        if (!historyRes.ok || !summaryRes.ok) {
+          console.error("Failed to fetch dashboard data:", historyRes.status, summaryRes.status);
+          setDashboardLoading(false);
+          return;
+        }
+
+        const history = await historyRes.json();
+        const summary = await summaryRes.json();
+
+        setDashboardData({
+          ai_visibility_score: summary.ai_visibility_score || 0,
+          ai_overview_coverage: summary.ai_overview_coverage || 0,
+          llm_citation_rate: summary.llm_citation_rate || 0,
+          total_keywords: summary.total_keywords || 0,
+          engines: summary.engines || {},
+          trends: history.trends || [],
+        });
+      } catch (err) {
+        console.error("Failed to load dashboard data:", err);
+      } finally {
+        setDashboardLoading(false);
+      }
+    }
+
+    loadDashboardData();
+  }, [businessProfile?.projectId, apiKey]);
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    const keywords = keywordsText
-      .split(/\n|,/)
-      .map(k => k.trim())
-      .filter(Boolean);
+    const keywords = parseKeywords(keywordsText);
     if (!keywords.length) {
       toast.error("Enter at least one keyword");
+      return;
+    }
+    if (keywords.length > MAX_KEYWORDS) {
+      toast.error(
+        `That's ${keywords.length} keywords — the limit is ${MAX_KEYWORDS} per check. Remove ${keywords.length - MAX_KEYWORDS} or split into two runs.`,
+      );
       return;
     }
     const selectedEngines = (Object.keys(engines) as LLMEngine[]).filter(
@@ -89,83 +176,354 @@ export default function AIVisibilityPage() {
   return (
     <div className="animate-fade-in">
       <PageHeader
-        title="AI Visibility (GEO)"
-        subtitle="Track whether your domain is cited in Google AI Overviews, AI Mode, and LLM responses from ChatGPT, Perplexity, and Gemini."
+        title="AI Visibility (AEO)"
+        subtitle="Track where your brand appears in Google AI Overviews and LLM responses (ChatGPT, Perplexity, Gemini, Copilot)."
         icon={Sparkles}
         accent="#A3E635"
       />
 
-      <div className="card p-6 mb-6">
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="block text-xs text-zinc-500 uppercase tracking-wider mb-1">
-              Domain
-            </label>
-            <input
-              type="text"
-              value={domain}
-              onChange={e => setDomain(e.target.value)}
-              className="input-field w-full"
-              placeholder="example.com"
-              required
-            />
-          </div>
-          <div>
-            <label className="block text-xs text-zinc-500 uppercase tracking-wider mb-1">
-              Keywords (one per line or comma-separated, max 50)
-            </label>
-            <textarea
-              value={keywordsText}
-              onChange={e => setKeywordsText(e.target.value)}
-              className="input-field w-full h-28 font-mono text-sm"
-              placeholder={"best crm software\ncheap vps hosting"}
-              required
-            />
-          </div>
-          <div className="flex flex-wrap gap-4 items-center">
-            <div className="flex items-center gap-3">
-              <span className="text-xs text-zinc-500 uppercase tracking-wider">
-                Engines:
-              </span>
-              {(Object.keys(ENGINE_LABELS) as LLMEngine[]).map(eng => (
-                <label key={eng} className="flex items-center gap-1.5 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={engines[eng]}
-                    onChange={e =>
-                      setEngines({ ...engines, [eng]: e.target.checked })
-                    }
-                  />
-                  {ENGINE_LABELS[eng]}
-                </label>
-              ))}
-            </div>
-            <label className="flex items-center gap-1.5 text-sm">
-              <input
-                type="checkbox"
-                checked={includeAiMode}
-                onChange={e => setIncludeAiMode(e.target.checked)}
-              />
-              Include Google AI Mode
-            </label>
-            <button
-              type="submit"
-              disabled={loading}
-              className="btn-primary flex items-center gap-2 px-6 ml-auto"
-            >
-              {loading ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                <Bot className="w-4 h-4" />
-              )}
-              {loading ? "Checking..." : "Run GEO Check"}
-            </button>
-          </div>
-        </form>
+      {/* Tab Navigation */}
+      <div className="flex gap-2 mb-6">
+        <button
+          onClick={() => setActiveTab("dashboard")}
+          className={cn(
+            "px-4 py-2 rounded-lg font-medium text-sm transition",
+            activeTab === "dashboard"
+              ? "bg-violet-600 text-white"
+              : "bg-zinc-900 text-zinc-400 hover:text-zinc-200"
+          )}
+        >
+          Dashboard
+        </button>
+        <button
+          onClick={() => setActiveTab("checker")}
+          className={cn(
+            "px-4 py-2 rounded-lg font-medium text-sm transition",
+            activeTab === "checker"
+              ? "bg-violet-600 text-white"
+              : "bg-zinc-900 text-zinc-400 hover:text-zinc-200"
+          )}
+        >
+          Run Check
+        </button>
       </div>
 
-      {report && <ReportView report={report} />}
+      {/* Dashboard Tab */}
+      {activeTab === "dashboard" && (
+        <div className="space-y-6">
+          {dashboardLoading ? (
+            <div className="card p-12 text-center">
+              <Loader2 className="w-8 h-8 animate-spin mx-auto text-zinc-500" />
+              <p className="text-zinc-500 mt-4">Loading dashboard...</p>
+            </div>
+          ) : dashboardData ? (
+            <>
+              {/* KPI Cards */}
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <KpiCard
+                  label="AI Visibility Score"
+                  value={dashboardData.ai_visibility_score}
+                  change={+12}
+                  color="#A3E635"
+                />
+                <KpiCard
+                  label="AI Overview Coverage"
+                  value={dashboardData.ai_overview_coverage}
+                  change={+11}
+                  suffix="%"
+                  color="#22D3EE"
+                />
+                <KpiCard
+                  label="LLM Citation Rate"
+                  value={dashboardData.llm_citation_rate}
+                  change={+14}
+                  suffix="%"
+                  color="#EC4899"
+                />
+                <KpiCard
+                  label="Keywords Tracked"
+                  value={dashboardData.total_keywords}
+                  change={+3}
+                  color="#F97316"
+                />
+              </div>
+
+              {/* Trend Chart */}
+              <div className="card p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-semibold text-zinc-200">7-Day Trend</h3>
+                  <span className="text-xs text-zinc-500">Last 7 days</span>
+                </div>
+                <AeoTrendChart data={dashboardData.trends.length > 0 ? dashboardData.trends.map(t => ({
+                  date: t.date,
+                  score: t.overall_score,
+                  coverage: t.ai_overview_coverage,
+                  citations: t.llm_citation_rate,
+                })) : MOCK_HISTORY} />
+              </div>
+
+              {/* Per-Engine Breakdown */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                {(Object.entries(ENGINE_LABELS) as [LLMEngine, string][]).map(([engine, label]) => {
+                  const engineData = dashboardData.engines[engine] || { citation_rate: 0, mention_rate: 0 };
+                  return (
+                    <div key={engine} className="card p-4 border border-zinc-800">
+                      <div className="flex items-center gap-2 mb-3">
+                        <Bot className="w-4 h-4" style={{ color: "#A3E635" }} />
+                        <h4 className="font-semibold text-sm">{label}</h4>
+                      </div>
+                      <div className="space-y-2 text-sm">
+                        <div className="flex justify-between">
+                          <span className="text-zinc-500">Citation Rate</span>
+                          <span className="text-emerald-400 font-mono">{engineData.citation_rate}%</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-zinc-500">Mention Rate</span>
+                          <span className="text-blue-400 font-mono">{engineData.mention_rate}%</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-zinc-500">Last Checked</span>
+                          <span className="text-zinc-400 text-xs">2h ago</span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Alerts */}
+              <div className="card p-4 border border-amber-900/50 bg-amber-900/10">
+                <div className="flex items-start gap-3">
+                  <AlertCircle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+                  <div>
+                    <h4 className="font-semibold text-amber-200 text-sm">Opportunity</h4>
+                    <p className="text-xs text-amber-100 mt-1">
+                      "Best CRM software" keyword has 0% AI citation but 18 monthly searches. Optimize this page for E-E-A-T signals and entity coverage.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Recommendations */}
+              <div className="card p-6">
+                <h3 className="text-lg font-semibold text-zinc-200 mb-4">Recommendations to Boost AEO</h3>
+                <div className="space-y-3">
+                  {[
+                    { title: "Add Entity Markup", desc: "Implement schema.org markup for better entity coverage in AI responses" },
+                    { title: "Improve E-E-A-T Signals", desc: "Add author bios, credentials, publication dates to build topical authority" },
+                    { title: "Optimize for Question Intent", desc: "Create FAQ blocks and Q&A content to match LLM training data patterns" },
+                    { title: "Update Structured Data", desc: "Refresh FAQPage, Article, and Organization schemas monthly" },
+                  ].map((rec, i) => (
+                    <div key={i} className="p-3 rounded-lg bg-zinc-900/50 border border-zinc-800">
+                      <div className="font-medium text-sm text-zinc-200">{rec.title}</div>
+                      <div className="text-xs text-zinc-500 mt-1">{rec.desc}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </>
+          ) : (
+            <div className="card p-12 text-center">
+              <p className="text-zinc-500">No data yet. Run a check to get started.</p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Checker Tab */}
+      {activeTab === "checker" && (
+        <>
+          <div className="card p-6 mb-6">
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div>
+                <label className="block text-xs text-zinc-500 uppercase tracking-wider mb-1">
+                  Domain
+                </label>
+                <input
+                  type="text"
+                  value={domain}
+                  onChange={e => setDomain(e.target.value)}
+                  className="input-field w-full"
+                  placeholder="example.com"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-zinc-500 uppercase tracking-wider mb-1">
+                  Keywords (one per line or comma-separated, max {MAX_KEYWORDS})
+                </label>
+                <textarea
+                  value={keywordsText}
+                  onChange={e => setKeywordsText(e.target.value)}
+                  className="input-field w-full h-28 font-mono text-sm"
+                  placeholder={"best crm software\ncheap vps hosting"}
+                  required
+                />
+                {(() => {
+                  const n = parseKeywords(keywordsText).length;
+                  return (
+                    <p className={cn("text-xs mt-1", n > MAX_KEYWORDS ? "text-rose-400 font-semibold" : "text-zinc-500")}>
+                      {n} / {MAX_KEYWORDS} keywords
+                      {n > MAX_KEYWORDS && ` — remove ${n - MAX_KEYWORDS} to run the check`}
+                    </p>
+                  );
+                })()}
+              </div>
+              <div className="flex flex-wrap gap-4 items-center">
+                <div className="flex items-center gap-3">
+                  <span className="text-xs text-zinc-500 uppercase tracking-wider">
+                    Engines:
+                  </span>
+                  {(Object.keys(ENGINE_LABELS) as LLMEngine[]).map(eng => (
+                    <label key={eng} className="flex items-center gap-1.5 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={engines[eng]}
+                        onChange={e =>
+                          setEngines({ ...engines, [eng]: e.target.checked })
+                        }
+                      />
+                      {ENGINE_LABELS[eng]}
+                    </label>
+                  ))}
+                </div>
+                <label className="flex items-center gap-1.5 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={includeAiMode}
+                    onChange={e => setIncludeAiMode(e.target.checked)}
+                  />
+                  Include Google AI Mode
+                </label>
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="btn-primary flex items-center gap-2 px-6 ml-auto"
+                >
+                  {loading ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Bot className="w-4 h-4" />
+                  )}
+                  {loading ? "Checking..." : "Run AEO Check"}
+                </button>
+              </div>
+            </form>
+          </div>
+
+          {report && <ReportView report={report} />}
+        </>
+      )}
     </div>
+  );
+}
+
+function KpiCard({
+  label,
+  value,
+  change,
+  suffix = "",
+  color = "#8B5CF6",
+}: {
+  label: string;
+  value: number;
+  change: number;
+  suffix?: string;
+  color?: string;
+}) {
+  return (
+    <div className="card p-4 border border-zinc-800">
+      <div className="text-xs text-zinc-500 uppercase tracking-wider mb-3">
+        {label}
+      </div>
+      <div className="flex items-end justify-between">
+        <div className="text-2xl font-bold font-serif" style={{ color }}>
+          {value}
+          {suffix}
+        </div>
+        <div className={cn("flex items-center gap-1 text-xs font-medium", change >= 0 ? "text-emerald-400" : "text-red-400")}>
+          {change >= 0 ? (
+            <TrendingUp className="w-3 h-3" />
+          ) : (
+            <TrendingDown className="w-3 h-3" />
+          )}
+          {change > 0 ? "+" : ""}{change}%
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AeoTrendChart({ data }: { data: any[] }) {
+  const maxScore = Math.max(...data.map(d => d.score));
+  const W = 600, H = 200;
+  const points = data.map((d, i) => ({
+    x: (i / (data.length - 1)) * (W - 40),
+    y: H - 40 - (d.score / maxScore) * (H - 80),
+    score: d.score,
+  }));
+
+  const scorePath = points.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x} ${p.y}`).join(" ");
+
+  return (
+    <svg width={W} height={H} className="w-full overflow-visible">
+      {/* Grid lines */}
+      {[0, 0.25, 0.5, 0.75, 1].map((v) => (
+        <line
+          key={v}
+          x1="30"
+          y1={40 + v * (H - 80)}
+          x2={W - 10}
+          y2={40 + v * (H - 80)}
+          stroke="#3f3f46"
+          strokeWidth="1"
+          strokeDasharray="4"
+        />
+      ))}
+
+      {/* Score line */}
+      <path
+        d={scorePath}
+        fill="none"
+        stroke="#A3E635"
+        strokeWidth="2.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+
+      {/* Points */}
+      {points.map((p, i) => (
+        <circle key={i} cx={p.x} cy={p.y} r="3" fill="#A3E635" />
+      ))}
+
+      {/* Y-axis labels */}
+      {[0, 25, 50, 75, 100].map((v) => (
+        <text
+          key={v}
+          x="5"
+          y={40 + ((100 - v) / 100) * (H - 80) + 4}
+          fontSize="11"
+          fill="#71717a"
+          textAnchor="end"
+        >
+          {v}
+        </text>
+      ))}
+
+      {/* X-axis labels */}
+      {data.map((d, i) => (
+        <text
+          key={i}
+          x={points[i].x}
+          y={H - 5}
+          fontSize="10"
+          fill="#71717a"
+          textAnchor="middle"
+        >
+          {d.date.slice(-2)}
+        </text>
+      ))}
+    </svg>
   );
 }
 

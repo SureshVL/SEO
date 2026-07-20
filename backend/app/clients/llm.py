@@ -53,10 +53,21 @@ class ProviderStatus:
     exhausted: bool = False
 
 class LLMClient:
+    # Central response-cache policy (applies to every module using this
+    # client): analytical calls (temperature <= threshold) are served from
+    # cache for FRESH_TTL, and a stale copy (up to STALE_TTL) is served when
+    # every provider fails. Creative calls (higher temperature) skip caching.
+    CACHE_MAX_TEMPERATURE = 0.4
+    CACHE_FRESH_TTL = 24 * 3600
+    CACHE_STALE_TTL = 7 * 24 * 3600
+
     def __init__(self):
         self.provider = self._determine_provider()
         self._status: Dict[str, ProviderStatus] = {}
         self.allow_paid: bool = True
+        self.cache_hits = 0
+        self.cache_stale_served = 0
+        self.cache_misses = 0
         for p in self._get_available():
             self._status[p] = ProviderStatus(name=p)
 
@@ -81,38 +92,100 @@ class LLMClient:
 
     def _get_fallback_order(self, primary: str) -> List[str]:
         available = self._get_available()
-        order = [primary] if primary in available else []
-        for p in CHEAPEST_FIRST_ORDER:
-            if p in available and p not in order:
-                s = self._status.get(p)
-                if s and s.rate_limited_until > time.time(): continue
-                order.append(p)
+        order = []
+        for p in ([primary] if primary in available else []) + CHEAPEST_FIRST_ORDER:
+            if p not in available or p in order:
+                continue
+            s = self._status.get(p)
+            if s and s.rate_limited_until > time.time():
+                continue
+            if not self.allow_paid and not PROVIDER_COST_TIERS.get(p, {}).get("free_tier"):
+                continue  # paid providers excluded while allow_paid is off
+            order.append(p)
         return order
 
+    @staticmethod
+    def _model_for_provider(provider: str, model: Optional[str]) -> Optional[str]:
+        """Only forward a model override to the provider family it belongs to."""
+        if not model:
+            return None
+        families = {
+            "claude": ("claude",),
+            "gemini": ("gemini",),
+            "openai": ("gpt", "o1", "o3", "o4"),
+            "perplexity": ("sonar",),
+            "groq": ("llama", "mixtral", "gemma", "qwen", "deepseek"),
+        }
+        prefixes = families.get(provider, ())
+        if any(model.startswith(p) for p in prefixes):
+            return model
+        return None  # fall back to that provider's default model
+
+    @staticmethod
+    def _normalize(result) -> Dict[str, Any]:
+        """Providers return either a dict or an AIResponse dataclass; unify to dict."""
+        if isinstance(result, dict):
+            return result
+        return {
+            "content": getattr(result, "content", str(result)),
+            "model": getattr(result, "model", ""),
+            "input_tokens": getattr(result, "input_tokens", 0),
+            "output_tokens": getattr(result, "output_tokens", 0),
+            "cost_usd": getattr(result, "cost_usd", 0.0),
+            "cached": getattr(result, "cached", False),
+        }
+
     def _call_provider(self, provider, messages, model=None, temperature=0.7, max_tokens=4000, **kw):
+        model = self._model_for_provider(provider, model)
         if provider == "claude":
             from .claude_client import ClaudeClient
-            return ClaudeClient().complete(messages, model or settings.default_claude_model, temperature=temperature, max_tokens=max_tokens, **kw)
+            result = ClaudeClient().complete(messages, model=model or settings.default_claude_model, temperature=temperature, max_tokens=max_tokens, **kw)
         elif provider == "gemini":
             from .gemini_client import GeminiClient
-            return GeminiClient().complete(messages, model or settings.default_gemini_model, temperature=temperature, max_tokens=max_tokens, **kw)
+            result = GeminiClient().complete(messages, model=model or settings.default_gemini_model, temperature=temperature, max_tokens=max_tokens, **kw)
         elif provider == "groq":
             from .groq_client import GroqClient
-            return GroqClient().complete(messages, model or settings.default_groq_model, temperature=temperature, max_tokens=max_tokens, **kw)
+            result = GroqClient().complete(messages, model=model or settings.default_groq_model, temperature=temperature, max_tokens=max_tokens, **kw)
         elif provider == "openai":
             from .openai_client import OpenAIClient
-            return OpenAIClient().complete(messages, model or settings.default_openai_model, temperature=temperature, max_tokens=max_tokens, **kw)
+            result = OpenAIClient().complete(messages, model=model or settings.default_openai_model, temperature=temperature, max_tokens=max_tokens, **kw)
         elif provider == "perplexity":
             from .perplexity_client import PerplexityClient
-            return PerplexityClient().complete(messages, model or settings.default_perplexity_model, temperature=temperature, max_tokens=max_tokens, **kw)
-        raise Exception(f"Unknown provider: {provider}")
+            result = PerplexityClient().complete(messages, model=model or settings.default_perplexity_model, temperature=temperature, max_tokens=max_tokens, **kw)
+        else:
+            raise Exception(f"Unknown provider: {provider}")
+        return self._normalize(result)
 
     def complete(self, messages: List[Dict], **kwargs) -> Dict[str, Any]:
-        """Smart complete: cheapest first, auto-fallback on 429/503."""
+        """Smart complete: cache-first for analytical calls, cheapest provider
+        first, auto-fallback on 429/503, stale-cache serve as last resort."""
         requested = kwargs.pop("provider", self.provider)
         model = kwargs.pop("model", None)
         temperature = kwargs.pop("temperature", 0.7)
         max_tokens = kwargs.pop("max_tokens", 4000)
+
+        # ── Central response cache (all callers inherit this) ──────
+        cache_k = None
+        cache_entry = None
+        if temperature <= self.CACHE_MAX_TEMPERATURE:
+            try:
+                from app.services.cache import cache_key, cache_json_get
+                cache_k = cache_key(
+                    "llm-v1", str(model), str(temperature), str(max_tokens),
+                    json.dumps(messages, sort_keys=True, default=str),
+                )
+                cache_entry = cache_json_get(cache_k)
+                if cache_entry and time.time() - float(cache_entry.get("at", 0)) < self.CACHE_FRESH_TTL:
+                    self.cache_hits += 1
+                    logger.info("LLM cache hit (skipping provider call)")
+                    result = dict(cache_entry["data"])
+                    result["_cache"] = "hit"
+                    return result
+                self.cache_misses += 1
+            except Exception as exc:
+                logger.debug("LLM cache unavailable: %s", exc)
+                cache_k = None
+
         fallback_order = self._get_fallback_order(requested)
         if not fallback_order:
             raise Exception("No LLM providers available. Add API keys to .env")
@@ -131,6 +204,15 @@ class LLMClient:
                         result["_provider_used"] = provider
                     self._status[provider] = status
                     logger.info("LLM OK: %s", provider)
+                    if cache_k and isinstance(result, dict):
+                        try:
+                            from app.services.cache import cache_json_set
+                            cache_json_set(
+                                cache_k, {"at": time.time(), "data": result},
+                                ttl=self.CACHE_STALE_TTL,
+                            )
+                        except Exception:
+                            pass
                     return result
                 except Exception as exc:
                     err = str(exc)
@@ -138,6 +220,7 @@ class LLMClient:
                     status.last_error = err[:200]
                     status.last_error_time = time.time()
                     self._status[provider] = status
+                    last_error = exc
                     if "429" in err or "rate" in err.lower() or "quota" in err.lower():
                         status.rate_limited_until = time.time() + 60
                         if PROVIDER_COST_TIERS.get(provider, {}).get("free_tier"):
@@ -150,9 +233,31 @@ class LLMClient:
                         time.sleep(wait)
                         continue
                     logger.warning("%s failed: %s", provider, err[:100])
-                    last_error = exc
                     break
+        # Last resort: serve a stale cached response rather than failing.
+        if cache_entry:
+            self.cache_stale_served += 1
+            logger.warning("All LLM providers failed — serving stale cached response")
+            result = dict(cache_entry["data"])
+            result["_cache"] = "stale"
+            return result
         raise Exception(f"All providers failed: {last_error}")
+
+    async def agenerate_text(self, prompt: str, model: Optional[str] = None,
+                             max_tokens: int = 4000, temperature: float = 0.7, **kwargs) -> str:
+        """Async text generation used by the agent classes. Returns the raw text."""
+        import asyncio
+
+        def _run() -> str:
+            result = self.complete(
+                [{"role": "user", "content": prompt}],
+                model=model, max_tokens=max_tokens, temperature=temperature, **kwargs,
+            )
+            if isinstance(result, dict):
+                return result.get("content", "")
+            return getattr(result, "content", str(result))
+
+        return await asyncio.to_thread(_run)
 
     def complete_json(self, messages: List[Dict], system: str = None, **kwargs) -> tuple:
         if system:
@@ -192,6 +297,11 @@ class LLMClient:
             "fallback_order": self._get_fallback_order(self.provider),
             "all_free_exhausted": all_free_gone, "allow_paid": self.allow_paid,
             "providers": providers,
+            "cache": {
+                "hits": self.cache_hits,
+                "misses": self.cache_misses,
+                "stale_served": self.cache_stale_served,
+            },
         }
 
     def set_allow_paid(self, allow: bool):

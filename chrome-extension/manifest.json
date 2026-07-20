@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "OMNI-RANK SEO Inspector",
+  "version": "1.0.0",
+  "description": "Instant on-page SEO analysis for any web page — titles, meta, headings, links, schema and a live score.",
+  "permissions": ["activeTab", "scripting"],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "OMNI-RANK SEO Inspector"
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}

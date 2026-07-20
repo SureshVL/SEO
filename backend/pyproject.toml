@@ -14,12 +14,31 @@ dependencies = [
   "pydantic-settings>=2.10.0",
   "requests>=2.32.0",
   "httpx>=0.27.0",
+  # LLM provider SDKs (Groq failover; OpenAI-compatible clients for
+  # Perplexity/OpenAI providers)
+  "groq>=0.11.0",
+  "openai>=1.40.0",
+  # Production infra: Redis cache/rate-limit backend and at-rest encryption
+  # for stored third-party secrets (both degrade gracefully if absent, but
+  # production should always have them)
+  "redis>=5.0.0",
+  "cryptography>=41.0.0",
 ]
 
 [project.optional-dependencies]
 dev = [
   "pytest>=8.4.0",
   "ruff>=0.8.0",
+]
+# Headless rendering for JS-heavy sites (React/Vue/Next storefronts):
+#   pip install -e ".[render]" && playwright install chromium
+render = [
+  "playwright>=1.45.0",
+]
+# At-rest encryption for stored third-party secrets (GitHub PATs, CMS creds).
+# Without it, those secrets fall back to plaintext storage (a warning is logged).
+crypto = [
+  "cryptography>=41.0.0",
 ]
 
 [tool.pytest.ini_options]

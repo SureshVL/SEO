@@ -9,6 +9,9 @@ class Settings(BaseSettings):
     llm_provider: str = "auto"
     anthropic_api_key: Optional[str] = None
     gemini_api_key: Optional[str] = None
+    # Comma-separated fallback Gemini keys; rotated to when the primary key hits
+    # its quota (429). Lets a fleet of free-tier keys act as one higher quota.
+    gemini_api_keys: str = ""
     groq_api_key: Optional[str] = None
     openai_api_key: Optional[str] = None
     perplexity_api_key: Optional[str] = None
@@ -22,9 +25,19 @@ class Settings(BaseSettings):
     pagespeed_api_key: str = ""
     dataforseo_login: str = ""
     dataforseo_password: str = ""
+    # True → hit DataForSEO's free Sandbox (dummy data, identical response
+    # shapes) instead of the paid live API. For development and testing only.
+    dataforseo_sandbox: bool = False
+    # WhatsApp Cloud API (Meta) — copilot over WhatsApp
+    whatsapp_access_token: str = ""
+    whatsapp_phone_number_id: str = ""
+    whatsapp_verify_token: str = ""   # any secret string, echoed at webhook setup
+    whatsapp_app_secret: str = ""     # Meta app secret for webhook signatures
+    frontend_url: str = "http://localhost:3000"
     supabase_url: str = ""
     supabase_service_role_key: str = ""
     supabase_anon_key: str = ""
+    supabase_jwt_secret: str = ""  # HS256 secret for verifying Supabase user JWTs
     redis_url: str = ""
     orchestrator_api_key: str = "dev-orchestrator-key"
     orchestrator_keys_json: str = ""
@@ -38,9 +51,30 @@ class Settings(BaseSettings):
     razorpay_key_id: str = ""
     razorpay_key_secret: str = ""
     razorpay_webhook_secret: str = ""
+    stripe_secret_key: str = ""
+    stripe_webhook_secret: str = ""
+    stripe_price_starter: str = ""   # Stripe monthly recurring Price IDs (price_...)
+    stripe_price_growth: str = ""
+    stripe_price_pro: str = ""
+    stripe_price_agency: str = ""
+    stripe_price_starter_annual: str = ""   # annual (20% off marketing) variants
+    stripe_price_growth_annual: str = ""
+    stripe_price_pro_annual: str = ""
+    stripe_price_agency_annual: str = ""
+    app_base_url: str = "http://localhost:3000"  # for checkout redirects
     wordpress_deploy_webhook: str = ""
     shopify_deploy_webhook: str = ""
     appstore_deploy_webhook: str = ""
+
+    def gemini_api_key_list(self) -> list[str]:
+        """Primary Gemini key followed by any comma-separated fallback keys,
+        de-duplicated, empties dropped. Used for quota-based key rotation."""
+        keys: list[str] = []
+        for raw in [self.gemini_api_key or ""] + self.gemini_api_keys.split(","):
+            k = raw.strip()
+            if k and k not in keys:
+                keys.append(k)
+        return keys
 
     class Config:
         env_file = ".env"

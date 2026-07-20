@@ -52,12 +52,15 @@ export default function AttributionPage() {
     try {
       const data = await attributionReport(
         {
-          ga4_access_token: ga4AccessToken,
+          // tokens are used server-side by project_id; any in-memory tokens
+          // are sent only as a same-session fallback.
+          ga4_access_token: ga4AccessToken || undefined,
           ga4_property_id: ga4PropertyId,
-          gsc_access_token: gscAccessToken,
+          gsc_access_token: gscAccessToken || undefined,
           gsc_site_url: gscSiteUrl,
           date_range_days: days,
           top_n: 15,
+          project_id: useAppStore.getState().currentProject?.id,
         },
         apiKey,
       );
