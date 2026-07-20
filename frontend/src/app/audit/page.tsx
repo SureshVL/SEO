@@ -186,6 +186,59 @@ export default function FreeAuditPage() {
           </form>
         ) : null}
 
+        {(status === "idle" || status === "error") && (
+          <section className="max-w-3xl mx-auto mt-20 space-y-6">
+            <div>
+              <h2 className="text-2xl font-bold">What our free SEO audit checks</h2>
+              <p className="mt-3 text-gray-400">
+                Search engines and AI answer engines can only rank pages they can
+                crawl, understand and trust. Our audit fetches your site the same way
+                Googlebot does and grades it against the technical signals that
+                actually move rankings — so you see exactly what&apos;s holding you
+                back before a competitor does.
+              </p>
+            </div>
+
+            <p className="text-gray-400">
+              In a single pass we inspect <span className="text-white font-medium">crawlability</span>{" "}
+              (robots.txt, sitemaps, indexability and orphan pages), your{" "}
+              <span className="text-white font-medium">titles and meta descriptions</span>{" "}
+              for duplicates and missing tags, and whether pages ship valid{" "}
+              <span className="text-white font-medium">structured data (JSON-LD schema)</span>{" "}
+              that helps you win rich results and AI citations. We flag{" "}
+              <span className="text-white font-medium">thin or duplicate content</span>,{" "}
+              <span className="text-white font-medium">broken links and redirect chains</span>,
+              and measure real load times and{" "}
+              <span className="text-white font-medium">Core Web Vitals</span> so slow,
+              unstable pages don&apos;t quietly bleed traffic.
+            </p>
+
+            <p className="text-gray-400">
+              Every issue comes with a plain-English explanation and a recommended
+              fix, prioritized by severity so you tackle the highest-impact problems
+              first. It&apos;s the same technical foundation the biggest SEO tools
+              charge for — free, instant, and with no credit card required.
+            </p>
+
+            <div className="grid sm:grid-cols-2 gap-3 pt-2">
+              {[
+                { title: "Crawlability & indexing", desc: "Robots.txt, sitemaps, noindex tags and orphan pages." },
+                { title: "Titles, meta & headings", desc: "Duplicate, missing or truncated tags across your site." },
+                { title: "Structured data", desc: "Valid JSON-LD schema for rich results and AI citations." },
+                { title: "Content quality", desc: "Thin, duplicate or low-value pages that dilute rankings." },
+                { title: "Links & redirects", desc: "Broken links, 404s and long redirect chains." },
+                { title: "Speed & Core Web Vitals", desc: "Load times, LCP, CLS and other performance signals." },
+              ].map((f) => (
+                <div key={f.title} className="bg-white/5 border border-white/10 rounded-xl p-4">
+                  <CheckCircle2 className="w-5 h-5 text-lime-400" />
+                  <p className="font-semibold mt-2">{f.title}</p>
+                  <p className="text-sm text-gray-400 mt-1">{f.desc}</p>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+
         {status === "running" && (
           <div className="max-w-xl mx-auto text-center py-16">
             <Loader2 className="w-12 h-12 animate-spin mx-auto text-fuchsia-400" />

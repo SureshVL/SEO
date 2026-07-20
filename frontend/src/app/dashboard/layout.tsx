@@ -1,5 +1,11 @@
+import type { Metadata } from "next";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { CopilotWidget } from "@/components/copilot/CopilotWidget";
+
+export const metadata: Metadata = {
+  robots: { index: false, follow: false },
+};
+
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-screen" style={{ background: "var(--bg-primary)" }}>
