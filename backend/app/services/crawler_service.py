@@ -60,6 +60,7 @@ class PageData:
     h1s: list[str] = field(default_factory=list)
     canonical: str = ""
     has_schema: bool = False
+    meta_robots: str = ""
     word_count: int = 0
     internal_links: list[str] = field(default_factory=list)
     external_links: list[str] = field(default_factory=list)
@@ -123,6 +124,7 @@ class _SEOPageParser(HTMLParser):
         self.links: list[str] = []
         self.images_missing_alt = 0
         self.has_schema = False
+        self.meta_robots = ""
         self.text_parts: list[str] = []
         self._in_title = False
         self._in_h1 = False
@@ -137,8 +139,11 @@ class _SEOPageParser(HTMLParser):
             self._in_h1 = True
             self.h1s.append("")
         elif tag == "meta":
-            if attrs_d.get("name", "").lower() == "description":
+            name = attrs_d.get("name", "").lower()
+            if name == "description":
                 self.meta_description = attrs_d.get("content", "") or ""
+            elif name == "robots":
+                self.meta_robots = (attrs_d.get("content", "") or "").lower()
         elif tag == "link":
             if attrs_d.get("rel", "").lower() == "canonical":
                 self.canonical = attrs_d.get("href", "") or ""
@@ -433,6 +438,7 @@ class CrawlerService:
         page.h1s = [h.strip() for h in parser.h1s if h.strip()][:5]
         page.canonical = parser.canonical[:500]
         page.has_schema = parser.has_schema
+        page.meta_robots = parser.meta_robots[:200]
         page.images_missing_alt = parser.images_missing_alt
         page.word_count = len(" ".join(parser.text_parts).split())
         base = f"{urlparse(url).scheme}://{urlparse(url).netloc}"
@@ -584,6 +590,32 @@ class CrawlerService:
         ]
 
 
+# Path segments that mark a page as a utility/app surface, not a ranking page.
+# These should be noindex'd, not optimized for crawlers — flagging them for
+# thin content / missing schema / client-rendering is noise.
+_UTILITY_SEGMENTS = frozenset({
+    "login", "signin", "sign-in", "signup", "sign-up", "register",
+    "logout", "signout", "sign-out", "auth", "password", "reset-password",
+    "forgot-password", "verify", "confirm", "callback", "oauth",
+    "dashboard", "account", "settings", "admin", "profile", "billing",
+    "cart", "checkout", "basket", "onboarding", "app",
+})
+
+
+def _is_utility_url(url: str) -> bool:
+    """True for auth/app/checkout surfaces that are not meant to rank."""
+    try:
+        path = urlparse(url).path.lower()
+    except Exception:
+        return False
+    return any(seg in _UTILITY_SEGMENTS for seg in path.split("/") if seg)
+
+
+def _is_noindex(page) -> bool:
+    r = getattr(page, "meta_robots", "") or ""
+    return "noindex" in r or "none" in r
+
+
 def analyze_crawl(result: CrawlResult) -> dict[str, Any]:
     """Deterministic technical audit from crawl data. No LLM needed."""
     issues: list[dict[str, Any]] = []
@@ -621,10 +653,33 @@ def analyze_crawl(result: CrawlResult) -> dict[str, Any]:
 
     titles_seen: dict[str, str] = {}
     for p in ok_pages:
+        # Utility surfaces (login, signup, dashboard, checkout, …) are not
+        # meant to rank. Handle them first — even when they're JS shells —
+        # so we recommend noindex instead of "make this crawlable", and skip
+        # the content/schema findings that only make sense for ranking pages.
+        # This is the difference between a data dump and advice.
+        if _is_utility_url(p.url):
+            if not _is_noindex(p):
+                add("indexable_utility_page", "info", p.url,
+                    "A login/app/checkout page is indexable.",
+                    "Add <meta name=\"robots\" content=\"noindex\"> — these pages "
+                    "shouldn't appear in search results, and keeping them out "
+                    "focuses crawl budget on pages that can rank.")
+            # Duplicate titles still matter (sitewide template sharing one
+            # title confuses even for noindex pages), so keep that check.
+            if p.title and p.title in titles_seen:
+                add("duplicate_title", "warning", p.url,
+                    f"Title duplicates {titles_seen[p.title]}",
+                    "Write a unique title for each page.", duplicate_of=titles_seen[p.title])
+            elif p.title:
+                titles_seen[p.title] = p.url
+            continue
+
         if p.needs_js_render and not p.js_rendered:
             # we couldn't see the real content; the client_side_rendered
             # finding covers it - don't pile on false "missing X" issues
             continue
+
         if not p.title:
             add("missing_title", "critical", p.url,
                 "Page has no <title> tag.",
@@ -690,9 +745,11 @@ def analyze_crawl(result: CrawlResult) -> dict[str, Any]:
                 "No internal links point to this page (within the crawl).",
                 "Link to this page from related content and navigation.")
 
-    # Client-side rendering findings (SPA storefronts)
+    # Client-side rendering findings (SPA storefronts). Utility pages
+    # (login/app/checkout) are exempt — they're noindex targets, not ranking
+    # pages, so "make this crawlable" is the wrong advice for them.
     for p in result.pages:
-        if not p.needs_js_render:
+        if not p.needs_js_render or _is_utility_url(p.url):
             continue
         if p.js_rendered:
             add("client_side_rendered", "info", p.url,

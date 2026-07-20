@@ -125,6 +125,49 @@ class TestAnalyzeCrawl:
         assert "missing_title" not in types
         assert "thin_content" not in types
 
+    def test_utility_page_suppresses_ranking_findings(self):
+        # A login page rendered as a JS shell must NOT be told to fix
+        # rendering / add schema / add content — it should be noindex'd.
+        login = self._page(
+            url="https://x.com/auth/login", title="Log in — X", meta_description="",
+            h1s=[], has_schema=False, word_count=20,
+            needs_js_render=True, js_rendered=False,
+        )
+        result = CrawlResult(domain="x.com", base_url="https://x.com",
+                             pages=[login], sitemap_found=True, robots_found=True)
+        report = analyze_crawl(result)
+        types = {i["issue_type"] for i in report["issues"]}
+        assert "client_side_rendered" not in types
+        assert "missing_schema" not in types
+        assert "thin_content" not in types
+        assert "missing_meta_description" not in types
+        # instead it recommends noindex
+        assert "indexable_utility_page" in types
+
+    def test_noindexed_utility_page_is_clean(self):
+        login = self._page(
+            url="https://x.com/auth/login", title="Log in — X",
+            has_schema=False, word_count=20, meta_robots="noindex, nofollow",
+        )
+        result = CrawlResult(domain="x.com", base_url="https://x.com",
+                             pages=[login], sitemap_found=True, robots_found=True)
+        report = analyze_crawl(result)
+        types = {i["issue_type"] for i in report["issues"]}
+        # already noindex → no nagging at all
+        assert "indexable_utility_page" not in types
+        assert "client_side_rendered" not in types
+        assert "thin_content" not in types
+
+    def test_duplicate_title_still_caught_on_utility_pages(self):
+        home = self._page(url="https://x.com/", title="OMNI-RANK")
+        login = self._page(url="https://x.com/auth/login", title="OMNI-RANK",
+                           meta_robots="noindex")
+        result = CrawlResult(domain="x.com", base_url="https://x.com",
+                             pages=[home, login], sitemap_found=True, robots_found=True)
+        report = analyze_crawl(result)
+        dupes = [i for i in report["issues"] if i["issue_type"] == "duplicate_title"]
+        assert dupes, "duplicate title should still be flagged even on a utility page"
+
     def test_template_rollup_estimates_systemic_impact(self):
         pages = [
             self._page(url=f"https://x.com/product/item-{i}", has_schema=False)
