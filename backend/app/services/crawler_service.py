@@ -665,14 +665,16 @@ def analyze_crawl(result: CrawlResult) -> dict[str, Any]:
                     "Add <meta name=\"robots\" content=\"noindex\"> — these pages "
                     "shouldn't appear in search results, and keeping them out "
                     "focuses crawl budget on pages that can rank.")
-            # Duplicate titles still matter (sitewide template sharing one
-            # title confuses even for noindex pages), so keep that check.
-            if p.title and p.title in titles_seen:
-                add("duplicate_title", "warning", p.url,
-                    f"Title duplicates {titles_seen[p.title]}",
-                    "Write a unique title for each page.", duplicate_of=titles_seen[p.title])
-            elif p.title:
-                titles_seen[p.title] = p.url
+            # Duplicate titles only matter for indexable pages — a noindex
+            # utility page sharing a title can't cause duplicate-content
+            # problems, so don't nag about it once noindex is in place.
+            if p.title and not _is_noindex(p):
+                if p.title in titles_seen:
+                    add("duplicate_title", "warning", p.url,
+                        f"Title duplicates {titles_seen[p.title]}",
+                        "Write a unique title for each page.", duplicate_of=titles_seen[p.title])
+                else:
+                    titles_seen[p.title] = p.url
             continue
 
         if p.needs_js_render and not p.js_rendered:

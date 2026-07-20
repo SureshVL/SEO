@@ -158,7 +158,9 @@ class TestAnalyzeCrawl:
         assert "client_side_rendered" not in types
         assert "thin_content" not in types
 
-    def test_duplicate_title_still_caught_on_utility_pages(self):
+    def test_duplicate_title_on_noindex_utility_page_not_flagged(self):
+        # A noindex login page sharing the homepage title is harmless —
+        # it can't cause duplicate-content problems, so don't nag.
         home = self._page(url="https://x.com/", title="OMNI-RANK")
         login = self._page(url="https://x.com/auth/login", title="OMNI-RANK",
                            meta_robots="noindex")
@@ -166,7 +168,19 @@ class TestAnalyzeCrawl:
                              pages=[home, login], sitemap_found=True, robots_found=True)
         report = analyze_crawl(result)
         dupes = [i for i in report["issues"] if i["issue_type"] == "duplicate_title"]
-        assert dupes, "duplicate title should still be flagged even on a utility page"
+        assert not dupes, "noindex utility page duplicate title should not be flagged"
+
+    def test_duplicate_title_flagged_on_indexable_utility_page(self):
+        # But if the utility page is still indexable, the shared title IS a
+        # problem (and it also gets the noindex recommendation).
+        home = self._page(url="https://x.com/", title="OMNI-RANK")
+        login = self._page(url="https://x.com/account/profile", title="OMNI-RANK")
+        result = CrawlResult(domain="x.com", base_url="https://x.com",
+                             pages=[home, login], sitemap_found=True, robots_found=True)
+        report = analyze_crawl(result)
+        types = {i["issue_type"] for i in report["issues"]}
+        assert "duplicate_title" in types
+        assert "indexable_utility_page" in types
 
     def test_template_rollup_estimates_systemic_impact(self):
         pages = [
